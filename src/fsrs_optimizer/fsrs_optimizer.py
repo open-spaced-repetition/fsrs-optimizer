@@ -497,6 +497,13 @@ class Optimizer:
         rating_count = {}
         average_recall = self.dataset['y'].mean()
         plots = []
+        s0_size = self.S0_dataset_group.shape[0]
+        rating_s0 = {
+            "1": 0.4,
+            "2": 0.6,
+            "3": 2.4,
+            "4": 5.8
+        }
 
         for first_rating in ("1", "2", "3", "4"):
             group = self.S0_dataset_group[self.S0_dataset_group['r_history'] == first_rating]
@@ -507,19 +514,16 @@ class Optimizer:
             recall = (group['y']['mean'] * group['y']['count'] + average_recall * 1) / (group['y']['count'] + 1)
             count = group['y']['count']
             total_count = sum(count)
-            rating_p0 = {
-                "1": 0.4,
-                "2": 0.6,
-                "3": 2.4,
-                "4": 5.8
-            }
+
+            init_s0 = rating_s0[first_rating]
             
             def loss(stability):
                 y_pred = power_forgetting_curve(delta_t, stability)
-                mse = np.mean((recall - y_pred)**2 * count)
-                return mse
+                mse = np.mean((recall - y_pred )** 2 * count)
+                l1 = np.abs(stability - init_s0) / s0_size
+                return mse + l1
 
-            res = minimize(loss, x0=rating_p0[first_rating], bounds=((0.1, 365),), options={"maxiter": total_count})
+            res = minimize(loss, x0=init_s0, bounds=((0.1, 365),), options={"maxiter": total_count})
             params = res.x
             stability = params[0]
             rating_stability[int(first_rating)] = stability
@@ -537,7 +541,6 @@ class Optimizer:
                 ax.legend(loc='upper right', fancybox=True, shadow=False)
                 ax.grid(True)
                 ax.set_ylim(0, 1)
-                ax.set_xlim(0, 30)
                 ax.set_xlabel('Interval')
                 ax.set_ylabel('Recall')
                 ax.set_title(f'Forgetting curve for first rating {first_rating} (n={total_count}, s={stability:.2f})')

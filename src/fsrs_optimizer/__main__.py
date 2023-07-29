@@ -105,7 +105,9 @@ def process(filename):
         with open(args.out, "a+") as f:
             f.write(profile)
 
-    optimizer.evaluate()
+    loss_before, loss_after = optimizer.evaluate()
+    print(f"Loss before training: {loss_before:.4f}")
+    print(f"Loss after training: {loss_after:.4f}")
     if save_graphs:
         for i, f in enumerate(optimizer.calibration_graph()):
             f.savefig(f"calibration_{i}.png")
