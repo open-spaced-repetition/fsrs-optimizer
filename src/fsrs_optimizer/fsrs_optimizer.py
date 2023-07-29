@@ -496,6 +496,7 @@ class Optimizer:
         rating_stability = {}
         rating_count = {}
         average_recall = self.dataset['y'].mean()
+        plots = []
 
         for first_rating in ("1", "2", "3", "4"):
             group = self.S0_dataset_group[self.S0_dataset_group['r_history'] == first_rating]
@@ -517,18 +518,20 @@ class Optimizer:
             rmse = mean_squared_error(recall, predict_recall, sample_weight=count, squared=False)
 
             if verbose:
-                plt.plot(delta_t, recall, label='Exact')
-                plt.plot(np.linspace(0, 30), power_forgetting_curve(np.linspace(0, 30), *params), label=f'Weighted fit (RMSE: {rmse:.4f})')
+                fig = plt.figure()
+                ax = fig.gca()
+                ax.plot(delta_t, recall, label='Exact')
+                ax.plot(np.linspace(0, 30), power_forgetting_curve(np.linspace(0, 30), *params), label=f'Weighted fit (RMSE: {rmse:.4f})')
                 count_percent = np.array([x/total_count for x in count])
-                plt.scatter(delta_t, recall, s=count_percent * 1000, alpha=0.5)
-                plt.legend(loc='upper right', fancybox=True, shadow=False)
-                plt.grid(True)
-                plt.ylim(0, 1)
-                plt.xlim(0, 30)
-                plt.xlabel('Interval')
-                plt.ylabel('Recall')
-                plt.title(f'Forgetting curve for first rating {first_rating} (n={total_count}, s={stability:.2f})')
-                plt.show()
+                ax.scatter(delta_t, recall, s=count_percent * 1000, alpha=0.5)
+                ax.legend(loc='upper right', fancybox=True, shadow=False)
+                ax.grid(True)
+                ax.set_ylim(0, 1)
+                ax.set_xlim(0, 30)
+                ax.set_xlabel('Interval')
+                ax.set_ylabel('Recall')
+                ax.set_title(f'Forgetting curve for first rating {first_rating} (n={total_count}, s={stability:.2f})')
+                plots.append(fig)
                 tqdm.write(str(rating_stability))
 
         if len(rating_stability) == 0:
@@ -541,7 +544,7 @@ class Optimizer:
             for rating, stability in rating_stability.items():
                 self.init_w[rating-1] = round(stability, 2)
             tqdm.write(f"Pretrain finished!")
-            return
+            return plots
 
         def S0_rating_curve(rating, a, b, c):
             return np.exp(a + b * rating) + c
@@ -552,16 +555,18 @@ class Optimizer:
             predict_stability = S0_rating_curve(np.array(list(rating_stability.keys())), *params)
             tqdm.write(f"Fit stability: {predict_stability}")
             tqdm.write(f'RMSE: {mean_squared_error(list(rating_stability.values()), predict_stability, sample_weight=list(rating_count.values()), squared=False):.4f}')
-            plt.plot(list(rating_stability.keys()), list(rating_stability.values()), label='Exact')
-            plt.plot(np.linspace(1, 4), S0_rating_curve(np.linspace(1, 4), *params), label='Weighted fit')
+            fig = plt.figure()
+            ax = fig.gca()
+            ax.plot(list(rating_stability.keys()), list(rating_stability.values()), label='Exact')
+            ax.plot(np.linspace(1, 4), S0_rating_curve(np.linspace(1, 4), *params), label='Weighted fit')
             scatter_size = np.array([x/sum(rating_count.values()) for x in rating_count.values()]) * 1000
-            plt.scatter(list(rating_stability.keys()), list(rating_stability.values()), scatter_size, label='Exact', alpha=0.5)
-            plt.legend(loc='upper right', fancybox=True, shadow=False)
-            plt.grid(True)
-            plt.xlabel('First rating')
-            plt.ylabel('Stability')
-            plt.title('Stability for first rating')
-            plt.show()
+            ax.scatter(list(rating_stability.keys()), list(rating_stability.values()), scatter_size, label='Exact', alpha=0.5)
+            ax.legend(loc='upper right', fancybox=True, shadow=False)
+            ax.grid(True)
+            ax.set_xlabel('First rating')
+            ax.set_ylabel('Stability')
+            ax.set_title('Stability for first rating')
+            plots.append(fig)
 
         for rating in (1, 2, 3, 4):
             again_extrap = max(min(S0_rating_curve(1, *params), 30), 0.1)
@@ -587,6 +592,7 @@ class Optimizer:
         for rating, stability in rating_stability.items():
             self.init_w[rating-1] = stability
         tqdm.write(f"Pretrain finished!")
+        return plots
 
     def train(self, lr: float = 4e-2, n_epoch: int = 5, n_splits: int = 5, batch_size: int = 512, verbose: bool = True):
         """Step 4"""

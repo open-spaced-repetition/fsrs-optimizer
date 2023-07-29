@@ -48,7 +48,7 @@ def process(filename):
         remembered_fallback_prompt("revlog_start_date", "the date at which before reviews will be ignored")
         remembered_fallback_prompt("filter_out_suspended_cards", "filter out suspended cards? (y/n)")
         
-        graphs_input = prompt("View graphs? (y/n)" , remembered_fallbacks["preview"])
+        graphs_input = prompt("Save graphs? (y/n)" , remembered_fallbacks["preview"])
     else:
         graphs_input = remembered_fallbacks["preview"]
 
@@ -58,7 +58,7 @@ def process(filename):
     with open(config_save, "w+") as f: # Save the settings to load next time the program is run
         json.dump(remembered_fallbacks, f)
 
-    show_graphs = graphs_input != "n"
+    save_graphs = graphs_input != "n"
 
     optimizer = fsrs_optimizer.Optimizer()
     optimizer.anki_extract(
@@ -73,14 +73,18 @@ def process(filename):
     print(analysis)
 
     optimizer.define_model()
-    optimizer.pretrain(verbose=show_graphs)
-    optimizer.train(verbose=show_graphs)
+    figures = optimizer.pretrain(verbose=save_graphs)
+    for i, f in enumerate(figures):
+        f.savefig(f"pretrain_{i}.png")
+    figures = optimizer.train(verbose=save_graphs)
+    for i, f in enumerate(figures):
+        f.savefig(f"train_{i}.png")
 
     optimizer.predict_memory_states()
     figures = optimizer.find_optimal_retention()
-    if show_graphs:
-        for f in figures:
-            f.show()
+    if save_graphs:
+        for i, f in enumerate(figures):
+            f.savefig(f"find_optimal_retention_{i}.png")
 
     optimizer.preview(optimizer.optimal_retention)
 
@@ -102,11 +106,11 @@ def process(filename):
             f.write(profile)
 
     optimizer.evaluate()
-    if show_graphs:
-        for f in optimizer.calibration_graph():
-            f.show()
-        for f in optimizer.compare_with_sm2():
-            f.show()
+    if save_graphs:
+        for i, f in enumerate(optimizer.calibration_graph()):
+            f.savefig(f"calibration_{i}.png")
+        for i, f in enumerate(optimizer.compare_with_sm2()):
+            f.savefig(f"compare_with_sm2_{i}.png")
 
 if __name__ == "__main__":
 
