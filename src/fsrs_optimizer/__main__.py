@@ -72,7 +72,7 @@ def process(file_path):
     )
     print(analysis)
 
-    file_name = os.path.basename(file_path)
+    file_name = os.path.splitext(os.path.basename(file_path))[0]
 
     optimizer.define_model()
     figures = optimizer.pretrain(verbose=save_graphs)
@@ -93,7 +93,7 @@ def process(file_path):
     profile = \
     f"""{{
     // Generated, Optimized anki deck settings
-    "deckName": "{os.path.splitext(file_name)[0]}",// PLEASE CHANGE THIS TO THE DECKS PROPER NAME
+    "deckName": "{file_name}",// PLEASE CHANGE THIS TO THE DECKS PROPER NAME
     "w": {optimizer.w},
     "requestRetention": {optimizer.optimal_retention},
     "maximumInterval": 36500,
