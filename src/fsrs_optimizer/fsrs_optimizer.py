@@ -17,7 +17,7 @@ from torch.utils.data import Dataset, DataLoader, Sampler
 from torch.nn.utils.rnn import pad_sequence, pack_padded_sequence, pad_packed_sequence
 from sklearn.model_selection import StratifiedGroupKFold
 from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
-from scipy.optimize import curve_fit
+from scipy.optimize import curve_fit, minimize
 from itertools import accumulate
 from tqdm.auto import tqdm
 import warnings
@@ -501,16 +501,26 @@ class Optimizer:
         for first_rating in ("1", "2", "3", "4"):
             group = self.S0_dataset_group[self.S0_dataset_group['r_history'] == first_rating]
             if group.empty:
-                tqdm.write(f'Not enough data for first rating {first_rating}. Expected at least 100, got 0.')
+                tqdm.write(f'Not enough data for first rating {first_rating}. Expected at least 1, got 0.')
                 continue
             delta_t = group['delta_t']
             recall = (group['y']['mean'] * group['y']['count'] + average_recall * 1) / (group['y']['count'] + 1)
             count = group['y']['count']
             total_count = sum(count)
-            if total_count < 100:
-                tqdm.write(f'Not enough data for first rating {first_rating}. Expected at least 100, got {total_count}.')
-                continue
-            params, _ = curve_fit(power_forgetting_curve, delta_t, recall, sigma=1/np.sqrt(count), bounds=((0.1), (30 if total_count < 1000 else 365)))
+            rating_p0 = {
+                "1": 0.4,
+                "2": 0.6,
+                "3": 2.4,
+                "4": 5.8
+            }
+            
+            def loss(stability):
+                y_pred = power_forgetting_curve(delta_t, stability)
+                mse = np.mean((recall - y_pred)**2 * count)
+                return mse
+
+            res = minimize(loss, x0=rating_p0[first_rating], bounds=((0.1, 365),), options={"maxiter": total_count})
+            params = res.x
             stability = params[0]
             rating_stability[int(first_rating)] = stability
             rating_count[int(first_rating)] = total_count
