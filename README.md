@@ -13,7 +13,7 @@ The `review_logs` table captures the review activities performed by users. Each 
 | Column Name | Data Type | Description | Constraints |
 |-------------|-----------|-------------|-------------|
 | card_id | integer or string | The unique identifier of the flashcard being reviewed | Not null |
-| review_time | timestamp  in *seconds* | The exact moment when the review took place | Not null |
+| review_time | timestamp  in *miliseconds* | The exact moment when the review took place | Not null |
 | review_rating | integer | The user's rating for the review. This rating is subjective and depends on how well the user believes they remembered the information on the card | Not null, Values: {1 (Again), 2 (Hard), 3 (Good), 4 (Easy)} |
 | review_state | integer | The state of the card at the time of review. This describes the learning phase of the card | Optional, Values: {0 (New), 1 (Learning), 2 (Review), 3 (Relearning)} |
 | review_duration | integer | The time spent on reviewing the card, typically in miliseconds | Optional, Non-negative |
