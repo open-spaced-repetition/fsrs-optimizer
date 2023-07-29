@@ -619,7 +619,7 @@ class Optimizer:
         tqdm.write("\nTraining finished!")
         return plots
 
-    def preview(self, requestRetention: float):
+    def preview(self, requestRetention: float, verbose=False):
         my_collection = Collection(self.w)
         preview_text = "1:again, 2:hard, 3:good, 4:easy\n"
         for first_rating in (1,2,3,4):
@@ -630,8 +630,8 @@ class Optimizer:
             # print("stability, difficulty, lapses")
             for i in range(10):
                 states = my_collection.predict(t_history, r_history)
-                # print('{0:9.2f} {1:11.2f} {2:7.0f}'.format(
-                    # *list(map(lambda x: round(float(x), 4), states))))
+                if verbose:
+                    print('{0:9.2f} {1:11.2f} {2:7.0f}'.format(*list(map(lambda x: round(float(x), 4), states))))
                 next_t = next_interval(states[0], requestRetention)                
                 difficulty = round(float(states[1]), 1)
                 t_history += f',{int(next_t)}'
