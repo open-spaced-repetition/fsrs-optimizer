@@ -17,7 +17,7 @@ def prompt(msg: str, fallback):
             raise Exception("You failed to enter a required parameter")
     return response
 
-def process(file_path):
+def process(filepath):
     try: # Try and remember the last values inputted.
         with open(config_save, "r") as f:
             remembered_fallbacks = json.load(f)
@@ -62,7 +62,7 @@ def process(file_path):
 
     optimizer = fsrs_optimizer.Optimizer()
     optimizer.anki_extract(
-        file_path,
+        filepath,
         remembered_fallbacks["filter_out_suspended_cards"] == "y"
     )
     analysis = optimizer.create_time_series(
@@ -72,28 +72,28 @@ def process(file_path):
     )
     print(analysis)
 
-    file_name = os.path.splitext(os.path.basename(file_path))[0]
+    filename = os.path.splitext(os.path.basename(filepath))[0]
 
     optimizer.define_model()
     figures = optimizer.pretrain(verbose=save_graphs)
     for i, f in enumerate(figures):
-        f.savefig(f"{file_name}_pretrain_{i}.png")
+        f.savefig(f"{filename}_pretrain_{i}.png")
     figures = optimizer.train(verbose=save_graphs)
     for i, f in enumerate(figures):
-        f.savefig(f"{file_name}_train_{i}.png")
+        f.savefig(f"{filename}_train_{i}.png")
 
     optimizer.predict_memory_states()
     figures = optimizer.find_optimal_retention()
     if save_graphs:
         for i, f in enumerate(figures):
-            f.savefig(f"{file_name}_find_optimal_retention_{i}.png")
+            f.savefig(f"{filename}_find_optimal_retention_{i}.png")
 
     optimizer.preview(optimizer.optimal_retention)
 
     profile = \
     f"""{{
     // Generated, Optimized anki deck settings
-    "deckName": "{file_name}",// PLEASE CHANGE THIS TO THE DECKS PROPER NAME
+    "deckName": "{filename}",// PLEASE CHANGE THIS TO THE DECKS PROPER NAME
     "w": {optimizer.w},
     "requestRetention": {optimizer.optimal_retention},
     "maximumInterval": 36500,
@@ -110,9 +110,9 @@ def process(file_path):
     optimizer.evaluate()
     if save_graphs:
         for i, f in enumerate(optimizer.calibration_graph()):
-            f.savefig(f"{file_name}_calibration_{i}.png")
+            f.savefig(f"{filename}_calibration_{i}.png")
         for i, f in enumerate(optimizer.compare_with_sm2()):
-            f.savefig(f"{file_name}_compare_with_sm2_{i}.png")
+            f.savefig(f"{filename}_compare_with_sm2_{i}.png")
 
 if __name__ == "__main__":
 
