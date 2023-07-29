@@ -61,12 +61,14 @@ def process(filename):
     show_graphs = graphs_input != "n"
 
     optimizer = fsrs_optimizer.Optimizer()
-    optimizer.anki_extract(filename)
+    optimizer.anki_extract(
+        filename,
+        remembered_fallbacks["filter_out_suspended_cards"] == "y"
+    )
     analysis = optimizer.create_time_series(
         remembered_fallbacks["timezone"],
         remembered_fallbacks["revlog_start_date"],
-        remembered_fallbacks["next_day"],
-        remembered_fallbacks["filter_out_suspended_cards"] == "y"
+        remembered_fallbacks["next_day"]
     )
     print(analysis)
 
