@@ -135,6 +135,7 @@ if __name__ == "__main__":
             files = [os.path.join(filename, f) for f in files]
             for file_path in files:
                 try:
+                    print(f"Processing {file_path}")
                     process(file_path)
                 except Exception as e:
                     print(f"Failed to process {file_path}")

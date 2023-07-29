@@ -519,9 +519,9 @@ class Optimizer:
             
             def loss(stability):
                 y_pred = power_forgetting_curve(delta_t, stability)
-                mse = np.mean((recall - y_pred )** 2 * count)
-                l1 = np.abs(stability - init_s0) / s0_size
-                return mse + l1
+                rmse = np.sqrt(np.sum((recall - y_pred)** 2 * count) / total_count)
+                l1 = np.abs(stability - init_s0) / np.sqrt(total_count * s0_size)
+                return rmse + l1
 
             res = minimize(loss, x0=init_s0, bounds=((0.1, 365),), options={"maxiter": total_count})
             params = res.x
