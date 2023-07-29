@@ -4,6 +4,8 @@ import json
 import pytz
 import os
 
+import matplotlib.pyplot as plt
+
 def prompt(msg: str, fallback):
     default = ""
     if fallback:
@@ -76,15 +78,18 @@ def process(filename):
     figures = optimizer.pretrain(verbose=save_graphs)
     for i, f in enumerate(figures):
         f.savefig(f"pretrain_{i}.png")
+        plt.close(f)
     figures = optimizer.train(verbose=save_graphs)
     for i, f in enumerate(figures):
         f.savefig(f"train_{i}.png")
+        plt.close(f)
 
     optimizer.predict_memory_states()
     figures = optimizer.find_optimal_retention()
     if save_graphs:
         for i, f in enumerate(figures):
             f.savefig(f"find_optimal_retention_{i}.png")
+            plt.close(f)
 
     optimizer.preview(optimizer.optimal_retention)
 
@@ -109,8 +114,10 @@ def process(filename):
     if save_graphs:
         for i, f in enumerate(optimizer.calibration_graph()):
             f.savefig(f"calibration_{i}.png")
+            plt.close(f)
         for i, f in enumerate(optimizer.compare_with_sm2()):
             f.savefig(f"compare_with_sm2_{i}.png")
+            plt.close(f)
 
 if __name__ == "__main__":
 
