@@ -68,7 +68,8 @@ class FSRS(nn.Module):
             keys = keys.view(1, -1).expand(X[:,1].long().size(0), -1)
             index = (X[:,1].long().unsqueeze(1) == keys).nonzero(as_tuple=True)
             # first learn, init memory states
-            new_s = self.w[index[1]]
+            new_s = torch.ones_like(state[:,0])
+            new_s[index[0]] = self.w[index[1]]
             new_d = self.w[4] - self.w[5] * (X[:,1] - 3)
             new_d = new_d.clamp(1, 10)
         else:
@@ -401,7 +402,7 @@ class Optimizer:
         r_history = df.groupby('card_id', group_keys=False)['review_rating'].apply(lambda x: cum_concat([[i] for i in x]))
         df['r_history']=[','.join(map(str, item[:-1])) for sublist in r_history for item in sublist]
         df = df.groupby('card_id').filter(lambda group: group['review_time'].min() > time.mktime(datetime.strptime(revlog_start_date, "%Y-%m-%d").timetuple()) * 1000)
-        df = df[df['review_rating'] != 0].copy()
+        df = df[(df['review_rating'] != 0) & (df['r_history'].str.contains("0") == 0)].copy()
         df['y'] = df['review_rating'].map(lambda x: {1: 0, 2: 1, 3: 1, 4: 1}[x])
 
         def remove_outliers(group: pd.DataFrame) -> pd.DataFrame:
@@ -415,6 +416,7 @@ class Optimizer:
             return group
 
         df[df['i'] == 2] = df[df['i'] == 2].groupby(by=['r_history', 't_history'], as_index=False, group_keys=False).apply(remove_outliers)
+        df.dropna(inplace=True)
 
         def remove_non_continuous_rows(group):
             discontinuity = group['i'].diff().fillna(1).ne(1)
