@@ -5,6 +5,8 @@ import pytz
 import os
 from pathlib import Path
 
+import matplotlib.pyplot as plt
+
 def prompt(msg: str, fallback):
     default = ""
     if fallback:
@@ -134,19 +136,19 @@ if __name__ == "__main__":
                         help="File to APPEND the automatically generated profile to."
                         )
     args = parser.parse_args()
-
+    curdir = os.getcwd()
     for filename in args.filenames:
         if os.path.isdir(filename):
             files = [f for f in os.listdir(filename) if f.lower().endswith('.apkg')]
             files = [os.path.join(filename, f) for f in files]
             for file_path in files:
                 try:
-                    curdir = os.getcwd()
                     process(file_path)
-                    os.chdir(curdir)
                 except Exception as e:
                     print(e)
                     print(f"Failed to process {file_path}")
+                finally:
+                    plt.close('all')
                     os.chdir(curdir)
                     continue
         else:
