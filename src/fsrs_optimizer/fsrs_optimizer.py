@@ -523,7 +523,7 @@ class Optimizer:
                 l1 = np.abs(stability - init_s0) / np.sqrt(s0_size) / total_count
                 return rmse + l1
 
-            res = minimize(loss, x0=init_s0, bounds=((0.1, 365),), options={"maxiter": total_count})
+            res = minimize(loss, x0=init_s0, bounds=((0.1, 365),), options={"maxiter": int(np.sqrt(total_count))})
             params = res.x
             stability = params[0]
             rating_stability[int(first_rating)] = stability
