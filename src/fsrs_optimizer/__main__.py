@@ -3,6 +3,7 @@ import argparse
 import json
 import pytz
 import os
+from pathlib import Path
 
 def prompt(msg: str, fallback):
     default = ""
@@ -18,6 +19,11 @@ def prompt(msg: str, fallback):
     return response
 
 def process(filepath):
+    suffix = filepath.split('/')[-1].replace(".", "_").replace("@", "_")
+    proj_dir = Path(f'{suffix}')
+    proj_dir.mkdir(parents=True, exist_ok=True)
+    os.chdir(proj_dir)
+
     try: # Try and remember the last values inputted.
         with open(config_save, "r") as f:
             remembered_fallbacks = json.load(f)
@@ -62,7 +68,7 @@ def process(filepath):
 
     optimizer = fsrs_optimizer.Optimizer()
     optimizer.anki_extract(
-        filepath,
+        f"../{filepath}",
         remembered_fallbacks["filter_out_suspended_cards"] == "y"
     )
     analysis = optimizer.create_time_series(
@@ -77,16 +83,16 @@ def process(filepath):
     optimizer.define_model()
     figures = optimizer.pretrain(verbose=save_graphs)
     for i, f in enumerate(figures):
-        f.savefig(f"{filename}_pretrain_{i}.png")
+        f.savefig(f"pretrain_{i}.png")
     figures = optimizer.train(verbose=save_graphs)
     for i, f in enumerate(figures):
-        f.savefig(f"{filename}_train_{i}.png")
+        f.savefig(f"train_{i}.png")
 
     optimizer.predict_memory_states()
     figures = optimizer.find_optimal_retention()
     if save_graphs:
         for i, f in enumerate(figures):
-            f.savefig(f"{filename}_find_optimal_retention_{i}.png")
+            f.savefig(f"find_optimal_retention_{i}.png")
 
     optimizer.preview(optimizer.optimal_retention)
 
@@ -110,9 +116,9 @@ def process(filepath):
     optimizer.evaluate()
     if save_graphs:
         for i, f in enumerate(optimizer.calibration_graph()):
-            f.savefig(f"{filename}_calibration_{i}.png")
+            f.savefig(f"calibration_{i}.png")
         for i, f in enumerate(optimizer.compare_with_sm2()):
-            f.savefig(f"{filename}_compare_with_sm2_{i}.png")
+            f.savefig(f"compare_with_sm2_{i}.png")
 
 if __name__ == "__main__":
 
@@ -135,9 +141,13 @@ if __name__ == "__main__":
             files = [os.path.join(filename, f) for f in files]
             for file_path in files:
                 try:
+                    curdir = os.getcwd()
                     process(file_path)
+                    os.chdir(curdir)
                 except Exception as e:
+                    print(e)
                     print(f"Failed to process {file_path}")
+                    os.chdir(curdir)
                     continue
         else:
             process(filename)
