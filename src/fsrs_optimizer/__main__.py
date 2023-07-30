@@ -115,7 +115,9 @@ def process(filepath):
         with open(args.out, "a+") as f:
             f.write(profile)
 
-    optimizer.evaluate()
+    loss_before, loss_after = optimizer.evaluate()
+    print(f"Loss before training: {loss_before:.4f}")
+    print(f"Loss after training: {loss_after:.4f}")
     if save_graphs:
         for i, f in enumerate(optimizer.calibration_graph()):
             f.savefig(f"calibration_{i}.png")
@@ -143,6 +145,7 @@ if __name__ == "__main__":
             files = [os.path.join(filename, f) for f in files]
             for file_path in files:
                 try:
+                    print(f"Processing {file_path}")
                     process(file_path)
                 except Exception as e:
                     print(e)
