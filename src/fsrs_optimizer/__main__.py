@@ -3,6 +3,7 @@ import argparse
 import json
 import pytz
 import os
+from pathlib import Path
 
 import matplotlib.pyplot as plt
 
@@ -19,7 +20,12 @@ def prompt(msg: str, fallback):
             raise Exception("You failed to enter a required parameter")
     return response
 
-def process(filename):
+def process(filepath):
+    suffix = filepath.split('/')[-1].replace(".", "_").replace("@", "_")
+    proj_dir = Path(f'{suffix}')
+    proj_dir.mkdir(parents=True, exist_ok=True)
+    os.chdir(proj_dir)
+
     try: # Try and remember the last values inputted.
         with open(config_save, "r") as f:
             remembered_fallbacks = json.load(f)
@@ -64,7 +70,7 @@ def process(filename):
 
     optimizer = fsrs_optimizer.Optimizer()
     optimizer.anki_extract(
-        filename,
+        f"../{filepath}",
         remembered_fallbacks["filter_out_suspended_cards"] == "y"
     )
     analysis = optimizer.create_time_series(
@@ -73,6 +79,8 @@ def process(filename):
         remembered_fallbacks["next_day"]
     )
     print(analysis)
+
+    filename = os.path.splitext(os.path.basename(filepath))[0]
 
     optimizer.define_model()
     figures = optimizer.pretrain(verbose=save_graphs)
@@ -93,7 +101,7 @@ def process(filename):
     profile = \
     f"""{{
     // Generated, Optimized anki deck settings
-    "deckName": "{os.path.splitext(os.path.basename(filename))[0]}",// PLEASE CHANGE THIS TO THE DECKS PROPER NAME
+    "deckName": "{filename}",// PLEASE CHANGE THIS TO THE DECKS PROPER NAME
     "w": {optimizer.w},
     "requestRetention": {optimizer.optimal_retention},
     "maximumInterval": 36500,
@@ -128,7 +136,7 @@ if __name__ == "__main__":
                         help="File to APPEND the automatically generated profile to."
                         )
     args = parser.parse_args()
-
+    curdir = os.getcwd()
     for filename in args.filenames:
         if os.path.isdir(filename):
             files = [f for f in os.listdir(filename) if f.lower().endswith('.apkg')]
@@ -137,9 +145,11 @@ if __name__ == "__main__":
                 try:
                     process(file_path)
                 except Exception as e:
+                    print(e)
                     print(f"Failed to process {file_path}")
                 finally:
                     plt.close('all')
+                    os.chdir(curdir)
                     continue
         else:
             process(filename)
