@@ -3,6 +3,7 @@ import argparse
 import json
 import pytz
 import os
+from pathlib import Path
 
 def prompt(msg: str, fallback):
     default = ""
@@ -17,7 +18,12 @@ def prompt(msg: str, fallback):
             raise Exception("You failed to enter a required parameter")
     return response
 
-def process(filename):
+def process(filepath):
+    suffix = filepath.split('/')[-1].replace(".", "_").replace("@", "_")
+    proj_dir = Path(f'{suffix}')
+    proj_dir.mkdir(parents=True, exist_ok=True)
+    os.chdir(proj_dir)
+
     try: # Try and remember the last values inputted.
         with open(config_save, "r") as f:
             remembered_fallbacks = json.load(f)
@@ -62,7 +68,7 @@ def process(filename):
 
     optimizer = fsrs_optimizer.Optimizer()
     optimizer.anki_extract(
-        filename,
+        f"../{filepath}",
         remembered_fallbacks["filter_out_suspended_cards"] == "y"
     )
     analysis = optimizer.create_time_series(
@@ -71,6 +77,8 @@ def process(filename):
         remembered_fallbacks["next_day"]
     )
     print(analysis)
+
+    filename = os.path.splitext(os.path.basename(filepath))[0]
 
     optimizer.define_model()
     figures = optimizer.pretrain(verbose=save_graphs)
@@ -91,7 +99,7 @@ def process(filename):
     profile = \
     f"""{{
     // Generated, Optimized anki deck settings
-    "deckName": "{os.path.splitext(os.path.basename(filename))[0]}",// PLEASE CHANGE THIS TO THE DECKS PROPER NAME
+    "deckName": "{filename}",// PLEASE CHANGE THIS TO THE DECKS PROPER NAME
     "w": {optimizer.w},
     "requestRetention": {optimizer.optimal_retention},
     "maximumInterval": 36500,
@@ -133,9 +141,13 @@ if __name__ == "__main__":
             files = [os.path.join(filename, f) for f in files]
             for file_path in files:
                 try:
+                    curdir = os.getcwd()
                     process(file_path)
+                    os.chdir(curdir)
                 except Exception as e:
+                    print(e)
                     print(f"Failed to process {file_path}")
+                    os.chdir(curdir)
                     continue
         else:
             process(filename)
