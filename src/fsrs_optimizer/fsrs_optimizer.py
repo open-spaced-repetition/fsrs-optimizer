@@ -837,7 +837,7 @@ class Optimizer:
 
     def calibration_graph(self):
         fig1 = plt.figure()
-        plot_brier(self.dataset['p'], self.dataset['y'], bins=40, ax=fig1.add_subplot(111))
+        metrics = plot_brier(self.dataset['p'], self.dataset['y'], bins=40, ax=fig1.add_subplot(111))
         fig2 = plt.figure(figsize=(16, 12))
         for last_rating in ("1","2","3","4"):
             calibration_data = self.dataset[self.dataset['r_history'].str.endswith(last_rating)]
@@ -910,7 +910,7 @@ class Optimizer:
         ax2.yaxis.set_major_formatter(ticker.FuncFormatter(to_percent))
         ax2.xaxis.set_major_formatter(ticker.FormatStrFormatter('%d'))
 
-        return fig1, fig2, fig3, fig4
+        return metrics, (fig1, fig2, fig3, fig4)
 
     def bw_matrix(self):
         B_W_Metric_raw = self.dataset[['difficulty', 'stability', 'p', 'y']].copy()
@@ -1025,6 +1025,12 @@ def plot_brier(predictions, real, bins=20, ax=None, title=None):
     ax2.legend(loc='lower center')
     if title:
         ax.set_title(title)
+    metrics = {
+        "R-squared": r2,
+        "RMSE": rmse,
+        "MAE": mae
+    }
+    return metrics
 
 def sm2(history):
     ivl = 0
