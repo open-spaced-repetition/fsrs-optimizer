@@ -118,11 +118,25 @@ def process(filepath):
     loss_before, loss_after = optimizer.evaluate()
     print(f"Loss before training: {loss_before:.4f}")
     print(f"Loss after training: {loss_after:.4f}")
+    metrics, figures = optimizer.calibration_graph()
+    metrics['Log loss'] = loss_after
     if save_graphs:
-        for i, f in enumerate(optimizer.calibration_graph()):
+        for i, f in enumerate(figures):
             f.savefig(f"calibration_{i}.png")
-        for i, f in enumerate(optimizer.compare_with_sm2()):
+    figures = optimizer.compare_with_sm2()
+    if save_graphs:
+        for i, f in enumerate(figures):
             f.savefig(f"compare_with_sm2_{i}.png")
+    
+    evaluation = {
+        "filename": filename,
+        "size": optimizer.dataset.shape[0],
+        "parameters": optimizer.w,
+        "metrics": metrics
+    }
+
+    with open("evaluation.json", "w+") as f:
+        json.dump(evaluation, f)
 
 if __name__ == "__main__":
 
@@ -141,7 +155,7 @@ if __name__ == "__main__":
     curdir = os.getcwd()
     for filename in args.filenames:
         if os.path.isdir(filename):
-            files = [f for f in os.listdir(filename) if f.lower().endswith('.apkg')]
+            files = [f for f in os.listdir(filename) if f.lower().endswith('.apkg') or f.lower().endswith('.colpkg')]
             files = [os.path.join(filename, f) for f in files]
             for file_path in files:
                 try:
