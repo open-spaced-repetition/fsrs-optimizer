@@ -3,6 +3,7 @@ import argparse
 import json
 import pytz
 import os
+import sys
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -140,7 +141,15 @@ def process(filepath):
 
 if __name__ == "__main__":
 
-    config_save = os.path.expanduser(".fsrs_optimizer")
+    if sys.platform == "darwin":
+        config_dir = os.path.expanduser("~/Library/Application Support/fsrs-optimizer")
+    elif sys.platform == "win32":
+        config_dir = os.path.expanduser("~/AppData/Roaming/fsrs-optimizer")
+    else:
+        config_dir = os.path.expanduser("~/.config/fsrs-optimizer")
+    
+    os.makedirs(config_dir, exist_ok=True)
+    config_save = os.path.join(config_dir, "config.json")
 
     parser = argparse.ArgumentParser()
     parser.add_argument("filenames", nargs='+')
