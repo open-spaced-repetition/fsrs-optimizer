@@ -70,7 +70,7 @@ def process(filepath):
 
     optimizer = fsrs_optimizer.Optimizer()
     optimizer.anki_extract(
-        f"../{filepath}",
+        filepath if os.path.isabs(filepath) else f"../{filepath}",
         remembered_fallbacks["filter_out_suspended_cards"] == "y"
     )
     analysis = optimizer.create_time_series(
