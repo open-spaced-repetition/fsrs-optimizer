@@ -316,7 +316,7 @@ class Optimizer:
     def __init__(self) -> None:
         tqdm.pandas()
 
-    def anki_extract(self, filename: str, filter_out_suspended_cards: bool = False):
+    def anki_extract(self, filename: str, filter_out_suspended_cards: bool = False, filter_out_flags: List[int] = []):
         """Step 1"""
         # Extract the collection file or deck file to get the .anki21 database.
         with zipfile.ZipFile(f'{filename}', 'r') as zip_ref:
@@ -334,6 +334,10 @@ class Optimizer:
         else:
             raise Exception("Collection not exist!")
         cur = con.cursor()
+
+        def flags2str(flags: List[int]) -> str:
+            return f"({','.join(map(str, flags))})"
+        
         res = cur.execute(f"""
         SELECT *
         FROM revlog
@@ -342,6 +346,7 @@ class Optimizer:
             FROM cards
             WHERE queue != 0
             {"AND queue != -1" if filter_out_suspended_cards else ""}
+            {"AND flags NOT IN %s" % flags2str(filter_out_flags) if len(filter_out_flags) > 0 else ""}
         )
         """
         )
