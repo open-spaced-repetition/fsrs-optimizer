@@ -149,3 +149,4 @@ meta
 *.png
 *.json
 .fsrs_optimizer
+*.ipynb
