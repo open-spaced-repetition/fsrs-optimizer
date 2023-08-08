@@ -1,5 +1,6 @@
 import fsrs_optimizer
 import argparse
+import shutil
 import json
 import pytz
 import os
@@ -69,10 +70,14 @@ def process(filepath):
     save_graphs = graphs_input != "n"
 
     optimizer = fsrs_optimizer.Optimizer()
-    optimizer.anki_extract(
-        f"../{filepath}",
-        remembered_fallbacks["filter_out_suspended_cards"] == "y"
-    )
+    if filepath.endswith(".apkg") or filepath.endswith(".colpkg"):
+        optimizer.anki_extract(
+            f"../{filepath}",
+            remembered_fallbacks["filter_out_suspended_cards"] == "y"
+        )
+    else:
+        # copy the file to the current directory and rename it as revlog.csv
+        shutil.copyfile(f"../{filepath}", "revlog.csv")
     analysis = optimizer.create_time_series(
         remembered_fallbacks["timezone"],
         remembered_fallbacks["revlog_start_date"],
