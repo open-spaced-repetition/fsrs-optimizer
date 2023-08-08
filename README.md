@@ -32,3 +32,33 @@ Notes:
 - `day_start` determines the start of the learner's day and is used to correctly assign reviews to days, especially when reviews are divided by sleep.
 
 Please ensure your data conforms to this schema for optimal compatibility with the optimization process.
+
+# Optimize FSRS with your review logs
+
+**Installation**
+
+Install the package with the command:
+
+```
+python -m pip install fsrs-optimizer
+```
+
+You should upgrade regularly to make sure you have the most recent version of FSRS-Optimizer:
+
+```
+python -m pip install fsrs-optimizer --upgrade
+```
+
+**Opimization**
+
+If you have a file named `revlog.csv` with the above schema, you can run:
+
+```
+python -m fsrs_optimizer "revlog.csv"
+```
+
+**Expected Functionality**
+
+![image](https://github.com/open-spaced-repetition/fsrs-optimizer/assets/32575846/fad7154a-9667-4eea-b868-d94c94a50912)
+
+![image](https://github.com/open-spaced-repetition/fsrs-optimizer/assets/32575846/f868aac4-2e9e-4101-b8ad-eccc1d9b1bd5)
