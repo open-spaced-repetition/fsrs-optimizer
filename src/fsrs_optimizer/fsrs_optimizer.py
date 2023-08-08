@@ -554,12 +554,19 @@ class Optimizer:
                 plots.append(fig)
                 tqdm.write(str(rating_stability))
 
+        for a, b in ((1, 2), (2, 3), (3, 4)):
+            if a in rating_stability and b in rating_stability:
+                if rating_stability[a] > rating_stability[b]:
+                    if rating_count[a] > rating_count[b]:
+                        rating_stability[b] = rating_stability[a]
+                    else:
+                        rating_stability[a] = rating_stability[b]
+
         if len(rating_stability) == 0:
             raise Exception("Not enough data for pretraining!")
         elif len(rating_stability) == 1:
             init_stability = round(list(rating_stability.values())[0], 2)
-            for i in (0, 1, 2, 3):
-                self.init_w[i] = init_stability
+            self.init_w[0:4] = [init_stability] * 4
         elif len(rating_stability) == 4:
             for rating, stability in rating_stability.items():
                 self.init_w[rating-1] = round(stability, 2)
