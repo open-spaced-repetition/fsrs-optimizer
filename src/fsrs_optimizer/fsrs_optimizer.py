@@ -509,7 +509,7 @@ class Optimizer:
         average_recall = self.dataset['y'].mean()
         plots = []
         s0_size = self.S0_dataset_group.shape[0]
-        rating_s0 = {
+        r_s0_default = {
             "1": 0.4,
             "2": 0.6,
             "3": 2.4,
@@ -526,7 +526,7 @@ class Optimizer:
             count = group['y']['count']
             total_count = sum(count)
 
-            init_s0 = rating_s0[first_rating]
+            init_s0 = r_s0_default[first_rating]
             
             def loss(stability):
                 y_pred = power_forgetting_curve(delta_t, stability)
@@ -566,44 +566,49 @@ class Optimizer:
                     else:
                         rating_stability[small_rating] = rating_stability[big_rating]
 
+        w1 = 3/5
+        w2 = 3/5
+
         if len(rating_stability) == 0:
             raise Exception("Not enough data for pretraining!")
         elif len(rating_stability) == 1:
             rating = list(rating_stability.keys())[0]
-            factor = rating_stability[rating] / rating_s0[str(rating)]
-            self.init_w[0:4] = list(map(lambda x: x * factor, rating_s0.values()))
+            factor = rating_stability[rating] / r_s0_default[str(rating)]
+            init_s0 = list(map(lambda x: x * factor, r_s0_default.values()))
         elif len(rating_stability) == 2:
             if 1 not in rating_stability and 2 not in rating_stability:
-                rating_stability[2] = rating_stability[3] ** 2 / rating_stability[4]
-                rating_stability[1] = rating_stability[2] ** 2 / rating_stability[3]
+                rating_stability[2] = np.power(rating_stability[3], 1/(1-w2)) * np.power(rating_stability[4], 1-1/(1-w2))
+                rating_stability[1] = np.power(rating_stability[2], 1/w1) * np.power(rating_stability[3], 1-1/w1)
             elif 1 not in rating_stability and 3 not in rating_stability:
-                rating_stability[3] = np.sqrt(rating_stability[2] * rating_stability[4])
-                rating_stability[1] = rating_stability[2] ** 2 / rating_stability[3]
+                rating_stability[3] = np.power(rating_stability[2], 1-w2) * np.power(rating_stability[4], w2)
+                rating_stability[1] = np.power(rating_stability[2], 1/w1) * np.power(rating_stability[3], 1-1/w1)
             elif 1 not in rating_stability and 4 not in rating_stability:
-                rating_stability[4] = rating_stability[3] ** 2 / rating_stability[2]
-                rating_stability[1] = rating_stability[2] ** 2 / rating_stability[3]
+                rating_stability[4] = np.power(rating_stability[2], 1-1/w2) * np.power(rating_stability[3], 1/w2)
+                rating_stability[1] = np.power(rating_stability[2], 1/w1) * np.power(rating_stability[3], 1-1/w1)
             elif 2 not in rating_stability and 3 not in rating_stability:
-                rating_stability[2] = rating_stability[1] ** (1/3) * rating_stability[4] ** (2/3)
-                rating_stability[3] = rating_stability[1] ** (2/3) * rating_stability[4] ** (1/3)
+                rating_stability[2] = np.power(rating_stability[1], w1/(w1+w2-w1*w2)) * np.power(rating_stability[4], 1 - w1/(w1+w2-w1*w2))
+                rating_stability[3] = np.power(rating_stability[1], 1 - w2/(w1+w2-w1*w2)) * np.power(rating_stability[4], w2/(w1+w2-w1*w2))
             elif 2 not in rating_stability and 4 not in rating_stability:
-                rating_stability[2] = np.sqrt(rating_stability[1] * rating_stability[3])
-                rating_stability[4] = rating_stability[3] ** 2 / rating_stability[2]
+                rating_stability[2] = np.power(rating_stability[1], w1) * np.power(rating_stability[3], 1-w1)
+                rating_stability[4] = np.power(rating_stability[2], 1-1/w2) * np.power(rating_stability[3], 1/w2)
             elif 3 not in rating_stability and 4 not in rating_stability:
-                rating_stability[3] = rating_stability[2] ** 2 / rating_stability[1]
-                rating_stability[4] = rating_stability[3] ** 2 / rating_stability[2]
-            self.init_w[0:4] = [item[1] for item in sorted(rating_stability.items(), key=lambda x: x[0])]
+                rating_stability[3] = np.power(rating_stability[1], 1-1/(1-w1)) * np.power(rating_stability[2], 1/(1-w1))
+                rating_stability[4] = np.power(rating_stability[2], 1-1/w2) * np.power(rating_stability[3], 1/w2)
+            init_s0 = [item[1] for item in sorted(rating_stability.items(), key=lambda x: x[0])]
         elif len(rating_stability) == 3:
             if 1 not in rating_stability:
-                rating_stability[1] = rating_stability[2] ** 2 / rating_stability[3]
+                rating_stability[1] = np.power(rating_stability[2], 1/w1) * np.power(rating_stability[3], 1-1/w1)
             elif 2 not in rating_stability:
-                rating_stability[2] = np.sqrt(rating_stability[1] * rating_stability[3])
+                rating_stability[2] = np.power(rating_stability[1], w1) * np.power(rating_stability[3], 1-w1)
             elif 3 not in rating_stability:
-                rating_stability[3] = np.sqrt(rating_stability[2] * rating_stability[4])
+                rating_stability[3] = np.power(rating_stability[2], 1-w2) * np.power(rating_stability[4], w2)
             elif 4 not in rating_stability:
-                rating_stability[4] = rating_stability[3] ** 2 / rating_stability[2]
-            self.init_w[0:4] = [item[1] for item in sorted(rating_stability.items(), key=lambda x: x[0])]
+                rating_stability[4] = np.power(rating_stability[2], 1-1/w2) * np.power(rating_stability[3], 1/w2)
+            init_s0 = [item[1] for item in sorted(rating_stability.items(), key=lambda x: x[0])]
         elif len(rating_stability) == 4:
-            self.init_w[0:4] = [item[1] for item in sorted(rating_stability.items(), key=lambda x: x[0])]
+            init_s0 = [item[1] for item in sorted(rating_stability.items(), key=lambda x: x[0])]
+        
+        self.init_w[0:4] = init_s0
 
         tqdm.write(f"Pretrain finished!")
         return plots
