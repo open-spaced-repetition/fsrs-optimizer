@@ -174,5 +174,14 @@ if __name__ == "__main__":
                     os.chdir(curdir)
                     continue
         else:
-            process(filename)
+            try:
+                print(f"Processing {filename}")
+                process(filename)
+            except Exception as e:
+                print(e)
+                print(f"Failed to process {filename}")
+            finally:
+                plt.close('all')
+                os.chdir(curdir)
+                continue
 
