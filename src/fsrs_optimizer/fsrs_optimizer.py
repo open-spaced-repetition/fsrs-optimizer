@@ -415,11 +415,22 @@ class Optimizer:
         def remove_outliers(group: pd.DataFrame) -> pd.DataFrame:
             # threshold = np.mean(group['delta_t']) * 1.5
             # threshold = group['delta_t'].quantile(0.95)
-            Q1 = group['delta_t'].quantile(0.25)
-            Q3 = group['delta_t'].quantile(0.75)
-            IQR = Q3 - Q1
-            threshold = Q3 + 1.5 * IQR
-            group = group[group['delta_t'] <= threshold]
+            # Q1 = group['delta_t'].quantile(0.25)
+            # Q3 = group['delta_t'].quantile(0.75)
+            # IQR = Q3 - Q1
+            # threshold = Q3 + 1.5 * IQR
+            # group = group[group['delta_t'] <= threshold]
+            grouped_group = group.groupby(by=['r_history', 'delta_t'], group_keys=False).agg({'y': ['mean', 'count']}).reset_index()
+            sort_index = grouped_group.sort_values(by=[('y', 'count'), "delta_t"], ascending=[True, False]).index
+
+            total = sum(grouped_group[('y', 'count')])
+            has_been_removed = 0
+            for i in sort_index:
+                count = grouped_group.loc[i, ('y', 'count')]
+                if has_been_removed + count >= total * 0.05:
+                    break
+                has_been_removed += count
+            group = group[group['delta_t'].isin(grouped_group[grouped_group[('y', 'count')] >= count]['delta_t'])]
             return group
 
         df[df['i'] == 2] = df[df['i'] == 2].groupby(by=['r_history', 't_history'], as_index=False, group_keys=False).apply(remove_outliers)
