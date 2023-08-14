@@ -421,7 +421,7 @@ class Optimizer:
             # threshold = Q3 + 1.5 * IQR
             # group = group[group['delta_t'] <= threshold]
             grouped_group = group.groupby(by=['r_history', 'delta_t'], group_keys=False).agg({'y': ['mean', 'count']}).reset_index()
-            sort_index = grouped_group.sort_values(by=[('y', 'count')], ascending=True).index
+            sort_index = grouped_group.sort_values(by=[('y', 'count'), "delta_t"], ascending=[True, False]).index
 
             total = sum(grouped_group[('y', 'count')])
             has_been_removed = 0
