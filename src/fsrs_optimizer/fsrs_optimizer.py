@@ -5,7 +5,7 @@ import pandas as pd
 import numpy as np
 import os
 import math
-from typing import List, Optional, Dict
+from typing import List, Optional
 from datetime import timedelta, datetime
 import statsmodels.api as sm
 import matplotlib.pyplot as plt
@@ -15,9 +15,9 @@ from torch import nn
 from torch import Tensor
 from torch.utils.data import Dataset, DataLoader, Sampler
 from torch.nn.utils.rnn import pad_sequence, pack_padded_sequence, pad_packed_sequence
-from sklearn.model_selection import StratifiedGroupKFold
+from sklearn.model_selection import StratifiedGroupKFold, TimeSeriesSplit
 from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
-from scipy.optimize import curve_fit, minimize
+from scipy.optimize import minimize
 from itertools import accumulate
 from tqdm.auto import tqdm
 import warnings
@@ -624,7 +624,7 @@ class Optimizer:
         tqdm.write(f"Pretrain finished!")
         return plots
 
-    def train(self, lr: float = 4e-2, n_epoch: int = 5, n_splits: int = 5, batch_size: int = 512, verbose: bool = True):
+    def train(self, lr: float = 4e-2, n_epoch: int = 5, n_splits: int = 5, batch_size: int = 512, verbose: bool = True, split_by_time: bool = False):
         """Step 4"""
         self.dataset['tensor'] = self.dataset.progress_apply(lambda x: lineToTensor(list(zip([x['t_history']], [x['r_history']]))[0]), axis=1)
         self.dataset['group'] = self.dataset['r_history'] + self.dataset['t_history']
@@ -633,15 +633,34 @@ class Optimizer:
         w = []
         plots = []
         if n_splits > 1:
-            sgkf = StratifiedGroupKFold(n_splits=n_splits)
-            for train_index, test_index in sgkf.split(self.dataset, self.dataset['i'], self.dataset['group']):
-                tqdm.write(f"TRAIN: {len(train_index)} TEST: {len(test_index)}")
-                train_set = self.dataset.iloc[train_index].copy()
-                test_set = self.dataset.iloc[test_index].copy()
-                trainer = Trainer(train_set, test_set, self.init_w, n_epoch=n_epoch, lr=lr, batch_size=batch_size)
-                w.append(trainer.train(verbose=verbose))
-                if verbose:
-                    plots.append(trainer.plot())
+            if split_by_time:
+                tscv = TimeSeriesSplit(n_splits=n_splits)
+                self.dataset.sort_values(by=['review_time'], inplace=True)
+                for i, (train_index, test_index) in enumerate(tscv.split(self.dataset)):
+                    tqdm.write(f"TRAIN: {len(train_index)} TEST: {len(test_index)}")
+                    train_set = self.dataset.iloc[train_index].copy()
+                    test_set = self.dataset.iloc[test_index].copy()
+                    trainer = Trainer(train_set, test_set, self.init_w, n_epoch=n_epoch, lr=lr, batch_size=batch_size)
+                    w.append(trainer.train(verbose=verbose))
+                    self.w = w[-1]
+                    self.evaluate()
+                    metrics, figures = self.calibration_graph(self.dataset.iloc[test_index])
+                    print(metrics)
+                    for j, f in enumerate(figures):
+                        f.savefig(f"graph_{j}_test_{i}.png")
+                        plt.close(f)
+                    if verbose:
+                        plots.append(trainer.plot())
+            else:
+                sgkf = StratifiedGroupKFold(n_splits=n_splits)
+                for train_index, test_index in sgkf.split(self.dataset, self.dataset['i'], self.dataset['group']):
+                    tqdm.write(f"TRAIN: {len(train_index)} TEST: {len(test_index)}")
+                    train_set = self.dataset.iloc[train_index].copy()
+                    test_set = self.dataset.iloc[test_index].copy()
+                    trainer = Trainer(train_set, test_set, self.init_w, n_epoch=n_epoch, lr=lr, batch_size=batch_size)
+                    w.append(trainer.train(verbose=verbose))
+                    if verbose:
+                        plots.append(trainer.plot())
         else:
             trainer = Trainer(self.dataset, self.dataset, self.init_w, n_epoch=n_epoch, lr=lr, batch_size=batch_size)
             w.append(trainer.train(verbose=verbose))
@@ -850,12 +869,14 @@ class Optimizer:
         del tmp
         return loss_before, loss_after
 
-    def calibration_graph(self):
+    def calibration_graph(self, dataset=None):
+        if dataset is None:
+            dataset = self.dataset
         fig1 = plt.figure()
-        metrics = plot_brier(self.dataset['p'], self.dataset['y'], bins=40, ax=fig1.add_subplot(111))
+        metrics = plot_brier(dataset['p'], dataset['y'], bins=40, ax=fig1.add_subplot(111))
         fig2 = plt.figure(figsize=(16, 12))
         for last_rating in ("1","2","3","4"):
-            calibration_data = self.dataset[self.dataset['r_history'].str.endswith(last_rating)]
+            calibration_data = dataset[dataset['r_history'].str.endswith(last_rating)]
             if calibration_data.empty:
                 continue
             tqdm.write(f"\nLast rating: {last_rating}")
@@ -870,7 +891,7 @@ class Optimizer:
         lns = []
 
         stability_calibration = pd.DataFrame(columns=['stability', 'predicted_retention', 'actual_retention'])
-        stability_calibration = self.dataset[['stability', 'p', 'y']].copy()
+        stability_calibration = dataset[['stability', 'p', 'y']].copy()
         stability_calibration['bin'] = stability_calibration['stability'].map(lambda x: math.pow(1.2, math.floor(math.log(x, 1.2))))
         stability_group = stability_calibration.groupby('bin').count()
 
@@ -901,7 +922,7 @@ class Optimizer:
         lns = []
 
         difficulty_calibration = pd.DataFrame(columns=['difficulty', 'predicted_retention', 'actual_retention'])
-        difficulty_calibration = self.dataset[['difficulty', 'p', 'y']].copy()
+        difficulty_calibration = dataset[['difficulty', 'p', 'y']].copy()
         difficulty_calibration['bin'] = difficulty_calibration['difficulty'].map(round)
         difficulty_group = difficulty_calibration.groupby('bin').count()
 

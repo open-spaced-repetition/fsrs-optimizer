@@ -21,7 +21,7 @@ def prompt(msg: str, fallback):
             raise Exception("You failed to enter a required parameter")
     return response
 
-def process(filepath):
+def process(filepath, filter_out_flags: list[str]):
     suffix = filepath.split('/')[-1].replace(".", "_").replace("@", "_")
     proj_dir = Path(f'{suffix}')
     proj_dir.mkdir(parents=True, exist_ok=True)
@@ -73,7 +73,8 @@ def process(filepath):
     if filepath.endswith(".apkg") or filepath.endswith(".colpkg"):
         optimizer.anki_extract(
             f"../{filepath}",
-            remembered_fallbacks["filter_out_suspended_cards"] == "y"
+            remembered_fallbacks["filter_out_suspended_cards"] == "y",
+            filter_out_flags
         )
     else:
         # copy the file to the current directory and rename it as revlog.csv
@@ -153,10 +154,17 @@ if __name__ == "__main__":
                         action=argparse.BooleanOptionalAction,
                         help="If set automatically defaults on all stdin settings."
                         )
+    parser.add_argument("--flags", 
+                        help="Remove any cards with the given flags from the training set.",
+                        default=[],
+                        nargs="+",
+                        )
     parser.add_argument("-o","--out",
                         help="File to APPEND the automatically generated profile to."
                         )
+    
     args = parser.parse_args()
+
     curdir = os.getcwd()
     for filename in args.filenames:
         if os.path.isdir(filename):
@@ -165,7 +173,7 @@ if __name__ == "__main__":
             for file_path in files:
                 try:
                     print(f"Processing {file_path}")
-                    process(file_path)
+                    process(file_path, args.flags)
                 except Exception as e:
                     print(e)
                     print(f"Failed to process {file_path}")
@@ -174,5 +182,14 @@ if __name__ == "__main__":
                     os.chdir(curdir)
                     continue
         else:
-            process(filename)
+            try:
+                print(f"Processing {filename}")
+                process(filename, args.flags)
+            except Exception as e:
+                print(e)
+                print(f"Failed to process {filename}")
+            finally:
+                plt.close('all')
+                os.chdir(curdir)
+                continue
 
