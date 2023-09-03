@@ -972,10 +972,13 @@ class Optimizer:
         fig2 = plt.figure(figsize=(6, 6))
         ax = fig2.gca()
 
+        def get_bin(x, bins=20):
+            return (np.log(np.exp(np.log(bins) * x).round()) / np.log(bins)).round(3)
+
         cross_comparison['SM2_B-W'] = cross_comparison['sm2_p'] - cross_comparison['y']
-        cross_comparison['SM2_bin'] = cross_comparison['sm2_p'].map(lambda x: round(x, 1))
+        cross_comparison['SM2_bin'] = cross_comparison['sm2_p'].map(get_bin)
         cross_comparison['FSRS_B-W'] = cross_comparison['p'] - cross_comparison['y']
-        cross_comparison['FSRS_bin'] = cross_comparison['p'].map(lambda x: round(x, 1))
+        cross_comparison['FSRS_bin'] = cross_comparison['p'].map(get_bin)
 
         ax.axhline(y = 0.0, color = 'black', linestyle = '-')
 
@@ -1005,16 +1008,20 @@ def load_brier(predictions, real, bins=20):
     counts = np.zeros(bins)
     correct = np.zeros(bins)
     prediction = np.zeros(bins)
+
+    def get_bin(x, bins=bins):
+        return int(np.exp(np.log(bins) * x).round() - 1)
+
     for p, r in zip(predictions, real):
-        bin = min(int(p * bins), bins - 1)
+        bin = min(get_bin(p), bins - 1)
         counts[bin] += 1
         correct[bin] += r
         prediction[bin] += p
+
     np.seterr(invalid='ignore')
+    mask = counts > 0
     prediction_means = prediction / counts
-    prediction_means[np.isnan(prediction_means)] = ((np.arange(bins) + 0.5) / bins)[np.isnan(prediction_means)]
     correct_means = correct / counts
-    correct_means[np.isnan(correct_means)] = ((np.arange(bins) + 0.5) / bins)[np.isnan(correct_means)]
     size = len(predictions)
     answer_mean = sum(correct) / size
     return {
@@ -1023,9 +1030,9 @@ def load_brier(predictions, real, bins=20):
         "uncertainty": answer_mean * (1 - answer_mean),
         "detail": {
             "bin_count": bins,
-            "bin_counts": list(counts),
-            "bin_prediction_means": list(prediction_means),
-            "bin_correct_means": list(correct_means),
+            "bin_counts": counts,
+            "bin_prediction_means": prediction_means,
+            "bin_correct_means": correct_means,
         }
     }
 
@@ -1034,30 +1041,33 @@ def plot_brier(predictions, real, bins=20, ax=None, title=None):
     bin_prediction_means = brier['detail']['bin_prediction_means']
     bin_correct_means = brier['detail']['bin_correct_means']
     bin_counts = brier['detail']['bin_counts']
-    r2 = r2_score(bin_correct_means, bin_prediction_means, sample_weight=bin_counts)
-    rmse = mean_squared_error(bin_correct_means, bin_prediction_means, sample_weight=bin_counts, squared=False)
-    mae = mean_absolute_error(bin_correct_means, bin_prediction_means, sample_weight=bin_counts)
+    mask = bin_counts > 0
+    r2 = r2_score(bin_correct_means[mask], bin_prediction_means[mask], sample_weight=bin_counts[mask])
+    rmse = mean_squared_error(bin_correct_means[mask], bin_prediction_means[mask], sample_weight=bin_counts[mask], squared=False)
+    mae = mean_absolute_error(bin_correct_means[mask], bin_prediction_means[mask], sample_weight=bin_counts[mask])
     tqdm.write(f"R-squared: {r2:.4f}")
     tqdm.write(f"RMSE: {rmse:.4f}")
     tqdm.write(f"MAE: {mae:.4f}")
     ax.set_xlim([0, 1])
     ax.set_ylim([0, 1])
     ax.grid(True)
-    fit_wls = sm.WLS(bin_correct_means, sm.add_constant(bin_prediction_means), weights=bin_counts).fit()
+    fit_wls = sm.WLS(bin_correct_means[mask], sm.add_constant(bin_prediction_means[mask]), weights=bin_counts[mask]).fit()
     tqdm.write(str(fit_wls.params))
-    y_regression = [fit_wls.params[0] + fit_wls.params[1]*x for x in bin_prediction_means]
-    ax.plot(bin_prediction_means, y_regression, label='Weighted Least Squares Regression', color="green")
-    ax.plot(bin_prediction_means, bin_correct_means, label='Actual Calibration', color="#1f77b4")
+    y_regression = [fit_wls.params[0] + fit_wls.params[1] * x for x in [0, 1]]
+    ax.plot([0, 1], y_regression, label='Weighted Least Squares Regression', color="green")
+    ax.plot(bin_prediction_means[mask], bin_correct_means[mask], label='Actual Calibration', color="#1f77b4")
     ax.plot((0, 1), (0, 1), label='Perfect Calibration', color="#ff7f0e")
     bin_count = brier['detail']['bin_count']
     counts = np.array(bin_counts)
-    bins = (np.arange(bin_count) + 0.5) / bin_count
+    bins = np.log((np.arange(bin_count)) + 1) / np.log(bin_count + 1)
+    widths = np.diff(bins)
+    widths = np.append(widths, 1 - bins[-1])
     ax.legend(loc='upper center')
     ax.set_xlabel('Predicted R')
     ax.set_ylabel('Actual R')
     ax2 = ax.twinx()
     ax2.set_ylabel('Number of reviews')
-    ax2.bar(bins, counts, width=(0.8 / bin_count), ec='k', lw=.2, alpha=0.5, label='Number of reviews')
+    ax2.bar(bins, counts, width=widths, ec='k', linewidth=0, alpha=0.5, label='Number of reviews', align='edge')
     ax2.legend(loc='lower center')
     if title:
         ax.set_title(title)
