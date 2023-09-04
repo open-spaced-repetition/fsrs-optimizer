@@ -1010,10 +1010,10 @@ def load_brier(predictions, real, bins=20):
     prediction = np.zeros(bins)
 
     def get_bin(x, bins=bins):
-        return int(np.exp(np.log(bins) * x).round() - 1)
+        return np.floor(np.exp(np.log(bins+1) * x)) - 1
 
     for p, r in zip(predictions, real):
-        bin = min(get_bin(p), bins - 1)
+        bin = int(min(get_bin(p), bins - 1))
         counts[bin] += 1
         correct[bin] += r
         prediction[bin] += p
@@ -1051,10 +1051,13 @@ def plot_brier(predictions, real, bins=20, ax=None, title=None):
     ax.set_xlim([0, 1])
     ax.set_ylim([0, 1])
     ax.grid(True)
-    fit_wls = sm.WLS(bin_correct_means[mask], sm.add_constant(bin_prediction_means[mask]), weights=bin_counts[mask]).fit()
-    tqdm.write(str(fit_wls.params))
-    y_regression = [fit_wls.params[0] + fit_wls.params[1] * x for x in [0, 1]]
-    ax.plot([0, 1], y_regression, label='Weighted Least Squares Regression', color="green")
+    try:
+        fit_wls = sm.WLS(bin_correct_means[mask], sm.add_constant(bin_prediction_means[mask]), weights=bin_counts[mask]).fit()
+        tqdm.write(str(fit_wls.params))
+        y_regression = [fit_wls.params[0] + fit_wls.params[1] * x for x in [0, 1]]
+        ax.plot([0, 1], y_regression, label='Weighted Least Squares Regression', color="green")
+    except:
+        pass
     ax.plot(bin_prediction_means[mask], bin_correct_means[mask], label='Actual Calibration', color="#1f77b4")
     ax.plot((0, 1), (0, 1), label='Perfect Calibration', color="#ff7f0e")
     bin_count = brier['detail']['bin_count']
