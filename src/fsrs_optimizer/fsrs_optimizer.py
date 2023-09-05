@@ -388,6 +388,7 @@ class Optimizer:
         df['real_days'] = pd.DatetimeIndex(df['real_days'].dt.floor('D', ambiguous='infer', nonexistent='shift_forward')).to_julian_date()
         df.drop_duplicates(['card_id', 'real_days'], keep='first', inplace=True)
         df['delta_t'] = df.real_days.diff()
+        df['delta_t'].fillna(0, inplace=True)
         df.dropna(inplace=True)
         df['i'] = df.groupby('card_id').cumcount() + 1
         df.loc[df['i'] == 1, 'delta_t'] = 0
