@@ -874,14 +874,14 @@ class Optimizer:
         if dataset is None:
             dataset = self.dataset
         fig1 = plt.figure()
-        metrics = plot_brier(dataset['p'], dataset['y'], bins=40, ax=fig1.add_subplot(111))
+        metrics = plot_brier(dataset['p'], dataset['y'], bins=20, ax=fig1.add_subplot(111))
         fig2 = plt.figure(figsize=(16, 12))
         for last_rating in ("1","2","3","4"):
             calibration_data = dataset[dataset['r_history'].str.endswith(last_rating)]
             if calibration_data.empty:
                 continue
             tqdm.write(f"\nLast rating: {last_rating}")
-            plot_brier(calibration_data['p'], calibration_data['y'], bins=40, ax=fig2.add_subplot(2, 2, int(last_rating)), title=f"Last rating: {last_rating}")
+            plot_brier(calibration_data['p'], calibration_data['y'], bins=20, ax=fig2.add_subplot(2, 2, int(last_rating)), title=f"Last rating: {last_rating}")
 
         def to_percent(temp, position):
             return '%1.0f' % (100 * temp) + '%'
@@ -974,7 +974,7 @@ class Optimizer:
         ax = fig2.gca()
 
         def get_bin(x, bins=20):
-            return (np.log(np.exp(np.log(bins) * x).round()) / np.log(bins)).round(3)
+            return (np.log(np.minimum(np.floor(np.exp(np.log(bins+1) * x) - 1), bins-1) + 1) / np.log(bins)).round(3)
 
         cross_comparison['SM2_B-W'] = cross_comparison['sm2_p'] - cross_comparison['y']
         cross_comparison['SM2_bin'] = cross_comparison['sm2_p'].map(get_bin)
