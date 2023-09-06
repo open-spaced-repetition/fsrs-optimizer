@@ -511,8 +511,11 @@ class Optimizer:
         https://github.com/open-spaced-repetition/fsrs4anki/wiki/The-Algorithm
         '''
 
-    def pretrain(self, verbose=True):
-        self.dataset = pd.read_csv("./revlog_history.tsv", sep='\t', index_col=None, dtype={'r_history': str ,'t_history': str} )
+    def pretrain(self, dataset=None, verbose=True):
+        if dataset is None:
+            self.dataset = pd.read_csv("./revlog_history.tsv", sep='\t', index_col=None, dtype={'r_history': str ,'t_history': str} )
+        else:
+            self.dataset = dataset
         self.dataset = self.dataset[(self.dataset['i'] > 1) & (self.dataset['delta_t'] > 0) & (self.dataset['t_history'].str.count(',0') == 0)]
         if self.dataset.empty:
             raise ValueError('Training data is inadequate.')
