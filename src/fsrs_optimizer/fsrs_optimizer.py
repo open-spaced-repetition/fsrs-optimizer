@@ -378,6 +378,7 @@ class Optimizer:
     def create_time_series(self, timezone: str, revlog_start_date: str, next_day_starts_at: int):
         """Step 2"""
         df = pd.read_csv("./revlog.csv")
+        df.sort_values(by=['card_id', 'review_time'], inplace=True, ignore_index=True)
         df['review_state'] = df['review_state'].map(lambda x: x if x != New else Learning)
         self.state_sequence = np.array(df['review_state'])
         self.duration_sequence = np.array(df['review_duration'])
