@@ -971,7 +971,7 @@ class Optimizer:
         tqdm.write(f"Loss of SM-2: {self.dataset['log_loss'].mean():.4f}")
         cross_comparison = self.dataset[['sm2_p', 'p', 'y']].copy()
         fig1 = plt.figure()
-        plot_brier(cross_comparison['sm2_p'], cross_comparison['y'], bins=40, ax=fig1.add_subplot(111))
+        plot_brier(cross_comparison['sm2_p'], cross_comparison['y'], bins=20, ax=fig1.add_subplot(111))
 
         fig2 = plt.figure(figsize=(6, 6))
         ax = fig2.gca()
