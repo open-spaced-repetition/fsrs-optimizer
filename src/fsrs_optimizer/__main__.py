@@ -8,6 +8,7 @@ from pathlib import Path
 
 import matplotlib.pyplot as plt
 
+
 def prompt(msg: str, fallback):
     default = ""
     if fallback:
@@ -17,26 +18,27 @@ def prompt(msg: str, fallback):
     if response == "":
         if fallback is not None:
             return fallback
-        else: # If there is no fallback
+        else:  # If there is no fallback
             raise Exception("You failed to enter a required parameter")
     return response
 
+
 def process(filepath, filter_out_flags: list[str]):
-    suffix = filepath.split('/')[-1].replace(".", "_").replace("@", "_")
-    proj_dir = Path(f'{suffix}')
+    suffix = filepath.split("/")[-1].replace(".", "_").replace("@", "_")
+    proj_dir = Path(f"{suffix}")
     proj_dir.mkdir(parents=True, exist_ok=True)
     os.chdir(proj_dir)
 
-    try: # Try and remember the last values inputted.
+    try:  # Try and remember the last values inputted.
         with open(config_save, "r") as f:
             remembered_fallbacks = json.load(f)
     except FileNotFoundError:
-        remembered_fallbacks = { # Defaults to this if not there
-            "timezone": None, # Timezone starts with no default
+        remembered_fallbacks = {  # Defaults to this if not there
+            "timezone": None,  # Timezone starts with no default
             "next_day": 4,
             "revlog_start_date": "2006-10-05",
             "preview": "y",
-            "filter_out_suspended_cards": "n"
+            "filter_out_suspended_cards": "n",
         }
 
     # Prompts the user with the key and then falls back on the last answer given.
@@ -48,23 +50,31 @@ def process(filepath, filter_out_flags: list[str]):
     print("The defaults will switch to whatever you entered last.\n")
 
     if not args.yes:
-        print("Timezone list: https://gist.github.com/heyalexej/8bf688fd67d7199be4a1682b3eec7568")
+        print(
+            "Timezone list: https://gist.github.com/heyalexej/8bf688fd67d7199be4a1682b3eec7568"
+        )
         remembered_fallback_prompt("timezone", "used timezone")
         if remembered_fallbacks["timezone"] not in pytz.all_timezones:
             raise Exception("Not a valid timezone, Check the list for more information")
 
         remembered_fallback_prompt("next_day", "used next day start hour")
-        remembered_fallback_prompt("revlog_start_date", "the date at which before reviews will be ignored")
-        remembered_fallback_prompt("filter_out_suspended_cards", "filter out suspended cards? (y/n)")
-        
-        graphs_input = prompt("Save graphs? (y/n)" , remembered_fallbacks["preview"])
+        remembered_fallback_prompt(
+            "revlog_start_date", "the date at which before reviews will be ignored"
+        )
+        remembered_fallback_prompt(
+            "filter_out_suspended_cards", "filter out suspended cards? (y/n)"
+        )
+
+        graphs_input = prompt("Save graphs? (y/n)", remembered_fallbacks["preview"])
     else:
         graphs_input = remembered_fallbacks["preview"]
 
-    if graphs_input.lower() != 'y':
+    if graphs_input.lower() != "y":
         remembered_fallbacks["preview"] = "n"
 
-    with open(config_save, "w+") as f: # Save the settings to load next time the program is run
+    with open(
+        config_save, "w+"
+    ) as f:  # Save the settings to load next time the program is run
         json.dump(remembered_fallbacks, f)
 
     save_graphs = graphs_input != "n"
@@ -74,7 +84,7 @@ def process(filepath, filter_out_flags: list[str]):
         optimizer.anki_extract(
             f"../{filepath}",
             remembered_fallbacks["filter_out_suspended_cards"] == "y",
-            filter_out_flags
+            filter_out_flags,
         )
     else:
         # copy the file to the current directory and rename it as revlog.csv
@@ -82,7 +92,7 @@ def process(filepath, filter_out_flags: list[str]):
     analysis = optimizer.create_time_series(
         remembered_fallbacks["timezone"],
         remembered_fallbacks["revlog_start_date"],
-        remembered_fallbacks["next_day"]
+        remembered_fallbacks["next_day"],
     )
     print(analysis)
 
@@ -104,8 +114,7 @@ def process(filepath, filter_out_flags: list[str]):
 
     optimizer.preview(optimizer.optimal_retention)
 
-    profile = \
-    f"""{{
+    profile = f"""{{
     // Generated, Optimized anki deck settings
     "deckName": "{filename}",// PLEASE CHANGE THIS TO THE DECKS PROPER NAME
     "w": {optimizer.w},
@@ -125,7 +134,7 @@ def process(filepath, filter_out_flags: list[str]):
     print(f"Loss before training: {loss_before:.4f}")
     print(f"Loss after training: {loss_after:.4f}")
     metrics, figures = optimizer.calibration_graph()
-    metrics['Log loss'] = loss_after
+    metrics["Log loss"] = loss_after
     if save_graphs:
         for i, f in enumerate(figures):
             f.savefig(f"calibration_{i}.png")
@@ -133,42 +142,49 @@ def process(filepath, filter_out_flags: list[str]):
     if save_graphs:
         for i, f in enumerate(figures):
             f.savefig(f"compare_with_sm2_{i}.png")
-    
+
     evaluation = {
         "filename": filename,
         "size": optimizer.dataset.shape[0],
         "parameters": optimizer.w,
-        "metrics": metrics
+        "metrics": metrics,
     }
 
     with open("evaluation.json", "w+") as f:
         json.dump(evaluation, f)
 
-if __name__ == "__main__":
 
+if __name__ == "__main__":
     config_save = os.path.expanduser(".fsrs_optimizer")
 
     parser = argparse.ArgumentParser()
-    parser.add_argument("filenames", nargs='+')
-    parser.add_argument("-y","--yes",
-                        action=argparse.BooleanOptionalAction,
-                        help="If set automatically defaults on all stdin settings."
-                        )
-    parser.add_argument("--flags", 
-                        help="Remove any cards with the given flags from the training set.",
-                        default=[],
-                        nargs="+",
-                        )
-    parser.add_argument("-o","--out",
-                        help="File to APPEND the automatically generated profile to."
-                        )
-    
+    parser.add_argument("filenames", nargs="+")
+    parser.add_argument(
+        "-y",
+        "--yes",
+        action=argparse.BooleanOptionalAction,
+        help="If set automatically defaults on all stdin settings.",
+    )
+    parser.add_argument(
+        "--flags",
+        help="Remove any cards with the given flags from the training set.",
+        default=[],
+        nargs="+",
+    )
+    parser.add_argument(
+        "-o", "--out", help="File to APPEND the automatically generated profile to."
+    )
+
     args = parser.parse_args()
 
     curdir = os.getcwd()
     for filename in args.filenames:
         if os.path.isdir(filename):
-            files = [f for f in os.listdir(filename) if f.lower().endswith('.apkg') or f.lower().endswith('.colpkg')]
+            files = [
+                f
+                for f in os.listdir(filename)
+                if f.lower().endswith(".apkg") or f.lower().endswith(".colpkg")
+            ]
             files = [os.path.join(filename, f) for f in files]
             for file_path in files:
                 try:
@@ -178,7 +194,7 @@ if __name__ == "__main__":
                     print(e)
                     print(f"Failed to process {file_path}")
                 finally:
-                    plt.close('all')
+                    plt.close("all")
                     os.chdir(curdir)
                     continue
         else:
@@ -189,7 +205,6 @@ if __name__ == "__main__":
                 print(e)
                 print(f"Failed to process {filename}")
             finally:
-                plt.close('all')
+                plt.close("all")
                 os.chdir(curdir)
                 continue
-
