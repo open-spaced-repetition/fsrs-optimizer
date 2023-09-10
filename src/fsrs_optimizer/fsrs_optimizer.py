@@ -532,6 +532,13 @@ class Optimizer:
         )
         self.state_sequence = np.array(df["review_state"])
         self.duration_sequence = np.array(df["review_duration"])
+        self.learn_cost = round(
+            df[df["review_state"] == Learning]["review_duration"].sum()
+            / len(df["card_id"].unique())
+            / 1000,
+            1,
+        )
+
         df["review_date"] = pd.to_datetime(df["review_time"] // 1000, unit="s")
         df["review_date"] = (
             df["review_date"].dt.tz_localize("UTC").dt.tz_convert(timezone)
@@ -1150,11 +1157,11 @@ class Optimizer:
         return self.difficulty_distribution
 
     def find_optimal_retention(
-        self, deck_size=10000, learn_span=365, max_cost_perday=1800, max_ivl=36500
+        self, deck_size=10000, learn_span=365, max_cost_perday=1800, max_ivl=36500, loss_aversion=2.5
     ):
         """should not be called before predict_memory_states"""
-        r_time = 8
-        f_time = 25
+        recall_cost = 8
+        forget_cost = 25
 
         state_block = dict()
         state_count = dict()
@@ -1172,17 +1179,20 @@ class Optimizer:
                 state_block[state] = state_block.setdefault(state, 0) + 1
             last_state = state
 
-        r_time = round(state_duration[Review] / state_count[Review] / 1000, 1)
+        recall_cost = round(state_duration[Review] / state_count[Review] / 1000, 1)
 
         if Relearning in state_count and Relearning in state_block:
-            f_time = round(
-                state_duration[Relearning] / state_block[Relearning] / 1000 + r_time, 1
+            forget_cost = round(
+                state_duration[Relearning] / state_block[Relearning] / 1000
+                + recall_cost,
+                1,
             )
 
-        tqdm.write(f"average time for failed cards: {f_time}s")
-        tqdm.write(f"average time for recalled cards: {r_time}s")
+        tqdm.write(f"average time for failed cards: {forget_cost}s")
+        tqdm.write(f"average time for recalled cards: {recall_cost}s")
+        tqdm.write(f"average time for learning a new card: {self.learn_cost}s")
 
-        f_time *= 2.5  # loss aversion
+        forget_cost *= loss_aversion
 
         self.optimal_retention = optimal_retention(
             self.w,
@@ -1190,9 +1200,9 @@ class Optimizer:
             learn_span=learn_span,
             max_cost_perday=max_cost_perday,
             max_ivl=max_ivl,
-            recall_cost=r_time,
-            forget_cost=f_time,
-            learn_cost=(r_time + f_time) / 2,
+            recall_cost=recall_cost,
+            forget_cost=forget_cost,
+            learn_cost=self.learn_cost,
             first_rating_prob=self.first_rating_prob,
             review_rating_prob=self.review_rating_prob,
         )
@@ -1208,9 +1218,9 @@ class Optimizer:
             max_cost_perday=max_cost_perday,
             max_ivl=max_ivl,
             request_retention=self.optimal_retention,
-            recall_cost=r_time,
-            forget_cost=f_time,
-            learn_cost=(r_time + f_time) / 2,
+            recall_cost=recall_cost,
+            forget_cost=forget_cost,
+            learn_cost=self.learn_cost,
             first_rating_prob=self.first_rating_prob,
             review_rating_prob=self.review_rating_prob,
         )
