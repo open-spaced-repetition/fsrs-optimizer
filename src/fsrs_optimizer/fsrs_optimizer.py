@@ -21,7 +21,10 @@ from scipy.optimize import minimize
 from itertools import accumulate
 from tqdm.auto import tqdm
 import warnings
-from fsrs_simulator import optimal_retention, simulate
+try:
+    from .fsrs_simulator import optimal_retention, simulate
+except ImportError:
+    from fsrs_simulator import optimal_retention, simulate
 
 warnings.filterwarnings("ignore", category=UserWarning)
 
