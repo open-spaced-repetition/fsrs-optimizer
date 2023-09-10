@@ -21,7 +21,11 @@ from scipy.optimize import minimize
 from itertools import accumulate
 from tqdm.auto import tqdm
 import warnings
-from fsrs_simulator import optimal_retention, simulate
+
+try:
+    from .fsrs_simulator import optimal_retention, simulate
+except ImportError:
+    from fsrs_simulator import optimal_retention, simulate
 
 warnings.filterwarnings("ignore", category=UserWarning)
 
@@ -1157,7 +1161,12 @@ class Optimizer:
         return self.difficulty_distribution
 
     def find_optimal_retention(
-        self, deck_size=10000, learn_span=365, max_cost_perday=1800, max_ivl=36500, loss_aversion=2.5
+        self,
+        deck_size=10000,
+        learn_span=365,
+        max_cost_perday=1800,
+        max_ivl=36500,
+        loss_aversion=2.5,
     ):
         """should not be called before predict_memory_states"""
         recall_cost = 8
