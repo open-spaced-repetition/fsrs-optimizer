@@ -21,6 +21,7 @@ from scipy.optimize import minimize
 from itertools import accumulate
 from tqdm.auto import tqdm
 import warnings
+from fsrs_simulator import optimal_retention, simulate
 
 warnings.filterwarnings("ignore", category=UserWarning)
 
@@ -506,6 +507,26 @@ class Optimizer:
         """Step 2"""
         df = pd.read_csv("./revlog.csv")
         df.sort_values(by=["card_id", "review_time"], inplace=True, ignore_index=True)
+
+        new_card_revlog = df[(df["review_state"] == New)]
+        self.first_rating_prob = np.zeros(4)
+        self.first_rating_prob[
+            new_card_revlog["review_rating"].value_counts().index - 1
+        ] = (
+            new_card_revlog["review_rating"].value_counts()
+            / new_card_revlog["review_rating"].count()
+        )
+        recall_card_revlog = df[
+            (df["review_state"] == Review) & (df["review_rating"] != 1)
+        ]
+        self.review_rating_prob = np.zeros(3)
+        self.review_rating_prob[
+            recall_card_revlog["review_rating"].value_counts().index - 2
+        ] = (
+            recall_card_revlog["review_rating"].value_counts()
+            / recall_card_revlog["review_rating"].count()
+        )
+
         df["review_state"] = df["review_state"].map(
             lambda x: x if x != New else Learning
         )
@@ -624,6 +645,17 @@ class Optimizer:
             remove_non_continuous_rows
         )
 
+        df["review_time"] = df["review_time"].astype(int)
+        df["card_id"] = df["card_id"].astype(int)
+        df["review_rating"] = df["review_rating"].astype(int)
+        df["review_duration"] = df["review_duration"].astype(int)
+        df["review_state"] = df["review_state"].astype(int)
+        df["delta_t"] = df["delta_t"].astype(int)
+        df["i"] = df["i"].astype(int)
+        df["t_history"] = df["t_history"].astype(str)
+        df["r_history"] = df["r_history"].astype(str)
+        df["y"] = df["y"].astype(int)
+
         df.to_csv("revlog_history.tsv", sep="\t", index=False)
         tqdm.write("Trainset saved.")
 
@@ -661,7 +693,7 @@ class Optimizer:
         df["retention"] = df["retention"].map(lambda x: max(min(0.99, x), 0.01))
 
         def cal_stability(group: pd.DataFrame) -> pd.DataFrame:
-            group_cnt = sum(group["total_cnt"])
+            group_cnt = sum(group.groupby("delta_t").first()["total_cnt"])
             if group_cnt < 10:
                 return pd.DataFrame()
             group["group_cnt"] = group_cnt
@@ -1117,17 +1149,12 @@ class Optimizer:
                 ] = self.difficulty_distribution.loc[i + 1]
         return self.difficulty_distribution
 
-    def find_optimal_retention(self):
+    def find_optimal_retention(
+        self, deck_size=10000, learn_span=365, max_cost_perday=1800, max_ivl=36500
+    ):
         """should not be called before predict_memory_states"""
-
-        base = 1.01
-        minimum_stability = 0.1
-        index_offset = -(np.log(minimum_stability) / np.log(base)).round().astype(int)
-        d_range = 10
-        d_offset = 1
         r_time = 8
         f_time = 25
-        max_time = 1e10
 
         state_block = dict()
         state_count = dict()
@@ -1155,109 +1182,77 @@ class Optimizer:
         tqdm.write(f"average time for failed cards: {f_time}s")
         tqdm.write(f"average time for recalled cards: {r_time}s")
 
-        def stability2index(stability):
-            return (np.log(stability) / np.log(base)).round().astype(int) + index_offset
+        f_time *= 2.5  # loss aversion
 
-        def cal_next_recall_stability(s, r, d, response):
-            if response == 1:
-                return s * (
-                    1
-                    + np.exp(self.w[8])
-                    * (11 - d)
-                    * np.power(s, -self.w[9])
-                    * (np.exp((1 - r) * self.w[10]) - 1)
-                )
-            else:
-                return np.minimum(
-                    self.w[11]
-                    * np.power(d, -self.w[12])
-                    * (np.power(s + 1, self.w[13]) - 1)
-                    * np.exp((1 - r) * self.w[14]),
-                    s,
-                )
-
-        terminal_stability = minimum_stability
-        for _ in range(128):
-            terminal_stability = cal_next_recall_stability(
-                terminal_stability, 0.96, d_range, 1
-            )
-        index_len = stability2index(terminal_stability)
-        stability_list = np.array(
-            [np.power(base, i - index_offset) for i in range(index_len)]
-        )
-        tqdm.write(f"terminal stability: {stability_list.max(): .2f}")
-        df = pd.DataFrame(columns=["retention", "difficulty", "time"])
-
-        for percentage in tqdm(range(96, 66, -2), desc="find optimal retention"):
-            recall = percentage / 100
-            time_list = np.zeros((d_range, index_len))
-            time_list[:, :-1] = max_time
-            for d in range(d_range, 0, -1):
-                s0 = 1
-                s0_index = stability2index(s0)
-                diff = max_time
-                iteration = 0
-                while diff > 1 and iteration < 2e5:
-                    iteration += 1
-                    total_time = time_list[d - 1].sum()
-                    s_indices = np.arange(index_len - 2, -1, -1)
-                    stabilities = stability_list[s_indices]
-                    intervals = next_interval(stabilities, recall)
-                    p_recalls = power_forgetting_curve(intervals, stabilities)
-                    recall_s = cal_next_recall_stability(stabilities, p_recalls, d, 1)
-                    forget_d = np.minimum(d + d_offset, 10)
-                    forget_s = cal_next_recall_stability(
-                        stabilities, p_recalls, forget_d, 0
-                    )
-                    recall_s_indices = np.minimum(
-                        stability2index(recall_s), index_len - 1
-                    )
-                    forget_s_indices = np.clip(
-                        stability2index(forget_s), 0, index_len - 1
-                    )
-                    recall_times = time_list[d - 1][recall_s_indices] + r_time
-                    forget_times = time_list[forget_d - 1][forget_s_indices] + f_time
-                    exp_times = (
-                        p_recalls * recall_times + (1.0 - p_recalls) * forget_times
-                    )
-                    mask = exp_times < time_list[d - 1][s_indices]
-                    time_list[d - 1][s_indices[mask]] = exp_times[mask]
-                    diff = total_time - time_list[d - 1].sum()
-                    s0_time = time_list[d - 1][s0_index]
-                df.loc[0 if pd.isnull(df.index.max()) else df.index.max() + 1] = [
-                    recall,
-                    d,
-                    s0_time,
-                ]
-
-        df.sort_values(by=["difficulty", "retention"], inplace=True)
-        df.to_csv("./expected_time.csv", index=False)
-        tqdm.write("expected_time.csv saved.")
-
-        optimal_retention_list = np.zeros(10)
-        fig = plt.figure()
-        ax = fig.gca()
-        for d in range(1, d_range + 1):
-            retention = df[df["difficulty"] == d]["retention"]
-            cost = df[df["difficulty"] == d]["time"]
-            optimal_retention = retention.iat[cost.argmin()]
-            optimal_retention_list[d - 1] = optimal_retention
-            ax.plot(retention, cost, label=f"d={d}, r={optimal_retention}")
-
-        self.optimal_retention = np.inner(
-            self.difficulty_distribution_padding, optimal_retention_list
+        self.optimal_retention = optimal_retention(
+            self.w,
+            deck_size=deck_size,
+            learn_span=learn_span,
+            max_cost_perday=max_cost_perday,
+            max_ivl=max_ivl,
+            recall_cost=r_time,
+            forget_cost=f_time,
+            learn_cost=(r_time + f_time) / 2,
+            first_rating_prob=self.first_rating_prob,
+            review_rating_prob=self.review_rating_prob,
         )
 
         tqdm.write(
             f"\n-----suggested retention (experimental): {self.optimal_retention:.2f}-----"
         )
 
-        ax.set_ylabel("expected time (second)")
-        ax.set_xlabel("retention")
+        (_, review_cnt_per_day, learn_cnt_per_day, memorized_cnt_per_day) = simulate(
+            self.w,
+            deck_size=deck_size,
+            learn_span=learn_span,
+            max_cost_perday=max_cost_perday,
+            max_ivl=max_ivl,
+            request_retention=self.optimal_retention,
+            recall_cost=r_time,
+            forget_cost=f_time,
+            learn_cost=(r_time + f_time) / 2,
+            first_rating_prob=self.first_rating_prob,
+            review_rating_prob=self.review_rating_prob,
+        )
+
+        def moving_average(data, window_size=365 // 20):
+            weights = np.ones(window_size) / window_size
+            return np.convolve(data, weights, mode="valid")
+
+        fig1 = plt.figure()
+        ax = fig1.gca()
+        ax.plot(
+            moving_average(review_cnt_per_day),
+            label=f"R={self.optimal_retention*100:.0f}%",
+        )
+        ax.set_title("Review Count per Day")
         ax.legend()
-        ax.grid()
-        ax.semilogy()
-        return (fig,)
+        ax.grid(True)
+        fig2 = plt.figure()
+        ax = fig2.gca()
+        ax.plot(
+            moving_average(learn_cnt_per_day),
+            label=f"R={self.optimal_retention*100:.0f}%",
+        )
+        ax.set_title("Learn Count per Day")
+        ax.legend()
+        ax.grid(True)
+        fig3 = plt.figure()
+        ax = fig3.gca()
+        ax.plot(
+            np.cumsum(learn_cnt_per_day), label=f"R={self.optimal_retention*100:.0f}%"
+        )
+        ax.set_title("Cumulative Learn Count")
+        ax.legend()
+        ax.grid(True)
+        fig4 = plt.figure()
+        ax = fig4.gca()
+        ax.plot(memorized_cnt_per_day, label=f"R={self.optimal_retention*100:.0f}%")
+        ax.set_title("Memorized Count per Day")
+        ax.legend()
+        ax.grid(True)
+
+        return (fig1, fig2, fig3, fig4)
 
     def evaluate(self):
         my_collection = Collection(self.init_w)
@@ -1543,7 +1538,6 @@ def load_brier(predictions, real, bins=20):
         prediction[bin] += p
 
     np.seterr(invalid="ignore")
-    mask = counts > 0
     prediction_means = prediction / counts
     correct_means = correct / counts
     size = len(predictions)
