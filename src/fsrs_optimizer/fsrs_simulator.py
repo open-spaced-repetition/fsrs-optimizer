@@ -13,6 +13,7 @@ columns = [
     "ivl",
     "cost",
     "rand",
+    "rating",
 ]
 col = {key: i for i, key in enumerate(columns)}
 
@@ -24,7 +25,7 @@ def simulate(
     learn_span=365,
     max_cost_perday=1800,
     max_ivl=36500,
-    recall_cost=10,
+    recall_costs=np.array([14, 10, 6]),
     forget_cost=50,
     learn_cost=20,
     first_rating_prob=np.array([0.15, 0.2, 0.6, 0.05]),
@@ -83,7 +84,13 @@ def simulate(
         card_table[col["rand"]][need_review] = np.random.rand(np.sum(need_review))
         forget = card_table[col["rand"]] > card_table[col["retrievability"]]
         card_table[col["cost"]][need_review & forget] = forget_cost
-        card_table[col["cost"]][need_review & ~forget] = recall_cost
+        card_table[col["rating"]][need_review & ~forget] = np.random.choice(
+            [1, 2, 3], np.sum(need_review & ~forget), p=review_rating_prob
+        )
+        card_table[col["cost"]][need_review & ~forget] = np.choose(
+            card_table[col["rating"]][need_review & ~forget].astype(int) - 1,
+            recall_costs,
+        )
         true_review = need_review & (
             np.cumsum(card_table[col["cost"]]) <= max_cost_perday
         )
@@ -97,15 +104,11 @@ def simulate(
             card_table[col["retrievability"]][true_review & forget],
             card_table[col["difficulty"]][true_review & forget],
         )
-
-        review_ratings = np.random.choice(
-            [1, 2, 3], np.sum(true_review & ~forget), p=review_rating_prob
-        )
         card_table[col["stability"]][true_review & ~forget] = stability_after_success(
             card_table[col["stability"]][true_review & ~forget],
             card_table[col["retrievability"]][true_review & ~forget],
             card_table[col["difficulty"]][true_review & ~forget],
-            review_ratings,
+            card_table[col["rating"]][true_review & ~forget],
         )
 
         card_table[col["difficulty"]][true_review & forget] = np.clip(
@@ -148,7 +151,7 @@ def optimal_retention(
     learn_span=365,
     max_cost_perday=1800,
     max_ivl=36500,
-    recall_cost=10,
+    recall_costs=np.array([14, 10, 6]),
     forget_cost=50,
     learn_cost=20,
     first_rating_prob=np.array([0.15, 0.2, 0.6, 0.05]),
@@ -159,7 +162,7 @@ def optimal_retention(
     optimal = 0.85
     epsilon = 0.01
 
-    pbar = tqdm(desc="train", colour="red", total=10)
+    pbar = tqdm(desc="optimization", colour="red", total=10)
     for _ in range(10):
         mid1 = low + (high - low) / 3
         mid2 = high - (high - low) / 3
@@ -172,7 +175,7 @@ def optimal_retention(
             learn_span,
             max_cost_perday,
             max_ivl,
-            recall_cost,
+            recall_costs,
             forget_cost,
             learn_cost,
             first_rating_prob,
@@ -187,7 +190,7 @@ def optimal_retention(
                     learn_span=learn_span,
                     max_cost_perday=max_cost_perday,
                     max_ivl=max_ivl,
-                    recall_cost=recall_cost,
+                    recall_costs=recall_costs,
                     forget_cost=forget_cost,
                     learn_cost=learn_cost,
                     first_rating_prob=first_rating_prob,
@@ -205,7 +208,7 @@ def optimal_retention(
             learn_span,
             max_cost_perday,
             max_ivl,
-            recall_cost,
+            recall_costs,
             forget_cost,
             learn_cost,
             first_rating_prob,
@@ -218,7 +221,7 @@ def optimal_retention(
             learn_span,
             max_cost_perday,
             max_ivl,
-            recall_cost,
+            recall_costs,
             forget_cost,
             learn_cost,
             first_rating_prob,
