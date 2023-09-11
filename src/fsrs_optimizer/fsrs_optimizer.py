@@ -534,6 +534,13 @@ class Optimizer:
         df["review_state"] = df["review_state"].map(
             lambda x: x if x != New else Learning
         )
+
+        self.recall_costs = np.zeros(3)
+        recall_costs = recall_card_revlog.groupby(by="review_rating")[
+            "review_duration"
+        ].mean()
+        self.recall_costs[recall_costs.index - 2] = recall_costs / 1000
+
         self.state_sequence = np.array(df["review_state"])
         self.duration_sequence = np.array(df["review_duration"])
         self.learn_cost = round(
@@ -1197,9 +1204,21 @@ class Optimizer:
                 1,
             )
 
-        tqdm.write(f"average time for failed cards: {forget_cost}s")
-        tqdm.write(f"average time for recalled cards: {recall_cost}s")
+        tqdm.write(f"average time for failed reviews: {forget_cost}s")
+        tqdm.write(f"average time for recalled reviews: {recall_cost}s")
+        tqdm.write(
+            "average time for `hard`, `good` and `easy` reviews: %.1fs, %.1fs, %.1fs"
+            % tuple(self.recall_costs)
+        )
         tqdm.write(f"average time for learning a new card: {self.learn_cost}s")
+        tqdm.write(
+            "Ratio of `hard`, `good` and `easy` ratings for recalled reviews: %.2f, %.2f, %.2f"
+            % tuple(self.review_rating_prob)
+        )
+        tqdm.write(
+            "Ratio of `again`, `hard`, `good` and `easy` ratings for new cards: %.2f, %.2f, %.2f, %.2f"
+            % tuple(self.first_rating_prob)
+        )
 
         forget_cost *= loss_aversion
 
@@ -1209,7 +1228,7 @@ class Optimizer:
             learn_span=learn_span,
             max_cost_perday=max_cost_perday,
             max_ivl=max_ivl,
-            recall_cost=recall_cost,
+            recall_costs=self.recall_costs,
             forget_cost=forget_cost,
             learn_cost=self.learn_cost,
             first_rating_prob=self.first_rating_prob,
@@ -1227,7 +1246,7 @@ class Optimizer:
             max_cost_perday=max_cost_perday,
             max_ivl=max_ivl,
             request_retention=self.optimal_retention,
-            recall_cost=recall_cost,
+            recall_costs=self.recall_costs,
             forget_cost=forget_cost,
             learn_cost=self.learn_cost,
             first_rating_prob=self.first_rating_prob,
