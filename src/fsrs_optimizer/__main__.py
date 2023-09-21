@@ -207,7 +207,7 @@ if __name__ == "__main__":
         filterC(lambda f:
                 f.lower().endswith(".apkg") or
                 f.lower().endswith(".colpkg") or
-                f.lower().endswith('csv')) # extesion filter
+                f.lower().endswith(".csv")) # extension filter
     ], args.filenames)
 
     for filename in files:
