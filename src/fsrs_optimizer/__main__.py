@@ -4,6 +4,7 @@ import shutil
 import json
 import pytz
 import os
+import functools
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -82,13 +83,13 @@ def process(filepath, filter_out_flags: list[str]):
     optimizer = fsrs_optimizer.Optimizer()
     if filepath.endswith(".apkg") or filepath.endswith(".colpkg"):
         optimizer.anki_extract(
-            f"../{filepath}",
+            f"{filepath}",
             remembered_fallbacks["filter_out_suspended_cards"] == "y",
             filter_out_flags,
         )
     else:
         # copy the file to the current directory and rename it as revlog.csv
-        shutil.copyfile(f"../{filepath}", "revlog.csv")
+        shutil.copyfile(f"{filepath}", "revlog.csv")
     analysis = optimizer.create_time_series(
         remembered_fallbacks["timezone"],
         remembered_fallbacks["revlog_start_date"],
@@ -153,11 +154,9 @@ def process(filepath, filter_out_flags: list[str]):
     with open("evaluation.json", "w+") as f:
         json.dump(evaluation, f)
 
-
-if __name__ == "__main__":
-    config_save = os.path.expanduser(".fsrs_optimizer")
-
+def create_arg_parser():
     parser = argparse.ArgumentParser()
+
     parser.add_argument("filenames", nargs="+")
     parser.add_argument(
         "-y",
@@ -175,36 +174,50 @@ if __name__ == "__main__":
         "-o", "--out", help="File to APPEND the automatically generated profile to."
     )
 
+    return parser
+
+if __name__ == "__main__":
+    config_save = os.path.expanduser(".fsrs_optimizer")
+
+    parser = create_arg_parser()
     args = parser.parse_args()
 
+    def lift(file_or_dir):
+        return os.listdir(file_or_dir) if os.path.isdir(file_or_dir) else [ file_or_dir ]
+
+    def flatten(fl):
+        return sum(fl, [])
+
+    def mapC(f):
+        return lambda x: map(f, x)
+
+    def filterC(f):
+        return lambda x: filter(f, x)
+
+    def pipe(functions, value):
+        return functools.reduce(lambda out, f: f(out), functions, value)
+
     curdir = os.getcwd()
-    for filename in args.filenames:
-        if os.path.isdir(filename):
-            files = [
-                f
-                for f in os.listdir(filename)
-                if f.lower().endswith(".apkg") or f.lower().endswith(".colpkg")
-            ]
-            files = [os.path.join(filename, f) for f in files]
-            for file_path in files:
-                try:
-                    print(f"Processing {file_path}")
-                    process(file_path, args.flags)
-                except Exception as e:
-                    print(e)
-                    print(f"Failed to process {file_path}")
-                finally:
-                    plt.close("all")
-                    os.chdir(curdir)
-                    continue
-        else:
-            try:
-                print(f"Processing {filename}")
-                process(filename, args.flags)
-            except Exception as e:
-                print(e)
-                print(f"Failed to process {filename}")
-            finally:
-                plt.close("all")
-                os.chdir(curdir)
-                continue
+
+    files = pipe([
+        mapC(lift), # map file to [ file ], dir to [ file1, file2, ... ]
+        flatten, # flatten into [ file1, file2, ... ]
+        mapC(os.path.abspath), # map to absolute path
+        filterC(lambda f: not os.path.isdir(f)), # file filter
+        filterC(lambda f:
+                f.lower().endswith(".apkg") or
+                f.lower().endswith(".colpkg") or
+                f.lower().endswith(".csv")) # extension filter
+    ], args.filenames)
+
+    for filename in files:
+        try:
+            print(f"Processing {filename}")
+            process(filename, args.flags)
+        except Exception as e:
+            print(e)
+            print(f"Failed to process {filename}")
+        finally:
+            plt.close("all")
+            os.chdir(curdir)
+            continue
