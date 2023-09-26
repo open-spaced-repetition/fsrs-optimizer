@@ -859,7 +859,7 @@ class Optimizer:
                     * count
                     / total_count
                 )
-                l1 = np.abs(stability - init_s0) / total_count * 0.1
+                l1 = np.abs(stability - init_s0) / total_count / 16
                 return logloss + l1
 
             res = minimize(
