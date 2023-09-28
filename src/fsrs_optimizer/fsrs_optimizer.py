@@ -664,7 +664,6 @@ class Optimizer:
         )
 
         df["review_time"] = df["review_time"].astype(int)
-        df["card_id"] = df["card_id"].astype(int)
         df["review_rating"] = df["review_rating"].astype(int)
         df["review_duration"] = df["review_duration"].astype(int)
         df["review_state"] = df["review_state"].astype(int)
