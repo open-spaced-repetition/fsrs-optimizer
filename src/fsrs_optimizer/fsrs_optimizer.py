@@ -148,7 +148,7 @@ def lineToTensor(line: str) -> Tensor:
     response = line[1].split(",")
     tensor = torch.zeros(len(response), 2)
     for li, response in enumerate(response):
-        tensor[li][0] = int(ivl[li])
+        tensor[li][0] = float(ivl[li])
         tensor[li][1] = int(response)
     return tensor
 
@@ -160,7 +160,7 @@ class RevlogDataset(Dataset):
         padded = pad_sequence(
             dataframe["tensor"].to_list(), batch_first=True, padding_value=0
         )
-        self.x_train = padded.int()
+        self.x_train = padded.float()
         self.t_train = torch.tensor(dataframe["delta_t"].values, dtype=torch.int)
         self.y_train = torch.tensor(dataframe["y"].values, dtype=torch.float)
         self.seq_len = torch.tensor(
@@ -563,10 +563,13 @@ class Optimizer:
         ).to_julian_date()
         df.drop_duplicates(["card_id", "real_days"], keep="first", inplace=True)
         df["delta_t"] = df.real_days.diff()
+        df["float_delta_t"] = df.review_time.diff() / 1000 / 60 / 60 / 24
         df["delta_t"].fillna(0, inplace=True)
+        df["float_delta_t"].fillna(0, inplace=True)
         df.dropna(inplace=True)
         df["i"] = df.groupby("card_id").cumcount() + 1
         df.loc[df["i"] == 1, "delta_t"] = 0
+        df.loc[df["i"] == 1, "float_delta_t"] = 0
         df = df.groupby("card_id").filter(
             lambda group: group["review_state"].iloc[0] == Learning
         )
@@ -591,8 +594,8 @@ class Optimizer:
         def cum_concat(x):
             return list(accumulate(x))
 
-        t_history = df.groupby("card_id", group_keys=False)["delta_t"].apply(
-            lambda x: cum_concat([[int(i)] for i in x])
+        t_history = df.groupby("card_id", group_keys=False)["float_delta_t"].apply(
+            lambda x: cum_concat([[round(i, 4)] for i in x])
         )
         df["t_history"] = [
             ",".join(map(str, item[:-1])) for sublist in t_history for item in sublist
@@ -667,7 +670,8 @@ class Optimizer:
         df["review_rating"] = df["review_rating"].astype(int)
         df["review_duration"] = df["review_duration"].astype(int)
         df["review_state"] = df["review_state"].astype(int)
-        df["delta_t"] = df["delta_t"].astype(int)
+        df["delta_t"] = round(df["float_delta_t"], 4)
+        del df["float_delta_t"]
         df["i"] = df["i"].astype(int)
         df["t_history"] = df["t_history"].astype(str)
         df["r_history"] = df["r_history"].astype(str)
@@ -822,7 +826,6 @@ class Optimizer:
         self.dataset = self.dataset[
             (self.dataset["i"] > 1)
             & (self.dataset["delta_t"] > 0)
-            & (self.dataset["t_history"].str.count(",0") == 0)
         ]
         if self.dataset.empty:
             raise ValueError("Training data is inadequate.")
