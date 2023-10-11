@@ -49,14 +49,14 @@ class FSRS(nn.Module):
         self.w = nn.Parameter(torch.tensor(w, dtype=torch.float32))
 
     def stability_after_success(
-        self, state: Tensor, new_d: Tensor, r: Tensor, rating: Tensor
+        self, state: Tensor, r: Tensor, rating: Tensor
     ) -> Tensor:
         hard_penalty = torch.where(rating == 2, self.w[15], 1)
         easy_bonus = torch.where(rating == 4, self.w[16], 1)
         new_s = state[:, 0] * (
             1
             + torch.exp(self.w[8])
-            * (11 - new_d)
+            * (11 - state[:, 1])
             * torch.pow(state[:, 0], -self.w[9])
             * (torch.exp((1 - r) * self.w[10]) - 1)
             * hard_penalty
@@ -64,12 +64,10 @@ class FSRS(nn.Module):
         )
         return new_s
 
-    def stability_after_failure(
-        self, state: Tensor, new_d: Tensor, r: Tensor
-    ) -> Tensor:
+    def stability_after_failure(self, state: Tensor, r: Tensor) -> Tensor:
         new_s = (
             self.w[11]
-            * torch.pow(new_d, -self.w[12])
+            * torch.pow(state[:, 1], -self.w[12])
             * (torch.pow(state[:, 0] + 1, self.w[13]) - 1)
             * torch.exp((1 - r) * self.w[14])
         )
@@ -92,15 +90,15 @@ class FSRS(nn.Module):
             new_d = new_d.clamp(1, 10)
         else:
             r = power_forgetting_curve(X[:, 0], state[:, 0])
-            new_d = state[:, 1] - self.w[6] * (X[:, 1] - 3)
-            new_d = self.mean_reversion(self.w[4], new_d)
-            new_d = new_d.clamp(1, 10)
             condition = X[:, 1] > 1
             new_s = torch.where(
                 condition,
-                self.stability_after_success(state, new_d, r, X[:, 1]),
-                self.stability_after_failure(state, new_d, r),
+                self.stability_after_success(state, r, X[:, 1]),
+                self.stability_after_failure(state, r),
             )
+            new_d = state[:, 1] - self.w[6] * (X[:, 1] - 3)
+            new_d = self.mean_reversion(self.w[4], new_d)
+            new_d = new_d.clamp(1, 10)
         new_s = new_s.clamp(0.1, 36500)
         return torch.stack([new_s, new_d], dim=1)
 
