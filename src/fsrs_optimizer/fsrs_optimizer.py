@@ -649,7 +649,7 @@ class Optimizer:
 
         df[df["i"] == 2] = (
             df[df["i"] == 2]
-            .groupby(by=["r_history", "t_history"], as_index=False, group_keys=False)
+            .groupby(by=["r_history"], as_index=False, group_keys=False)
             .apply(remove_outliers)
         )
         df.dropna(inplace=True)
