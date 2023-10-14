@@ -787,9 +787,9 @@ class Optimizer:
         """Step 3"""
         self.init_w = [
             0.4,
-            0.6,
-            2.4,
-            5.8,
+            0.9,
+            2.3,
+            10.9,
             4.93,
             0.94,
             0.86,
@@ -830,8 +830,7 @@ class Optimizer:
         rating_count = {}
         average_recall = self.dataset["y"].mean()
         plots = []
-        s0_size = self.S0_dataset_group.shape[0]
-        r_s0_default = {"1": 0.4, "2": 0.6, "3": 2.4, "4": 5.8}
+        r_s0_default = {"1": 0.4, "2": 0.9, "3": 2.3, "4": 10.9}
 
         for first_rating in ("1", "2", "3", "4"):
             group = self.S0_dataset_group[
