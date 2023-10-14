@@ -1120,6 +1120,21 @@ class Optimizer:
                 )
                 + "\n"
             )
+            preview_text += (
+                "factor history: "
+                + ",".join(
+                    ["0.0"] + [
+                        f"{float(ivl) / float(pre_ivl):.2f}" 
+                        if pre_ivl != "0"
+                        else "0.0"
+                        for ivl, pre_ivl in zip(
+                            t_history.split(",")[1:],
+                            t_history.split(",")[:-1],
+                        )
+                    ]
+                )
+                + "\n"
+            )
             preview_text += f"difficulty history: {d_history}\n"
         return preview_text
 
