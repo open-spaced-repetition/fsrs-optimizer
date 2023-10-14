@@ -1120,6 +1120,21 @@ class Optimizer:
                 )
                 + "\n"
             )
+            preview_text += (
+                "factor history: "
+                + ",".join(
+                    ["0.0"] + [
+                        f"{float(ivl) / float(pre_ivl):.2f}" 
+                        if pre_ivl != "0"
+                        else "0.0"
+                        for ivl, pre_ivl in zip(
+                            t_history.split(",")[1:],
+                            t_history.split(",")[:-1],
+                        )
+                    ]
+                )
+                + "\n"
+            )
             preview_text += f"difficulty history: {d_history}\n"
         return preview_text
 
@@ -1136,7 +1151,35 @@ class Optimizer:
             difficulty = round(float(states[1]), 1)
             d_history += f",{difficulty}"
         preview_text = f"rating history: {test_rating_sequence}\n"
-        preview_text += f"interval history: {t_history}\n"
+        preview_text += (
+            "interval history: "
+            + ",".join(
+                [
+                    f"{ivl}d"
+                    if ivl < 30
+                    else f"{ivl / 30:.1f}m"
+                    if ivl < 365
+                    else f"{ivl / 365:.1f}y"
+                    for ivl in map(int, t_history.split(","))
+                ]
+            )
+            + "\n"
+        )
+        preview_text += (
+            "factor history: "
+            + ",".join(
+                ["0.0"] + [
+                    f"{float(ivl) / float(pre_ivl):.2f}" 
+                    if pre_ivl != "0"
+                    else "0.0"
+                    for ivl, pre_ivl in zip(
+                        t_history.split(",")[1:],
+                        t_history.split(",")[:-1],
+                    )
+                ]
+            )
+            + "\n"
+        )
         preview_text += f"difficulty history: {d_history}"
         return preview_text
 
