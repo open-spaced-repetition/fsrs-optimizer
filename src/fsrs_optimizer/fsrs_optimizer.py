@@ -512,7 +512,9 @@ class Optimizer:
         df = pd.read_csv("./revlog.csv")
         df.sort_values(by=["card_id", "review_time"], inplace=True, ignore_index=True)
 
-        new_card_revlog = df[(df["review_state"] == New)]
+        new_card_revlog = df[
+            (df["review_state"] == New) & (df["review_rating"].isin([1, 2, 3, 4]))
+        ]
         self.first_rating_prob = np.zeros(4)
         self.first_rating_prob[
             new_card_revlog["review_rating"].value_counts().index - 1
@@ -521,7 +523,7 @@ class Optimizer:
             / new_card_revlog["review_rating"].count()
         )
         recall_card_revlog = df[
-            (df["review_state"] == Review) & (df["review_rating"] != 1)
+            (df["review_state"] == Review) & (df["review_rating"].isin([2, 3, 4]))
         ]
         self.review_rating_prob = np.zeros(3)
         self.review_rating_prob[
@@ -1123,8 +1125,9 @@ class Optimizer:
             preview_text += (
                 "factor history: "
                 + ",".join(
-                    ["0.0"] + [
-                        f"{float(ivl) / float(pre_ivl):.2f}" 
+                    ["0.0"]
+                    + [
+                        f"{float(ivl) / float(pre_ivl):.2f}"
                         if pre_ivl != "0"
                         else "0.0"
                         for ivl, pre_ivl in zip(
@@ -1168,10 +1171,9 @@ class Optimizer:
         preview_text += (
             "factor history: "
             + ",".join(
-                ["0.0"] + [
-                    f"{float(ivl) / float(pre_ivl):.2f}" 
-                    if pre_ivl != "0"
-                    else "0.0"
+                ["0.0"]
+                + [
+                    f"{float(ivl) / float(pre_ivl):.2f}" if pre_ivl != "0" else "0.0"
                     for ivl, pre_ivl in zip(
                         t_history.split(",")[1:],
                         t_history.split(",")[:-1],
