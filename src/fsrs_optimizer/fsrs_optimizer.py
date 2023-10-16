@@ -1497,11 +1497,13 @@ class Optimizer:
             pls_df_group["last_s_bin"],
             pls_df_group["stability"]["mean"],
             label="Predicted stability",
+            color="orange",
         )
         ax1.legend(loc="upper left")
         ax1.set_xlabel("Last stability (days)")
         ax1.semilogx()
         ax1.set_ylabel("Stability (days)")
+        ax1.set_title("Post-lapse Stability")
 
         return metrics, (fig1, fig2, fig3, fig4, fig5)
 
