@@ -1419,7 +1419,87 @@ class Optimizer:
         fig4 = self.calibration_helper(
             dataset[["difficulty", "p", "y"]].copy(), "difficulty", lambda x: round(x)
         )
-        return metrics, (fig1, fig2, fig3, fig4)
+
+        pls_dataset = dataset[
+            (dataset["r_history"].str.endswith("1")) & (dataset["i"] > 2)
+        ].copy()
+
+        my_collection = Collection(self.w)
+        pls_dataset["last_state"] = pls_dataset.apply(
+            lambda x: my_collection.predict(
+                ",".join(x["t_history"].split(",")[:-1]),
+                ",".join(x["r_history"].split(",")[:-1]),
+            ),
+            axis=1,
+        )
+        pls_dataset["last_s"] = pls_dataset["last_state"].map(lambda x: x[0].item())
+        pls_dataset["last_d"] = pls_dataset["last_state"].map(lambda x: x[1].item())
+        del pls_dataset["last_state"]
+        pls_dataset["last_s_bin"] = pls_dataset["last_s"].map(
+            lambda x: math.pow(1.2, math.floor(math.log(x, 1.2)))
+        )
+        pls_df_group = pls_dataset.groupby(
+            by=["last_s_bin", "delta_t"], group_keys=False
+        ).agg(
+            {
+                "y": ["mean", "count"],
+                "p": "mean",
+                "stability": "mean",
+                "last_d": "mean",
+            }
+        )
+        pls_df_group.reset_index(inplace=True)
+
+        def cal_stability(tmp):
+            delta_t = tmp["delta_t"]
+            recall = tmp["y"]["mean"]
+            count = tmp["y"]["count"]
+            total_count = sum(count)
+
+            def loss(stability):
+                y_pred = power_forgetting_curve(delta_t, stability)
+                logloss = sum(
+                    -(recall * np.log(y_pred) + (1 - recall) * np.log(1 - y_pred))
+                    * count
+                    / total_count
+                )
+                return logloss
+
+            res = minimize(loss, 1, method="Nelder-Mead")
+            if res.success:
+                tmp["true_s"] = res.x[0]
+            else:
+                tmp["true_s"] = np.nan
+            tmp["predicted_s"] = tmp["stability"]["mean"].mean()
+            tmp["total_count"] = total_count
+            return tmp
+
+        pls_df_group = (
+            pls_df_group.groupby("last_s_bin", group_keys=False)
+            .apply(cal_stability)
+            .reset_index(drop=True)
+        )
+        pls_df_group.drop_duplicates(subset=[("last_s_bin", "")], inplace=True)
+        fig5 = plt.figure()
+        ax1 = fig5.add_subplot(111)
+        ax1.scatter(
+            pls_df_group["last_s_bin"],
+            pls_df_group["true_s"],
+            s=np.sqrt(pls_df_group["total_count"]),
+            label="True stability",
+            alpha=0.5,
+        )
+        ax1.plot(
+            pls_df_group["last_s_bin"],
+            pls_df_group["stability"]["mean"],
+            label="Predicted stability",
+        )
+        ax1.legend(loc="upper left")
+        ax1.set_xlabel("Last stability (days)")
+        ax1.semilogx()
+        ax1.set_ylabel("Stability (days)")
+
+        return metrics, (fig1, fig2, fig3, fig4, fig5)
 
     def calibration_helper(self, calibration_data, key, bin_func):
         fig = plt.figure()
