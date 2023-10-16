@@ -229,6 +229,21 @@ def collate_fn(batch):
     return sequences_padded, delta_ts, labels, seq_lens
 
 
+class AlphaLoss(nn.Module):
+    def __init__(self, alpha=1):
+        super().__init__()
+        self.alpha = alpha
+
+    def forward(self, p, y):
+        if self.alpha == 1:
+            loss = -(y * torch.log(p) + (1 - y) * torch.log(1 - p))
+        else:
+            loss = (self.alpha / (self.alpha - 1)) * (
+                1 - torch.pow(1 - torch.abs(y - p), 1 - (1 / self.alpha))
+            )
+        return loss
+
+
 class Trainer:
     def __init__(
         self,
@@ -251,7 +266,8 @@ class Trainer:
         )
         self.avg_train_losses = []
         self.avg_eval_losses = []
-        self.loss_fn = nn.BCELoss(reduction="none")
+        # self.loss_fn = nn.BCELoss(reduction="none")
+        self.loss_fn = AlphaLoss(alpha=1.5)
 
     def build_dataset(self, train_set: pd.DataFrame, test_set: pd.DataFrame):
         pre_train_set = train_set[train_set["i"] == 2]
