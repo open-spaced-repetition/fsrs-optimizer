@@ -1502,8 +1502,9 @@ class Optimizer:
         ax1.legend(loc="upper left")
         ax1.set_xlabel("Last stability (days)")
         ax1.semilogx()
-        ax1.set_ylabel("Stability (days)")
-        ax1.set_title("Post-lapse Stability")
+        ax1.set_ylabel("Post-lapse Stability (days)")
+        ax1.grid()
+        ax1.xaxis.set_major_formatter(ticker.FormatStrFormatter("%d"))
 
         return metrics, (fig1, fig2, fig3, fig4, fig5)
 
@@ -1522,7 +1523,7 @@ class Optimizer:
         lns1 = ax1.bar(
             x=calibration_group.index,
             height=calibration_group["y"],
-            width=calibration_group.index / 5.5,
+            width=calibration_group.index / 5.5 if key == "stability" else 0.8,
             ec="k",
             lw=0.2,
             label="Number of predictions",
