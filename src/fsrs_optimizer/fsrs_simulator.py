@@ -61,7 +61,7 @@ def simulate(
             np.minimum(
                 w[11]
                 * np.power(d, -w[12])
-                * (np.power(s + 1, w[13]) - 1)
+                * np.log(s + w[13])
                 * np.exp((1 - r) * w[14]),
                 s,
             ),
