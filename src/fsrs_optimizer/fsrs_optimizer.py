@@ -1415,9 +1415,13 @@ class Optimizer:
             dataset[["stability", "p", "y"]].copy(),
             "stability",
             lambda x: math.pow(1.2, math.floor(math.log(x, 1.2))),
+            True,
         )
         fig4 = self.calibration_helper(
-            dataset[["difficulty", "p", "y"]].copy(), "difficulty", lambda x: round(x)
+            dataset[["difficulty", "p", "y"]].copy(),
+            "difficulty",
+            lambda x: round(x),
+            False,
         )
 
         pls_dataset = dataset[
@@ -1501,7 +1505,7 @@ class Optimizer:
 
         return metrics, (fig1, fig2, fig3, fig4, fig5)
 
-    def calibration_helper(self, calibration_data, key, bin_func):
+    def calibration_helper(self, calibration_data, key, bin_func, semilogx):
         fig = plt.figure()
         ax1 = fig.add_subplot(111)
         ax2 = ax1.twinx()
@@ -1524,7 +1528,8 @@ class Optimizer:
         )
         ax1.set_ylabel("Number of predictions")
         ax1.set_xlabel(key.title())
-        ax1.semilogx()
+        if semilogx:
+            ax1.semilogx()
         lns.append(lns1)
 
         calibration_group = calibration_data.groupby(by="bin").agg("mean")
