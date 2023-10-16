@@ -94,6 +94,7 @@ def process(filepath, filter_out_flags: list[str]):
         remembered_fallbacks["timezone"],
         remembered_fallbacks["revlog_start_date"],
         remembered_fallbacks["next_day"],
+        False,
     )
     print(analysis)
 

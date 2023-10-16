@@ -567,7 +567,7 @@ class Optimizer:
                 "D", ambiguous="infer", nonexistent="shift_forward"
             )
         ).to_julian_date()
-        df.drop_duplicates(["card_id", "real_days"], keep="first", inplace=True)
+        # df.drop_duplicates(["card_id", "real_days"], keep="first", inplace=True)
         df["delta_t"] = df.real_days.diff()
         df["delta_t"].fillna(0, inplace=True)
         df.dropna(inplace=True)
@@ -597,26 +597,40 @@ class Optimizer:
         def cum_concat(x):
             return list(accumulate(x))
 
-        t_history = df.groupby("card_id", group_keys=False)["delta_t"].apply(
+        t_history_list = df.groupby("card_id", group_keys=False)["delta_t"].apply(
             lambda x: cum_concat([[int(i)] for i in x])
         )
         df["t_history"] = [
-            ",".join(map(str, item[:-1])) for sublist in t_history for item in sublist
+            ",".join(map(str, item[:-1])) for sublist in t_history_list for item in sublist
         ]
-        r_history = df.groupby("card_id", group_keys=False)["review_rating"].apply(
+        r_history_list = df.groupby("card_id", group_keys=False)["review_rating"].apply(
             lambda x: cum_concat([[i] for i in x])
         )
         df["r_history"] = [
-            ",".join(map(str, item[:-1])) for sublist in r_history for item in sublist
+            ",".join(map(str, item[:-1])) for sublist in r_history_list for item in sublist
         ]
+        last_rating = []
+        for t_sublist, r_sublist in zip(t_history_list, r_history_list):
+            for t_history, r_history in zip(t_sublist, r_sublist):
+                flag = True
+                for t, r in zip(reversed(t_history[:-1]), reversed(r_history[:-1])):
+                    if t > 0:
+                        last_rating.append(r)
+                        flag = False
+                        break
+                if flag:
+                    last_rating.append(r_history[0])
+        df["last_rating"] = last_rating
+
         df = df.groupby("card_id").filter(
             lambda group: group["review_time"].min()
             > time.mktime(datetime.strptime(revlog_start_date, "%Y-%m-%d").timetuple())
             * 1000
         )
         df = df[
-            (df["review_rating"] != 0) & (df["r_history"].str.contains("0") == 0)
+            (df["review_rating"] != 0) & (df["r_history"].str.contains("0") == 0) & (df["delta_t"] > 0)
         ].copy()
+        df["i"] = df.groupby("card_id").cumcount() + 2
         df["y"] = df["review_rating"].map(lambda x: {1: 0, 2: 1, 3: 1, 4: 1}[x])
 
         def remove_outliers(group: pd.DataFrame) -> pd.DataFrame:
@@ -628,7 +642,7 @@ class Optimizer:
             # threshold = Q3 + 1.5 * IQR
             # group = group[group['delta_t'] <= threshold]
             grouped_group = (
-                group.groupby(by=["r_history", "delta_t"], group_keys=False)
+                group.groupby(by=["first_rating", "delta_t"], group_keys=False)
                 .agg({"y": ["mean", "count"]})
                 .reset_index()
             )
@@ -650,25 +664,27 @@ class Optimizer:
             ]
             return group
 
+        df["first_rating"] = df.groupby("card_id")["r_history"].transform("first").map(lambda x: x[0])
         df[df["i"] == 2] = (
             df[df["i"] == 2]
-            .groupby(by=["r_history", "t_history"], as_index=False, group_keys=False)
+            .groupby(by=["first_rating"], as_index=False, group_keys=False)
             .apply(remove_outliers)
         )
         df.dropna(inplace=True)
 
-        def remove_non_continuous_rows(group):
-            discontinuity = group["i"].diff().fillna(1).ne(1)
-            if not discontinuity.any():
-                return group
-            else:
-                first_non_continuous_index = discontinuity.idxmax()
-                return group.loc[: first_non_continuous_index - 1]
-
-        df = df.groupby("card_id", as_index=False, group_keys=False).progress_apply(
-            remove_non_continuous_rows
+        df = df.groupby("card_id").filter(
+            lambda group: group["i"].iloc[0] == 2
         )
 
+        S0_dataset = df[df["i"] == 2]
+        self.S0_dataset_group = (
+            S0_dataset.groupby(by=["first_rating", "delta_t"], group_keys=False)
+            .agg({"y": ["mean", "count"]})
+            .reset_index()
+        )
+        self.S0_dataset_group.to_csv("stability_for_pretrain.tsv", sep="\t", index=None)
+
+        del df["first_rating"]
         df["review_time"] = df["review_time"].astype(int)
         df["review_rating"] = df["review_rating"].astype(int)
         df["review_duration"] = df["review_duration"].astype(int)
@@ -677,18 +693,11 @@ class Optimizer:
         df["i"] = df["i"].astype(int)
         df["t_history"] = df["t_history"].astype(str)
         df["r_history"] = df["r_history"].astype(str)
+        df["last_rating"] = df["last_rating"].astype(int)
         df["y"] = df["y"].astype(int)
 
         df.to_csv("revlog_history.tsv", sep="\t", index=False)
         tqdm.write("Trainset saved.")
-
-        S0_dataset = df[df["i"] == 2]
-        self.S0_dataset_group = (
-            S0_dataset.groupby(by=["r_history", "delta_t"], group_keys=False)
-            .agg({"y": ["mean", "count"]})
-            .reset_index()
-        )
-        self.S0_dataset_group.to_csv("stability_for_pretrain.tsv", sep="\t", index=None)
 
         if not analysis:
             return
@@ -831,7 +840,6 @@ class Optimizer:
         self.dataset = self.dataset[
             (self.dataset["i"] > 1)
             & (self.dataset["delta_t"] > 0)
-            & (self.dataset["t_history"].str.count(",0") == 0)
         ]
         if self.dataset.empty:
             raise ValueError("Training data is inadequate.")
@@ -841,9 +849,10 @@ class Optimizer:
         plots = []
         r_s0_default = {"1": 0.4, "2": 0.9, "3": 2.3, "4": 10.9}
 
+
         for first_rating in ("1", "2", "3", "4"):
             group = self.S0_dataset_group[
-                self.S0_dataset_group["r_history"] == first_rating
+                self.S0_dataset_group["first_rating"] == first_rating
             ]
             if group.empty:
                 tqdm.write(
@@ -1405,8 +1414,8 @@ class Optimizer:
             dataset["p"], dataset["y"], bins=20, ax=fig1.add_subplot(111)
         )
         fig2 = plt.figure(figsize=(16, 12))
-        for last_rating in ("1", "2", "3", "4"):
-            calibration_data = dataset[dataset["r_history"].str.endswith(last_rating)]
+        for last_rating in (1, 2, 3, 4):
+            calibration_data = dataset[dataset["last_rating"] == last_rating]
             if calibration_data.empty:
                 continue
             tqdm.write(f"\nLast rating: {last_rating}")
@@ -1502,9 +1511,9 @@ class Optimizer:
         )
         figs = []
         for group_key in ("last_s_bin", "last_d_bin", "last_r_bin"):
-            for last_rating in ("1", "3"):
+            for last_rating in (1, 3):
                 analysis_group = (
-                    analysis_df[analysis_df["r_history"].str.endswith(last_rating)]
+                    analysis_df[analysis_df["last_rating"] == last_rating]
                     .groupby(
                         by=["last_s_bin", "last_d_bin", "last_r_bin", "delta_t"],
                         group_keys=False,
