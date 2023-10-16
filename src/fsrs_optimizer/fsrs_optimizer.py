@@ -1523,7 +1523,7 @@ class Optimizer:
             alpha=0.5,
         )
         ax1.set_ylabel("Number of predictions")
-        ax1.set_xlabel("Stability (days)")
+        ax1.set_xlabel(key.title())
         ax1.semilogx()
         lns.append(lns1)
 
