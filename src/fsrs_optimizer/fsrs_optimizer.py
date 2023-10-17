@@ -506,7 +506,11 @@ class Optimizer:
         tqdm.write("revlog.csv saved.")
 
     def create_time_series(
-        self, timezone: str, revlog_start_date: str, next_day_starts_at: int
+        self,
+        timezone: str,
+        revlog_start_date: str,
+        next_day_starts_at: int,
+        analysis: bool = True,
     ):
         """Step 2"""
         df = pd.read_csv("./revlog.csv")
@@ -685,6 +689,9 @@ class Optimizer:
             .reset_index()
         )
         self.S0_dataset_group.to_csv("stability_for_pretrain.tsv", sep="\t", index=None)
+
+        if not analysis:
+            return
 
         df["retention"] = df.groupby(by=["r_history", "delta_t"], group_keys=False)[
             "y"
