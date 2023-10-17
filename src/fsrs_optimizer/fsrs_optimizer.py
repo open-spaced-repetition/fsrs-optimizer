@@ -300,7 +300,10 @@ class Trainer:
                 outputs, _ = self.model(sequences)
                 stabilities = outputs[seq_lens - 1, torch.arange(real_batch_size), 0]
                 retentions = power_forgetting_curve(delta_ts, stabilities)
-                loss = self.loss_fn(retentions, labels).sum()
+                pls_flag = sequences[seq_lens-1, torch.arange(real_batch_size), 1] == 1
+                penalty = torch.ones_like(retentions, requires_grad=False)
+                penalty[pls_flag] *= 10
+                loss = (self.loss_fn(retentions, labels) * penalty).sum()
                 loss.backward()
                 for param in self.model.parameters():
                     param.grad[:4] = torch.zeros(4)
@@ -335,11 +338,15 @@ class Trainer:
                 self.train_set.y_train,
                 self.train_set.seq_len,
             )
+            sequences = sequences.transpose(0, 1)
             real_batch_size = seq_lens.shape[0]
-            outputs, _ = self.model(sequences.transpose(0, 1))
+            outputs, _ = self.model(sequences)
             stabilities = outputs[seq_lens - 1, torch.arange(real_batch_size), 0]
             retentions = power_forgetting_curve(delta_ts, stabilities)
-            tran_loss = self.loss_fn(retentions, labels).mean()
+            penalty = torch.ones_like(retentions, requires_grad=False)
+            pls_flag = sequences[seq_lens-1, torch.arange(real_batch_size), 1] == 1
+            penalty[pls_flag] *= 10
+            tran_loss = (self.loss_fn(retentions, labels) * penalty).mean()
             self.avg_train_losses.append(tran_loss)
 
             sequences, delta_ts, labels, seq_lens = (
@@ -348,11 +355,15 @@ class Trainer:
                 self.test_set.y_train,
                 self.test_set.seq_len,
             )
+            sequences = sequences.transpose(0, 1)
             real_batch_size = seq_lens.shape[0]
-            outputs, _ = self.model(sequences.transpose(0, 1))
+            outputs, _ = self.model(sequences)
             stabilities = outputs[seq_lens - 1, torch.arange(real_batch_size), 0]
             retentions = power_forgetting_curve(delta_ts, stabilities)
-            test_loss = self.loss_fn(retentions, labels).mean()
+            penalty = torch.ones_like(retentions, requires_grad=False)
+            pls_flag = sequences[seq_lens-1, torch.arange(real_batch_size), 1] == 1
+            penalty[pls_flag] *= 10
+            test_loss = (self.loss_fn(retentions, labels) * penalty).mean()
             self.avg_eval_losses.append(test_loss)
 
             w = list(
