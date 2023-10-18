@@ -1476,7 +1476,7 @@ class Optimizer:
                 )
                 return logloss
 
-            res = minimize(loss, 1, method="Nelder-Mead")
+            res = minimize(loss, 1, bounds=((0.1, 365),))
             if res.success:
                 tmp["true_s"] = res.x[0]
             else:
@@ -1506,6 +1506,7 @@ class Optimizer:
             label="Predicted stability",
             color="orange",
         )
+        ax1.set_ylim(0, pls_df_group["stability"]["mean"].max() * 1.1)
         ax1.legend(loc="upper left")
         ax1.set_xlabel("Last stability (days)")
         ax1.semilogx()
