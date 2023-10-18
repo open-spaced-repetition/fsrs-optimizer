@@ -154,6 +154,7 @@ def process(filepath, filter_out_flags: list[str]):
     with open("evaluation.json", "w+") as f:
         json.dump(evaluation, f)
 
+
 def create_arg_parser():
     parser = argparse.ArgumentParser()
 
@@ -176,6 +177,7 @@ def create_arg_parser():
 
     return parser
 
+
 if __name__ == "__main__":
     config_save = os.path.expanduser(".fsrs_optimizer")
 
@@ -183,7 +185,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     def lift(file_or_dir):
-        return os.listdir(file_or_dir) if os.path.isdir(file_or_dir) else [ file_or_dir ]
+        return os.listdir(file_or_dir) if os.path.isdir(file_or_dir) else [file_or_dir]
 
     def flatten(fl):
         return sum(fl, [])
@@ -199,16 +201,20 @@ if __name__ == "__main__":
 
     curdir = os.getcwd()
 
-    files = pipe([
-        mapC(lift), # map file to [ file ], dir to [ file1, file2, ... ]
-        flatten, # flatten into [ file1, file2, ... ]
-        mapC(os.path.abspath), # map to absolute path
-        filterC(lambda f: not os.path.isdir(f)), # file filter
-        filterC(lambda f:
-                f.lower().endswith(".apkg") or
-                f.lower().endswith(".colpkg") or
-                f.lower().endswith(".csv")) # extension filter
-    ], args.filenames)
+    files = pipe(
+        [
+            mapC(lift),  # map file to [ file ], dir to [ file1, file2, ... ]
+            flatten,  # flatten into [ file1, file2, ... ]
+            mapC(os.path.abspath),  # map to absolute path
+            filterC(lambda f: not os.path.isdir(f)),  # file filter
+            filterC(
+                lambda f: f.lower().endswith(".apkg")
+                or f.lower().endswith(".colpkg")
+                or f.lower().endswith(".csv")
+            ),  # extension filter
+        ],
+        args.filenames,
+    )
 
     for filename in files:
         try:
