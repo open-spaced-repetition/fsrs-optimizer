@@ -1502,11 +1502,11 @@ class Optimizer:
         )
         ax1.plot(
             pls_df_group["last_s_bin"],
-            pls_df_group["stability"]["mean"],
+            pls_df_group["predicted_s"],
             label="Predicted stability",
             color="orange",
         )
-        ax1.set_ylim(0, pls_df_group["stability"]["mean"].max() * 1.1)
+        ax1.set_ylim(0, pls_df_group["predicted_s"].max() * 1.1)
         ax1.legend(loc="upper left")
         ax1.set_xlabel("Last stability (days)")
         ax1.semilogx()
