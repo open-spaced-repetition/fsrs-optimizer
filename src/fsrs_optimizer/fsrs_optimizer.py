@@ -70,10 +70,16 @@ class FSRS(nn.Module):
         new_s = (
             self.w[11]
             * torch.pow(new_d, -self.w[12])
-            * (torch.pow(state[:, 0] + 1, self.w[13]) - 1)
+            * self.BoxCox(state[:, 0])
             * torch.exp((1 - r) * self.w[14])
         )
         return new_s
+
+    def BoxCox(self, stability: Tensor) -> Tensor:
+        if self.w[13] == 0:
+            return torch.log(stability + 1)
+        else:
+            return (torch.pow(stability + 1, self.w[13]) - 1) / self.w[13]  # as self.w[13] approaches 0, this function approaches a natural log
 
     def step(self, X: Tensor, state: Tensor) -> Tensor:
         """
@@ -135,8 +141,8 @@ class WeightClipper:
             w[9] = w[9].clamp(0.1, 0.8)
             w[10] = w[10].clamp(0.01, 2.5)
             w[11] = w[11].clamp(0.5, 5)
-            w[12] = w[12].clamp(0.01, 0.2)
-            w[13] = w[13].clamp(0.01, 0.9)
+            w[12] = w[12].clamp(0.01, 2)
+            w[13] = w[13].clamp(-1, 0.9)
             w[14] = w[14].clamp(0.01, 2)
             w[15] = w[15].clamp(0, 1)
             w[16] = w[16].clamp(1, 10)
@@ -806,10 +812,10 @@ class Optimizer:
             1.49,
             0.14,
             0.94,
-            2.18,
-            0.05,
-            0.34,
-            1.26,
+            2.1,
+            0.45,
+            0.08,
+            1.2,
             0.29,
             2.61,
         ]
