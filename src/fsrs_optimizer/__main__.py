@@ -103,15 +103,18 @@ def process(filepath, filter_out_flags: list[str]):
     figures = optimizer.pretrain(verbose=save_graphs)
     for i, f in enumerate(figures):
         f.savefig(f"pretrain_{i}.png")
+        plt.close(f)
     figures = optimizer.train(verbose=save_graphs)
     for i, f in enumerate(figures):
         f.savefig(f"train_{i}.png")
+        plt.close(f)
 
     optimizer.predict_memory_states()
     figures = optimizer.find_optimal_retention()
     if save_graphs:
         for i, f in enumerate(figures):
             f.savefig(f"find_optimal_retention_{i}.png")
+            plt.close(f)
 
     optimizer.preview(optimizer.optimal_retention)
 
@@ -139,10 +142,17 @@ def process(filepath, filter_out_flags: list[str]):
     if save_graphs:
         for i, f in enumerate(figures):
             f.savefig(f"calibration_{i}.png")
+            plt.close(f)
+    figures = optimizer.formula_analysis()
+    if save_graphs:
+        for i, f in enumerate(figures):
+            f.savefig(f"formula_analysis_{i}.png")
+            plt.close(f)
     figures = optimizer.compare_with_sm2()
     if save_graphs:
         for i, f in enumerate(figures):
             f.savefig(f"compare_with_sm2_{i}.png")
+            plt.close(f)
 
     evaluation = {
         "filename": filename,

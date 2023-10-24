@@ -1430,91 +1430,7 @@ class Optimizer:
             lambda x: round(x),
             False,
         )
-
-        pls_dataset = dataset[
-            (dataset["r_history"].str.endswith("1")) & (dataset["i"] > 2)
-        ].copy()
-
-        my_collection = Collection(self.w)
-        pls_dataset["last_state"] = pls_dataset.apply(
-            lambda x: my_collection.predict(
-                ",".join(x["t_history"].split(",")[:-1]),
-                ",".join(x["r_history"].split(",")[:-1]),
-            ),
-            axis=1,
-        )
-        pls_dataset["last_s"] = pls_dataset["last_state"].map(lambda x: x[0].item())
-        pls_dataset["last_d"] = pls_dataset["last_state"].map(lambda x: x[1].item())
-        del pls_dataset["last_state"]
-        pls_dataset["last_s_bin"] = pls_dataset["last_s"].map(
-            lambda x: math.pow(1.2, math.floor(math.log(x, 1.2)))
-        )
-        pls_df_group = pls_dataset.groupby(
-            by=["last_s_bin", "delta_t"], group_keys=False
-        ).agg(
-            {
-                "y": ["mean", "count"],
-                "p": "mean",
-                "stability": "mean",
-                "last_d": "mean",
-            }
-        )
-        pls_df_group.reset_index(inplace=True)
-
-        def cal_stability(tmp):
-            delta_t = tmp["delta_t"]
-            recall = tmp["y"]["mean"]
-            count = tmp["y"]["count"]
-            total_count = sum(count)
-
-            def loss(stability):
-                y_pred = power_forgetting_curve(delta_t, stability)
-                logloss = sum(
-                    -(recall * np.log(y_pred) + (1 - recall) * np.log(1 - y_pred))
-                    * count
-                    / total_count
-                )
-                return logloss
-
-            res = minimize(loss, 1, bounds=((0.1, 365),))
-            if res.success:
-                tmp["true_s"] = res.x[0]
-            else:
-                tmp["true_s"] = np.nan
-            tmp["predicted_s"] = tmp["stability"]["mean"].mean()
-            tmp["total_count"] = total_count
-            return tmp
-
-        pls_df_group = (
-            pls_df_group.groupby("last_s_bin", group_keys=False)
-            .apply(cal_stability)
-            .reset_index(drop=True)
-        )
-        pls_df_group.drop_duplicates(subset=[("last_s_bin", "")], inplace=True)
-        fig5 = plt.figure()
-        ax1 = fig5.add_subplot(111)
-        ax1.scatter(
-            pls_df_group["last_s_bin"],
-            pls_df_group["true_s"],
-            s=np.sqrt(pls_df_group["total_count"]),
-            label="True stability",
-            alpha=0.5,
-        )
-        ax1.plot(
-            pls_df_group["last_s_bin"],
-            pls_df_group["predicted_s"],
-            label="Predicted stability",
-            color="orange",
-        )
-        ax1.set_ylim(0, pls_df_group["predicted_s"].max() * 1.1)
-        ax1.legend(loc="upper left")
-        ax1.set_xlabel("Last stability (days)")
-        ax1.semilogx()
-        ax1.set_ylabel("Post-lapse Stability (days)")
-        ax1.grid()
-        ax1.xaxis.set_major_formatter(ticker.FormatStrFormatter("%d"))
-
-        return metrics, (fig1, fig2, fig3, fig4, fig5)
+        return metrics, (fig1, fig2, fig3, fig4)
 
     def calibration_helper(self, calibration_data, key, bin_func, semilogx):
         fig = plt.figure()
@@ -1557,6 +1473,126 @@ class Optimizer:
         ax2.yaxis.set_major_formatter(ticker.FuncFormatter(to_percent))
         ax2.xaxis.set_major_formatter(ticker.FormatStrFormatter("%d"))
         return fig
+
+    def formula_analysis(self):
+        analysis_df = self.dataset[self.dataset["i"] > 2].copy()
+        analysis_df["tensor"] = analysis_df["tensor"].map(lambda x: x[:-1])
+        my_collection = Collection(self.w)
+        stabilities, difficulties = my_collection.batch_predict(analysis_df)
+        analysis_df["last_s"] = stabilities
+        analysis_df["last_d"] = difficulties
+        analysis_df["last_delta_t"] = analysis_df["t_history"].map(
+            lambda x: int(x.split(",")[-1])
+        )
+        analysis_df["last_r"] = power_forgetting_curve(
+            analysis_df["delta_t"], analysis_df["last_s"]
+        )
+        analysis_df["last_s_bin"] = analysis_df["last_s"].map(
+            lambda x: math.pow(1.2, math.floor(math.log(x, 1.2)))
+        )
+        analysis_df["last_d_bin"] = analysis_df["last_d"].map(lambda x: round(x))
+        bins = 20
+        analysis_df["last_r_bin"] = analysis_df["last_r"].map(
+            lambda x: (
+                np.log(
+                    np.minimum(np.floor(np.exp(np.log(bins + 1) * x) - 1), bins - 1) + 1
+                )
+                / np.log(bins)
+            ).round(3)
+        )
+        figs = []
+        for group_key in ("last_s_bin", "last_d_bin", "last_r_bin"):
+            for last_rating in ("1", "3"):
+                analysis_group = (
+                    analysis_df[analysis_df["r_history"].str.endswith(last_rating)]
+                    .groupby(
+                        by=["last_s_bin", "last_d_bin", "last_r_bin", "delta_t"],
+                        group_keys=False,
+                    )
+                    .agg(
+                        {
+                            "y": ["mean", "count"],
+                            "p": "mean",
+                            "stability": "mean",
+                            "last_d": "mean",
+                        }
+                    )
+                )
+                analysis_group.reset_index(inplace=True)
+
+                def cal_stability(tmp):
+                    delta_t = tmp["delta_t"]
+                    recall = tmp["y"]["mean"]
+                    count = tmp["y"]["count"]
+                    total_count = sum(count)
+
+                    def loss(stability):
+                        y_pred = power_forgetting_curve(delta_t, stability)
+                        logloss = sum(
+                            -(
+                                recall * np.log(y_pred)
+                                + (1 - recall) * np.log(1 - y_pred)
+                            )
+                            * count
+                            / total_count
+                        )
+                        return logloss
+
+                    res = minimize(loss, 1, bounds=((0.1, 3650),))
+                    if res.success:
+                        tmp["true_s"] = res.x[0]
+                    else:
+                        tmp["true_s"] = np.nan
+                    tmp["predicted_s"] = np.average(
+                        tmp["stability"]["mean"], weights=count
+                    )
+                    tmp["total_count"] = total_count
+                    return tmp
+
+                analysis_group = (
+                    analysis_group.groupby(by=[group_key], group_keys=False)
+                    .apply(cal_stability)
+                    .reset_index(drop=True)
+                )
+                analysis_group.drop_duplicates(subset=[(group_key, "")], inplace=True)
+                analysis_group.sort_values(by=[group_key], inplace=True)
+                rmse = mean_squared_error(
+                    analysis_group["true_s"],
+                    analysis_group["predicted_s"],
+                    sample_weight=analysis_group["total_count"],
+                    squared=False,
+                )
+                fig = plt.figure()
+                ax1 = fig.add_subplot(111)
+                ax1.set_title(f"RMSE={rmse:.2f}, last rating={last_rating}")
+                ax1.scatter(
+                    analysis_group[group_key],
+                    analysis_group["true_s"],
+                    s=np.sqrt(analysis_group["total_count"]),
+                    label="True stability",
+                    alpha=0.5,
+                )
+                ax1.plot(
+                    analysis_group[group_key],
+                    analysis_group["predicted_s"],
+                    label="Predicted stability",
+                    color="orange",
+                )
+                ax1.set_ylim(0, analysis_group["predicted_s"].max() * 1.1)
+                ax1.legend(loc="upper left")
+                ax1.set_xlabel(group_key)
+                if group_key == "last_s_bin":
+                    ax1.set_ylim(
+                        max(analysis_group["predicted_s"].min(), 0.1),
+                        analysis_group["predicted_s"].max() * 1.1,
+                    )
+                    ax1.set_xscale("log")
+                    ax1.set_yscale("log")
+                ax1.set_ylabel("Next Stability (days)")
+                ax1.grid()
+                ax1.xaxis.set_major_formatter(ticker.FormatStrFormatter("%.2f"))
+                figs.append(fig)
+        return figs
 
     def bw_matrix(self):
         B_W_Metric_raw = self.dataset[["difficulty", "stability", "p", "y"]].copy()
