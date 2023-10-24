@@ -229,6 +229,25 @@ def collate_fn(batch):
     return sequences_padded, delta_ts, labels, seq_lens
 
 
+class CustomLoss(nn.Module):
+
+    def __init__(self):
+        super(CustomLoss, self).__init__()
+
+    def forward(self, predictions, labels):
+        logloss = (-(labels * torch.log(predictions) + (1-labels) * torch.log(1-predictions))).clamp(0.00001, 100)
+        logloss_mean = logloss.mean()
+        average_p = labels.mean()
+        expected_logloss = (-(average_p * torch.log(average_p) + (1-average_p) * torch.log(1-average_p))).clamp(0.00001, 100)
+        norm_logloss = logloss_mean/expected_logloss
+        # norm_logloss = norm_logloss.clamp(0.00001, 100)
+        a = 1
+        b = 1
+        mae = torch.abs(predictions-labels)
+        mae_mean = mae.mean()
+        final = a * norm_logloss + b * mae_mean
+        return final
+
 class Trainer:
     def __init__(
         self,
@@ -251,7 +270,7 @@ class Trainer:
         )
         self.avg_train_losses = []
         self.avg_eval_losses = []
-        self.loss_fn = nn.BCELoss(reduction="none")
+        self.loss_fn = CustomLoss()
 
     def build_dataset(self, train_set: pd.DataFrame, test_set: pd.DataFrame):
         pre_train_set = train_set[train_set["i"] == 2]
