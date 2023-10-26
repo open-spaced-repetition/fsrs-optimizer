@@ -115,6 +115,10 @@ def simulate(
             card_table[col["difficulty"]][true_review & forget] + 2 * w[6], 1, 10
         )
 
+        card_table[col["difficulty"]][true_review & ~forget] = np.clip(
+            card_table[col["difficulty"]][true_review & ~forget] - w[6] * (card_table[col["rating"]][true_review & ~forget] - 3) , 1, 10
+        )
+
         need_learn = card_table[col["due"]] == learn_span
         card_table[col["cost"]][need_learn] = learn_cost
         true_learn = need_learn & (
