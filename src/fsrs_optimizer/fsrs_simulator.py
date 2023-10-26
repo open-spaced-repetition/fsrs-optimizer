@@ -43,8 +43,8 @@ def simulate(
     memorized_cnt_per_day = np.zeros(learn_span)
 
     def stability_after_success(s, r, d, response):
-        hard_penalty = np.where(response == 1, w[15], 1)
-        easy_bonus = np.where(response == 3, w[16], 1)
+        hard_penalty = np.where(response == 2, w[15], 1)
+        easy_bonus = np.where(response == 4, w[16], 1)
         return s * (
             1
             + np.exp(w[8])
@@ -85,10 +85,10 @@ def simulate(
         forget = card_table[col["rand"]] > card_table[col["retrievability"]]
         card_table[col["cost"]][need_review & forget] = forget_cost
         card_table[col["rating"]][need_review & ~forget] = np.random.choice(
-            [1, 2, 3], np.sum(need_review & ~forget), p=review_rating_prob
+            [2, 3, 4], np.sum(need_review & ~forget), p=review_rating_prob
         )
         card_table[col["cost"]][need_review & ~forget] = np.choose(
-            card_table[col["rating"]][need_review & ~forget].astype(int) - 1,
+            card_table[col["rating"]][need_review & ~forget].astype(int) - 2,
             recall_costs,
         )
         true_review = need_review & (
@@ -116,7 +116,10 @@ def simulate(
         )
 
         card_table[col["difficulty"]][true_review & ~forget] = np.clip(
-            card_table[col["difficulty"]][true_review & ~forget] - w[6] * (card_table[col["rating"]][true_review & ~forget] - 3) , 1, 10
+            card_table[col["difficulty"]][true_review & ~forget]
+            - w[6] * (card_table[col["rating"]][true_review & ~forget] - 3),
+            1,
+            10,
         )
 
         need_learn = card_table[col["due"]] == learn_span
@@ -125,9 +128,13 @@ def simulate(
             np.cumsum(card_table[col["cost"]]) <= max_cost_perday
         )
         card_table[col["last_date"]][true_learn] = today
-        first_ratings = np.random.choice(4, np.sum(true_learn), p=first_rating_prob)
-        card_table[col["stability"]][true_learn] = np.choose(first_ratings, w[:4])
-        card_table[col["difficulty"]][true_learn] = w[4] - w[5] * (first_ratings - 3)
+        first_ratings = np.random.choice(
+            [1, 2, 3, 4], np.sum(true_learn), p=first_rating_prob
+        )
+        card_table[col["stability"]][true_learn] = np.choose(first_ratings - 1, w[:4])
+        card_table[col["difficulty"]][true_learn] = np.clip(
+            w[4] - w[5] * (first_ratings - 3), 1, 10
+        )
 
         card_table[col["ivl"]][true_review | true_learn] = np.clip(
             np.round(
@@ -146,7 +153,7 @@ def simulate(
         review_cnt_per_day[today] = np.sum(true_review)
         learn_cnt_per_day[today] = np.sum(true_learn)
         memorized_cnt_per_day[today] = card_table[col["retrievability"]].sum()
-    return card_table, review_cnt_per_day, learn_cnt_per_day, memorized_cnt_per_day
+    return None, review_cnt_per_day, learn_cnt_per_day, memorized_cnt_per_day
 
 
 def optimal_retention(
@@ -241,3 +248,38 @@ def optimal_retention(
             break
 
     return optimal
+
+
+if __name__ == "__main__":
+    np.set_printoptions(threshold=10000, precision=2, linewidth=1000)
+    w = [
+        0.4,
+        0.9,
+        2.3,
+        10.9,
+        4.93,
+        0.94,
+        0.86,
+        0.01,
+        1.49,
+        0.14,
+        0.94,
+        2.18,
+        0.05,
+        0.34,
+        1.26,
+        0.29,
+        2.61,
+    ]
+    print(
+        simulate(
+            w=w,
+            forget_cost=50 * 2.5,
+        )
+    )
+    print(
+        optimal_retention(
+            w=w,
+            forget_cost=50 * 2.5,
+        )
+    )
