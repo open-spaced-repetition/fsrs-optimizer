@@ -153,7 +153,7 @@ def simulate(
         review_cnt_per_day[today] = np.sum(true_review)
         learn_cnt_per_day[today] = np.sum(true_learn)
         memorized_cnt_per_day[today] = card_table[col["retrievability"]].sum()
-    return None, review_cnt_per_day, learn_cnt_per_day, memorized_cnt_per_day
+    return card_table, review_cnt_per_day, learn_cnt_per_day, memorized_cnt_per_day
 
 
 def optimal_retention(
@@ -248,38 +248,3 @@ def optimal_retention(
             break
 
     return optimal
-
-
-if __name__ == "__main__":
-    np.set_printoptions(threshold=10000, precision=2, linewidth=1000)
-    w = [
-        0.4,
-        0.9,
-        2.3,
-        10.9,
-        4.93,
-        0.94,
-        0.86,
-        0.01,
-        1.49,
-        0.14,
-        0.94,
-        2.18,
-        0.05,
-        0.34,
-        1.26,
-        0.29,
-        2.61,
-    ]
-    print(
-        simulate(
-            w=w,
-            forget_cost=50 * 2.5,
-        )
-    )
-    print(
-        optimal_retention(
-            w=w,
-            forget_cost=50 * 2.5,
-        )
-    )
