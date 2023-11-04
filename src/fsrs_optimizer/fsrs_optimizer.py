@@ -23,9 +23,9 @@ from tqdm.auto import tqdm
 import warnings
 
 try:
-    from .fsrs_simulator import optimal_retention, simulate
-except ImportError:
-    from fsrs_simulator import optimal_retention, simulate
+    from .fsrs_simulator import optimal_retention, simulate, next_interval, power_forgetting_curve
+except:
+    from fsrs_simulator import optimal_retention, simulate, next_interval, power_forgetting_curve
 
 warnings.filterwarnings("ignore", category=UserWarning)
 
@@ -33,14 +33,6 @@ New = 0
 Learning = 1
 Review = 2
 Relearning = 3
-
-
-def power_forgetting_curve(t, s):
-    return (1 + t / (9 * s)) ** -1
-
-
-def next_interval(s, r):
-    return np.maximum(1, np.round(9 * s * (1 / r - 1)))
 
 
 class FSRS(nn.Module):

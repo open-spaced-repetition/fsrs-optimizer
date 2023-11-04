@@ -1,6 +1,20 @@
 import numpy as np
 from tqdm import trange, tqdm
 
+
+DECAY = -0.5
+FACTOR = 0.9 ** (1 / DECAY) - 1
+
+
+def power_forgetting_curve(t, s):
+    return (1 + FACTOR * t / s) ** DECAY
+
+
+def next_interval(s, r):
+    ivl = s / FACTOR * (r ** (1 / DECAY) - 1)
+    return np.maximum(1, np.round(ivl))
+
+
 columns = [
     "difficulty",
     "stability",
@@ -72,13 +86,10 @@ def simulate(
         card_table[col["delta_t"]][has_learned] = (
             today - card_table[col["last_date"]][has_learned]
         )
-        card_table[col["retrievability"]][has_learned] = np.power(
-            1
-            + card_table[col["delta_t"]][has_learned]
-            / (9 * card_table[col["stability"]][has_learned]),
-            -1,
+        card_table[col["retrievability"]][has_learned] = power_forgetting_curve(
+            card_table[col["delta_t"]][has_learned],
+            card_table[col["stability"]][has_learned],
         )
-
         card_table[col["cost"]] = 0
         need_review = card_table[col["due"]] <= today
         card_table[col["rand"]][need_review] = np.random.rand(np.sum(need_review))
@@ -137,11 +148,9 @@ def simulate(
         )
 
         card_table[col["ivl"]][true_review | true_learn] = np.clip(
-            np.round(
-                9
-                * card_table[col["stability"]][true_review | true_learn]
-                * (1 / request_retention - 1),
-                0,
+            next_interval(
+                card_table[col["stability"]][true_review | true_learn],
+                request_retention,
             ),
             1,
             max_ivl,
