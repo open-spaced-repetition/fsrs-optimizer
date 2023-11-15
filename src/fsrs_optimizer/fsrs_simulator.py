@@ -17,6 +17,8 @@ columns = [
 ]
 col = {key: i for i, key in enumerate(columns)}
 
+SAMPLE_SIZE = 5
+
 
 def simulate(
     w,
@@ -156,95 +158,236 @@ def simulate(
     return card_table, review_cnt_per_day, learn_cnt_per_day, memorized_cnt_per_day
 
 
-def optimal_retention(
+def sample(
+    r,
     w,
-    deck_size=10000,
-    learn_span=365,
-    max_cost_perday=1800,
-    max_ivl=36500,
-    recall_costs=np.array([14, 10, 6]),
-    forget_cost=50,
-    learn_cost=20,
-    first_rating_prob=np.array([0.15, 0.2, 0.6, 0.05]),
-    review_rating_prob=np.array([0.3, 0.6, 0.1]),
+    deck_size,
+    learn_span,
+    max_cost_perday,
+    max_ivl,
+    recall_costs,
+    forget_cost,
+    learn_cost,
+    first_rating_prob,
+    review_rating_prob,
 ):
-    low = 0.75
-    high = 0.95
-    optimal = 0.85
-    epsilon = 0.01
-
-    pbar = tqdm(desc="optimization", colour="red", total=10)
-    for _ in range(10):
-        mid1 = low + (high - low) / 3
-        mid2 = high - (high - low) / 3
-
-        def sample(
-            n,
-            mid,
+    memorization = []
+    for i in range(SAMPLE_SIZE):
+        _, _, _, memorized_cnt_per_day = simulate(
             w,
-            deck_size,
-            learn_span,
-            max_cost_perday,
-            max_ivl,
-            recall_costs,
-            forget_cost,
-            learn_cost,
-            first_rating_prob,
-            review_rating_prob,
-        ):
-            memorization = []
-            for i in range(n):
-                _, _, _, memorized_cnt_per_day = simulate(
-                    w,
-                    request_retention=mid,
-                    deck_size=deck_size,
-                    learn_span=learn_span,
-                    max_cost_perday=max_cost_perday,
-                    max_ivl=max_ivl,
-                    recall_costs=recall_costs,
-                    forget_cost=forget_cost,
-                    learn_cost=learn_cost,
-                    first_rating_prob=first_rating_prob,
-                    review_rating_prob=review_rating_prob,
-                    seed=42 + i,
-                )
-                memorization.append(memorized_cnt_per_day[-1])
-            return np.mean(memorization)
+            request_retention=r,
+            deck_size=deck_size,
+            learn_span=learn_span,
+            max_cost_perday=max_cost_perday,
+            max_ivl=max_ivl,
+            recall_costs=recall_costs,
+            forget_cost=forget_cost,
+            learn_cost=learn_cost,
+            first_rating_prob=first_rating_prob,
+            review_rating_prob=review_rating_prob,
+            seed=42 + i,
+        )
+        memorization.append(memorized_cnt_per_day[-1])
+    return np.mean(memorization)
 
-        if sample(
-            5,
-            mid1,
-            w,
-            deck_size,
-            learn_span,
-            max_cost_perday,
-            max_ivl,
-            recall_costs,
-            forget_cost,
-            learn_cost,
-            first_rating_prob,
-            review_rating_prob,
-        ) > sample(
-            5,
-            mid2,
-            w,
-            deck_size,
-            learn_span,
-            max_cost_perday,
-            max_ivl,
-            recall_costs,
-            forget_cost,
-            learn_cost,
-            first_rating_prob,
-            review_rating_prob,
-        ):
-            high = mid2
+
+def bracket(xa=0.75, xb=0.95, maxiter=20, **kwargs):
+    u_lim = 0.95
+    l_lim = 0.75
+
+    grow_limit = 100.0
+    gold = 1.6180339
+    verysmall_num = 1e-21
+
+    fa = -sample(xa, **kwargs)
+    fb = -sample(xb, **kwargs)
+    funccalls = 2
+
+    if fa < fb:  # Switch so fa > fb
+        xa, xb = xb, xa
+        fa, fb = fb, fa
+    xc = max(min(xb + gold * (xb - xa), u_lim), l_lim)
+    fc = -sample(xc, **kwargs)
+    funccalls += 1
+
+    iter = 0
+    while fc < fb:
+        tmp1 = (xb - xa) * (fb - fc)
+        tmp2 = (xb - xc) * (fb - fa)
+        val = tmp2 - tmp1
+        if np.abs(val) < verysmall_num:
+            denom = 2.0 * verysmall_num
         else:
-            low = mid1
+            denom = 2.0 * val
+        w = max(min((xb - ((xb - xc) * tmp2 - (xb - xa) * tmp1) / denom), u_lim), l_lim)
+        wlim = max(min(xb + grow_limit * (xc - xb), u_lim), l_lim)
 
-        optimal = (low + high) / 2
-        pbar.update(1)
-        if high - low < epsilon:
+        if iter > maxiter:
+            print("Failed to converge")
             break
 
-    return optimal
+        iter += 1
+        if (w - xc) * (xb - w) > 0.0:
+            fw = -sample(w, **kwargs)
+            funccalls += 1
+            if fw < fc:
+                xa = max(min(xb, u_lim), l_lim)
+                xb = max(min(w, u_lim), l_lim)
+                fa = fb
+                fb = fw
+                break
+            elif fw > fb:
+                xc = max(min(w, u_lim), l_lim)
+                fc = fw
+                break
+            w = max(min(xc + gold * (xc - xb), u_lim), l_lim)
+            fw = -sample(w, **kwargs)
+            funccalls += 1
+        elif (w - wlim) * (wlim - xc) >= 0.0:
+            w = wlim
+            fw = -sample(w, **kwargs)
+            funccalls += 1
+        elif (w - wlim) * (xc - w) > 0.0:
+            fw = -sample(w, **kwargs)
+            funccalls += 1
+            if fw < fc:
+                xb = max(min(xc, u_lim), l_lim)
+                xc = max(min(w, u_lim), l_lim)
+                w = max(min(xc + gold * (xc - xb), u_lim), l_lim)
+                fb = fc
+                fc = fw
+                fw = -sample(w, **kwargs)
+                funccalls += 1
+        else:
+            w = max(min(xc + gold * (xc - xb), u_lim), l_lim)
+            fw = -sample(w, **kwargs)
+            funccalls += 1
+        xa = max(min(xb, u_lim), l_lim)
+        xb = max(min(xc, u_lim), l_lim)
+        xc = max(min(w, u_lim), l_lim)
+        fa = fb
+        fb = fc
+        fc = fw
+
+    return xa, xb, xc, fa, fb, fc, funccalls
+
+
+def optimal_retention(tol=0.005, maxiter=20, **kwargs):
+    mintol = 1.0e-11
+    cg = 0.3819660
+
+    xa, xb, xc, fa, fb, fc, funccalls = bracket(
+        xa=0.75, xb=0.95, maxiter=maxiter, **kwargs
+    )
+
+    #################################
+    # BEGIN
+    #################################
+    x = w = v = xb
+    fw = fv = fx = fb
+    if xa < xc:
+        a = xa
+        b = xc
+    else:
+        a = xc
+        b = xa
+    deltax = 0.0
+    iter = 0
+
+    while iter < maxiter:
+        tol1 = tol * np.abs(x) + mintol
+        tol2 = 2.0 * tol1
+        xmid = 0.5 * (a + b)
+        # check for convergence
+        if np.abs(x - xmid) < (tol2 - 0.5 * (b - a)):
+            break
+
+        if np.abs(deltax) <= tol1:
+            if x >= xmid:
+                deltax = a - x  # do a golden section step
+            else:
+                deltax = b - x
+            rat = cg * deltax
+        else:  # do a parabolic step
+            tmp1 = (x - w) * (fx - fv)
+            tmp2 = (x - v) * (fx - fw)
+            p = (x - v) * tmp2 - (x - w) * tmp1
+            tmp2 = 2.0 * (tmp2 - tmp1)
+            if tmp2 > 0.0:
+                p = -p
+            tmp2 = np.abs(tmp2)
+            dx_temp = deltax
+            deltax = rat
+            # check parabolic fit
+            if (
+                (p > tmp2 * (a - x))
+                and (p < tmp2 * (b - x))
+                and (np.abs(p) < np.abs(0.5 * tmp2 * dx_temp))
+            ):
+                rat = p * 1.0 / tmp2  # if parabolic step is useful
+                u = x + rat
+                if (u - a) < tol2 or (b - u) < tol2:
+                    if xmid - x >= 0:
+                        rat = tol1
+                    else:
+                        rat = -tol1
+            else:
+                if x >= xmid:
+                    deltax = a - x  # if it's not do a golden section step
+                else:
+                    deltax = b - x
+                rat = cg * deltax
+
+        if np.abs(rat) < tol1:  # update by at least tol1
+            if rat >= 0:
+                u = x + tol1
+            else:
+                u = x - tol1
+        else:
+            u = x + rat
+        fu = -sample(u, **kwargs)  # calculate new output value
+        funccalls += 1
+
+        if fu > fx:  # if it's bigger than current
+            if u < x:
+                a = u
+            else:
+                b = u
+            if (fu <= fw) or (w == x):
+                v = w
+                w = u
+                fv = fw
+                fw = fu
+            elif (fu <= fv) or (v == x) or (v == w):
+                v = u
+                fv = fu
+        else:
+            if u >= x:
+                a = x
+            else:
+                b = x
+            v = w
+            w = x
+            x = u
+            fv = fw
+            fw = fx
+            fx = fu
+
+        iter += 1
+    #################################
+    # END
+    #################################
+
+    xmin = x
+    fval = fx
+
+    success = (
+        iter < maxiter
+        and not (np.isnan(fval) or np.isnan(xmin))
+        and (0.75 <= xmin <= 0.95)
+    )
+
+    if success:
+        return xmin
+    else:
+        raise Exception("The algorithm terminated without finding a valid value.")
