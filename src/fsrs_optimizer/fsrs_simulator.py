@@ -158,6 +158,10 @@ def simulate(
     return card_table, review_cnt_per_day, learn_cnt_per_day, memorized_cnt_per_day
 
 
+def optimal_retention(**kwargs):
+    return brent(**kwargs)
+
+
 def sample(
     r,
     w,
@@ -189,6 +193,24 @@ def sample(
         )
         memorization.append(memorized_cnt_per_day[-1])
     return np.mean(memorization)
+
+
+def native(**kwargs):
+    low = 0.75
+    high = 0.95
+    optimal = 0.85
+    epsilon = 0.01
+    for _ in range(10):
+        mid1 = low + (high - low) / 3
+        mid2 = high - (high - low) / 3
+        if sample(r=mid1, **kwargs) > sample(r=mid2, **kwargs):
+            high = mid2
+        else:
+            low = mid1
+        optimal = (low + high) / 2
+        if high - low < epsilon:
+            break
+    return optimal
 
 
 def bracket(xa=0.75, xb=0.95, maxiter=20, **kwargs):
@@ -272,7 +294,7 @@ def bracket(xa=0.75, xb=0.95, maxiter=20, **kwargs):
     return xa, xb, xc, fa, fb, fc, funccalls
 
 
-def optimal_retention(tol=0.005, maxiter=20, **kwargs):
+def brent(tol=0.005, maxiter=20, **kwargs):
     mintol = 1.0e-11
     cg = 0.3819660
 
@@ -391,3 +413,49 @@ def optimal_retention(tol=0.005, maxiter=20, **kwargs):
         return xmin
     else:
         raise Exception("The algorithm terminated without finding a valid value.")
+
+
+if __name__ == "__main__":
+    default_params = {
+        "w": [
+            0.4,
+            0.9,
+            2.3,
+            10.9,
+            4.93,
+            0.94,
+            0.86,
+            0.01,
+            1.49,
+            0.14,
+            0.94,
+            2.18,
+            0.05,
+            0.34,
+            1.26,
+            0.29,
+            2.61,
+        ],
+        "deck_size": 10000,
+        "learn_span": 365,
+        "max_cost_perday": 1800,
+        "max_ivl": 36500,
+        "recall_costs": np.array([14, 10, 6]),
+        "forget_cost": 50,
+        "learn_cost": 20,
+        "first_rating_prob": np.array([0.15, 0.2, 0.6, 0.05]),
+        "review_rating_prob": np.array([0.3, 0.6, 0.1]),
+    }
+    import time
+
+    start = time.time()
+    memo1 = native(**default_params)
+    print("Native: ", memo1)
+    print("Time: ", time.time() - start)
+    print("Memorization: ", sample(r=memo1, **default_params))
+
+    start = time.time()
+    memo2 = brent(**default_params)
+    print("Brent: ", memo2)
+    print("Time: ", time.time() - start)
+    print("Memorization: ", sample(r=memo2, **default_params))
