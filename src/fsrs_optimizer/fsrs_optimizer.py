@@ -79,10 +79,14 @@ class FSRS(nn.Module):
         :param state: shape[batch_size, 2], state[:,0] is stability, state[:,1] is difficulty
         :return state:
         """
+
+        keys = torch.tensor([1, 2, 3, 4])
+        keys = keys.view(1, -1).expand(X[:, 1].long().size(0), -1)
+        index = (X[:, 1].long().unsqueeze(1) == keys).nonzero(as_tuple=True)
+        grade_derived_r = torch.ones_like(X[:, 1], dtype=torch.float32)
+        grade_derived_r[index[0]] = grade_to_r[index[1]]
+
         if torch.equal(state, torch.zeros_like(state)):
-            keys = torch.tensor([1, 2, 3, 4])
-            keys = keys.view(1, -1).expand(X[:, 1].long().size(0), -1)
-            index = (X[:, 1].long().unsqueeze(1) == keys).nonzero(as_tuple=True)
             # first learn, init memory states
             new_s = torch.ones_like(state[:, 0])
             new_s[index[0]] = self.w[index[1]]
@@ -1020,6 +1024,49 @@ class Optimizer:
         )
         self.dataset["group"] = self.dataset["r_history"] + self.dataset["t_history"]
         tqdm.write("Tensorized!")
+
+        from scipy.optimize import curve_fit
+
+        tmp = self.dataset.copy()
+
+        tmp["lapse"] = tmp["r_history"].str.count("1")
+
+        # don't change the numbers in the rounding functions below, I have fine-tuned them
+        tmp["delta_t"] = tmp["delta_t"].map(
+            lambda x: round(1.2 * math.pow(1.4, math.floor(math.log(x, 1.4))), 2)
+        )
+        tmp["i"] = tmp["i"].map(
+            lambda x: round(1.115 * math.pow(1.1, math.floor(math.log(x, 1.1))), 2)
+        )
+        tmp["lapse"] = tmp["lapse"].map(lambda x: min(x, 8))
+
+        grade_r_matrix = (
+            tmp.groupby(by=["delta_t", "i", "lapse"])
+            .agg({"y": ["count", "mean"], "review_rating": "mean"})
+            .reset_index()
+        )
+        grade_r_matrix.sort_values(by=[("review_rating", "mean")], inplace=True, ignore_index=True)
+        grade_means = grade_r_matrix["review_rating"]["mean"]
+        r_means = (
+            grade_r_matrix["y"]["mean"] * grade_r_matrix["y"]["count"]
+            + 1 * grade_r_matrix["y"]["mean"].mean()
+        ) / (grade_r_matrix["y"]["count"] + 1)
+        count = grade_r_matrix["y"]["count"]
+
+        def func(x, a, b):
+            return 1 - (np.power(1 - np.power((x - 1) / 3, a), b))
+
+        params, covs = curve_fit(
+            func,
+            grade_means,
+            r_means,
+            bounds=((0.25, 0.25), (4, 4)),
+            sigma=1 / np.sqrt(count),
+        )
+        grade_derived_r_values = [func(x, *params) for x in [1, 2, 3, 4]]
+        global grade_to_r
+        grade_to_r = torch.tensor(grade_derived_r_values, dtype=torch.float32)
+        print("grade_to_r:", grade_to_r)
 
         w = []
         plots = []
