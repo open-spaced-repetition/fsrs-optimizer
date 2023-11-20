@@ -294,7 +294,7 @@ def bracket(xa=0.75, xb=0.95, maxiter=20, **kwargs):
     return xa, xb, xc, fa, fb, fc, funccalls
 
 
-def brent(tol=0.005, maxiter=20, **kwargs):
+def brent(tol=0.01, maxiter=20, **kwargs):
     mintol = 1.0e-11
     cg = 0.3819660
 
