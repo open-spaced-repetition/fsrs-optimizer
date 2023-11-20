@@ -1267,7 +1267,7 @@ class Optimizer:
         forget_cost *= loss_aversion
 
         self.optimal_retention = optimal_retention(
-            self.w,
+            w=self.w,
             deck_size=deck_size,
             learn_span=learn_span,
             max_cost_perday=max_cost_perday,
