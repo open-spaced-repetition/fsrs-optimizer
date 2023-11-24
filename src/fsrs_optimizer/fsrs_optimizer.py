@@ -443,9 +443,17 @@ class Optimizer:
             SELECT id
             FROM cards
             WHERE queue != 0
+            AND id <= {time.time() * 1000}
             {"AND queue != -1" if filter_out_suspended_cards else ""}
             {"AND flags NOT IN %s" % flags2str(filter_out_flags) if len(filter_out_flags) > 0 else ""}
         )
+        AND ease BETWEEN 1 AND 4
+        AND (
+            type != 3
+            OR factor != 0
+        )
+        AND id <= {time.time() * 1000}
+        ORDER BY cid, id
         """
         )
         revlog = res.fetchall()
@@ -463,14 +471,6 @@ class Optimizer:
             "review_duration",
             "review_state",
         ]
-        df = df[
-            (df["card_id"] <= time.time() * 1000)
-            & (df["review_time"] <= time.time() * 1000)
-        ].copy()
-        df_set_due_date = df[(df["review_state"] == 4) & (df["ivl"] > 0)]
-        df.drop(df_set_due_date.index, inplace=True)
-        df.sort_values(by=["card_id", "review_time"], inplace=True, ignore_index=True)
-
         df["is_learn_start"] = (df["review_state"] == 0) & (
             df["review_state"].shift() != 0
         )
@@ -483,10 +483,11 @@ class Optimizer:
         )
         df["mask"] = df["last_learn_start"] <= df["sequence_group"]
         df = df[df["mask"] == True].copy()
-        df = df[(df["review_state"] != 4)].copy()
-        df = df[(df["review_state"] != 3) | (df["factor"] != 0)].copy()
         df["review_state"] = df["review_state"] + 1
         df.loc[df["is_learn_start"], "review_state"] = New
+        df = df.groupby("card_id").filter(
+            lambda group: group["review_state"].iloc[0] == New
+        )
         df.drop(
             columns=[
                 "is_learn_start",
@@ -568,29 +569,10 @@ class Optimizer:
         df.drop_duplicates(["card_id", "real_days"], keep="first", inplace=True)
         df["delta_t"] = df.real_days.diff()
         df["delta_t"].fillna(0, inplace=True)
-        df.dropna(inplace=True)
         df["i"] = df.groupby("card_id").cumcount() + 1
         df.loc[df["i"] == 1, "delta_t"] = 0
-        df = df.groupby("card_id").filter(
-            lambda group: group["review_state"].iloc[0] == Learning
-        )
         if df.empty:
             raise ValueError("Training data is inadequate.")
-        df["prev_review_state"] = (
-            df.groupby("card_id")["review_state"].shift(1).fillna(Learning).astype(int)
-        )
-        df["helper"] = (
-            (df["review_state"] == Learning)
-            & (
-                (df["prev_review_state"] == Review)
-                | (df["prev_review_state"] == Relearning)
-            )
-            & (df["i"] > 1)
-        ).astype(int)
-        df["helper"] = df.groupby("card_id")["helper"].cumsum()
-        df = df[df["helper"] == 0]
-        del df["prev_review_state"]
-        del df["helper"]
 
         def cum_concat(x):
             return list(accumulate(x))
@@ -771,7 +753,7 @@ class Optimizer:
             df["last_recall"] = df["r_history"].map(lambda x: x[-1])
             df = df[
                 df.groupby(["i", "r_history"], group_keys=False)["group_cnt"].transform(
-                    max
+                    "max"
                 )
                 == df["group_cnt"]
             ]
