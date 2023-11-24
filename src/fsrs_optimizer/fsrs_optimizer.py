@@ -753,7 +753,7 @@ class Optimizer:
             df["last_recall"] = df["r_history"].map(lambda x: x[-1])
             df = df[
                 df.groupby(["i", "r_history"], group_keys=False)["group_cnt"].transform(
-                    max
+                    "max"
                 )
                 == df["group_cnt"]
             ]
