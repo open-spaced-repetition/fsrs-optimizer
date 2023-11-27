@@ -507,45 +507,49 @@ class Optimizer:
         df = pd.read_csv("./revlog.csv")
         df.sort_values(by=["card_id", "review_time"], inplace=True, ignore_index=True)
 
-        new_card_revlog = df[
-            (df["review_state"] == New) & (df["review_rating"].isin([1, 2, 3, 4]))
-        ]
-        self.first_rating_prob = np.zeros(4)
-        self.first_rating_prob[
-            new_card_revlog["review_rating"].value_counts().index - 1
-        ] = (
-            new_card_revlog["review_rating"].value_counts()
-            / new_card_revlog["review_rating"].count()
-        )
-        recall_card_revlog = df[
-            (df["review_state"] == Review) & (df["review_rating"].isin([2, 3, 4]))
-        ]
-        self.review_rating_prob = np.zeros(3)
-        self.review_rating_prob[
-            recall_card_revlog["review_rating"].value_counts().index - 2
-        ] = (
-            recall_card_revlog["review_rating"].value_counts()
-            / recall_card_revlog["review_rating"].count()
-        )
+        if "review_state" in df.columns and "review_duration" in df.columns:
+            new_card_revlog = df[
+                (df["review_state"] == New) & (df["review_rating"].isin([1, 2, 3, 4]))
+            ]
+            self.first_rating_prob = np.zeros(4)
+            self.first_rating_prob[
+                new_card_revlog["review_rating"].value_counts().index - 1
+            ] = (
+                new_card_revlog["review_rating"].value_counts()
+                / new_card_revlog["review_rating"].count()
+            )
+            recall_card_revlog = df[
+                (df["review_state"] == Review) & (df["review_rating"].isin([2, 3, 4]))
+            ]
+            self.review_rating_prob = np.zeros(3)
+            self.review_rating_prob[
+                recall_card_revlog["review_rating"].value_counts().index - 2
+            ] = (
+                recall_card_revlog["review_rating"].value_counts()
+                / recall_card_revlog["review_rating"].count()
+            )
 
-        df["review_state"] = df["review_state"].map(
-            lambda x: x if x != New else Learning
-        )
+            df["review_state"] = df["review_state"].map(
+                lambda x: x if x != New else Learning
+            )
 
-        self.recall_costs = np.zeros(3)
-        recall_costs = recall_card_revlog.groupby(by="review_rating")[
-            "review_duration"
-        ].mean()
-        self.recall_costs[recall_costs.index - 2] = recall_costs / 1000
+            self.recall_costs = np.zeros(3)
+            recall_costs = recall_card_revlog.groupby(by="review_rating")[
+                "review_duration"
+            ].mean()
+            self.recall_costs[recall_costs.index - 2] = recall_costs / 1000
 
-        self.state_sequence = np.array(df["review_state"])
-        self.duration_sequence = np.array(df["review_duration"])
-        self.learn_cost = round(
-            df[df["review_state"] == Learning]["review_duration"].sum()
-            / len(df["card_id"].unique())
-            / 1000,
-            1,
-        )
+            self.state_sequence = np.array(df["review_state"])
+            self.duration_sequence = np.array(df["review_duration"])
+            self.learn_cost = round(
+                df[df["review_state"] == Learning]["review_duration"].sum()
+                / len(df["card_id"].unique())
+                / 1000,
+                1,
+            )
+
+            df["review_duration"] = df["review_duration"].astype(int)
+            df["review_state"] = df["review_state"].astype(int)
 
         df["review_date"] = pd.to_datetime(df["review_time"] // 1000, unit="s")
         df["review_date"] = (
@@ -643,8 +647,6 @@ class Optimizer:
 
         df["review_time"] = df["review_time"].astype(int)
         df["review_rating"] = df["review_rating"].astype(int)
-        df["review_duration"] = df["review_duration"].astype(int)
-        df["review_state"] = df["review_state"].astype(int)
         df["delta_t"] = df["delta_t"].astype(int)
         df["i"] = df["i"].astype(int)
         df["t_history"] = df["t_history"].astype(str)
@@ -1208,7 +1210,10 @@ class Optimizer:
         state_block = dict()
         state_count = dict()
         state_duration = dict()
-        last_state = self.state_sequence[0]
+        try:
+            last_state = self.state_sequence[0]
+        except:
+            return ()
         state_block[last_state] = 1
         state_count[last_state] = 1
         state_duration[last_state] = self.duration_sequence[0]
