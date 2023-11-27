@@ -1218,7 +1218,10 @@ class Optimizer:
         state_block = dict()
         state_count = dict()
         state_duration = dict()
-        last_state = self.state_sequence[0]
+        try:
+            last_state = self.state_sequence[0]
+        except:
+            return ()
         state_block[last_state] = 1
         state_count[last_state] = 1
         state_duration[last_state] = self.duration_sequence[0]
