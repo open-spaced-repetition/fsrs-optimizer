@@ -34,6 +34,26 @@ Learning = 1
 Review = 2
 Relearning = 3
 
+DEFAULT_WEIGHT = [
+    0.27,
+    0.74,
+    1.3,
+    5.52,
+    5.1,
+    1.02,
+    0.78,
+    0.06,
+    1.57,
+    0.14,
+    0.94,
+    2.16,
+    0.06,
+    0.31,
+    1.34,
+    0.21,
+    2.69,
+]
+
 
 class FSRS(nn.Module):
     def __init__(self, w: List[float]):
@@ -768,25 +788,7 @@ class Optimizer:
 
     def define_model(self):
         """Step 3"""
-        self.init_w = [
-            0.4,
-            0.9,
-            2.3,
-            10.9,
-            4.93,
-            0.94,
-            0.86,
-            0.01,
-            1.49,
-            0.14,
-            0.94,
-            2.18,
-            0.05,
-            0.34,
-            1.26,
-            0.29,
-            2.61,
-        ]
+        self.init_w = DEFAULT_WEIGHT
         """
         For details about the parameters, please see: 
         https://github.com/open-spaced-repetition/fsrs4anki/wiki/The-Algorithm
@@ -813,7 +815,7 @@ class Optimizer:
         rating_count = {}
         average_recall = self.dataset["y"].mean()
         plots = []
-        r_s0_default = {"1": 0.4, "2": 0.9, "3": 2.3, "4": 10.9}
+        r_s0_default = {str(i): DEFAULT_WEIGHT[i - 1] for i in range(1, 5)}
 
         for first_rating in ("1", "2", "3", "4"):
             group = self.S0_dataset_group[
@@ -975,7 +977,9 @@ class Optimizer:
                 item[1] for item in sorted(rating_stability.items(), key=lambda x: x[0])
             ]
 
-        self.init_w[0:4] = init_s0
+        self.init_w[0:4] = list(
+            map(lambda x: max(min(365, x), 0.1), init_s0)
+        )
 
         tqdm.write(f"Pretrain finished!")
         return plots
