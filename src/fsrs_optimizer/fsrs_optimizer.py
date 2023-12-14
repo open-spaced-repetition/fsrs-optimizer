@@ -651,7 +651,7 @@ class Optimizer:
                 has_been_removed += count
             group = group[
                 group["delta_t"].isin(
-                    grouped_group[grouped_group[("y", "count")] >= count]["delta_t"]
+                    grouped_group[grouped_group[("y", "count")] > count]["delta_t"]
                 )
             ]
             return group
@@ -857,7 +857,7 @@ class Optimizer:
             res = minimize(
                 loss,
                 x0=init_s0,
-                bounds=((0.1, 365),),
+                bounds=((0.1, 100),),
                 options={"maxiter": int(sum(weight))},
             )
             params = res.x
@@ -986,7 +986,7 @@ class Optimizer:
                 item[1] for item in sorted(rating_stability.items(), key=lambda x: x[0])
             ]
 
-        self.init_w[0:4] = list(map(lambda x: max(min(365, x), 0.1), init_s0))
+        self.init_w[0:4] = list(map(lambda x: max(min(100, x), 0.1), init_s0))
 
         tqdm.write(f"Pretrain finished!")
         return plots
