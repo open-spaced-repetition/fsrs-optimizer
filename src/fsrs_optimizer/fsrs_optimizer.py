@@ -23,9 +23,19 @@ from tqdm.auto import tqdm
 import warnings
 
 try:
-    from .fsrs_simulator import optimal_retention, simulate, next_interval, power_forgetting_curve
+    from .fsrs_simulator import (
+        optimal_retention,
+        simulate,
+        next_interval,
+        power_forgetting_curve,
+    )
 except:
-    from fsrs_simulator import optimal_retention, simulate, next_interval, power_forgetting_curve
+    from fsrs_simulator import (
+        optimal_retention,
+        simulate,
+        next_interval,
+        power_forgetting_curve,
+    )
 
 warnings.filterwarnings("ignore", category=UserWarning)
 
@@ -831,7 +841,7 @@ class Optimizer:
                 group["y"]["count"] + 1
             )
             count = group["y"]["count"]
-            total_count = sum(count)
+            weight = np.sqrt(count)
 
             init_s0 = r_s0_default[first_rating]
 
@@ -839,22 +849,21 @@ class Optimizer:
                 y_pred = power_forgetting_curve(delta_t, stability)
                 logloss = sum(
                     -(recall * np.log(y_pred) + (1 - recall) * np.log(1 - y_pred))
-                    * count
-                    / total_count
+                    * weight
                 )
-                l1 = np.abs(stability - init_s0) / total_count / 16
+                l1 = np.abs(stability - init_s0) / 16
                 return logloss + l1
 
             res = minimize(
                 loss,
                 x0=init_s0,
                 bounds=((0.1, 365),),
-                options={"maxiter": int(np.sqrt(total_count))},
+                options={"maxiter": int(sum(weight))},
             )
             params = res.x
             stability = params[0]
             rating_stability[int(first_rating)] = stability
-            rating_count[int(first_rating)] = total_count
+            rating_count[int(first_rating)] = sum(count)
             predict_recall = power_forgetting_curve(delta_t, *params)
             rmse = mean_squared_error(
                 recall, predict_recall, sample_weight=count, squared=False
@@ -869,7 +878,7 @@ class Optimizer:
                     power_forgetting_curve(np.linspace(0, 30), *params),
                     label=f"Weighted fit (RMSE: {rmse:.4f})",
                 )
-                count_percent = np.array([x / total_count for x in count])
+                count_percent = np.array([x / sum(count) for x in count])
                 ax.scatter(delta_t, recall, s=count_percent * 1000, alpha=0.5)
                 ax.legend(loc="upper right", fancybox=True, shadow=False)
                 ax.grid(True)
@@ -877,7 +886,7 @@ class Optimizer:
                 ax.set_xlabel("Interval")
                 ax.set_ylabel("Recall")
                 ax.set_title(
-                    f"Forgetting curve for first rating {first_rating} (n={total_count}, s={stability:.2f})"
+                    f"Forgetting curve for first rating {first_rating} (n={sum(count)}, s={stability:.2f})"
                 )
                 plots.append(fig)
                 tqdm.write(str(rating_stability))
@@ -977,9 +986,7 @@ class Optimizer:
                 item[1] for item in sorted(rating_stability.items(), key=lambda x: x[0])
             ]
 
-        self.init_w[0:4] = list(
-            map(lambda x: max(min(365, x), 0.1), init_s0)
-        )
+        self.init_w[0:4] = list(map(lambda x: max(min(365, x), 0.1), init_s0))
 
         tqdm.write(f"Pretrain finished!")
         return plots
