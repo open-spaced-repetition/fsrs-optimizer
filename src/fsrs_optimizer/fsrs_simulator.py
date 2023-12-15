@@ -1,6 +1,20 @@
 import numpy as np
 from tqdm import trange, tqdm
 
+
+DECAY = -0.5
+FACTOR = 0.9 ** (1 / DECAY) - 1
+
+
+def power_forgetting_curve(t, s):
+    return (1 + FACTOR * t / s) ** DECAY
+
+
+def next_interval(s, r):
+    ivl = s / FACTOR * (r ** (1 / DECAY) - 1)
+    return np.maximum(1, np.round(ivl))
+
+
 columns = [
     "difficulty",
     "stability",
@@ -74,13 +88,10 @@ def simulate(
         card_table[col["delta_t"]][has_learned] = (
             today - card_table[col["last_date"]][has_learned]
         )
-        card_table[col["retrievability"]][has_learned] = np.power(
-            1
-            + card_table[col["delta_t"]][has_learned]
-            / (9 * card_table[col["stability"]][has_learned]),
-            -1,
+        card_table[col["retrievability"]][has_learned] = power_forgetting_curve(
+            card_table[col["delta_t"]][has_learned],
+            card_table[col["stability"]][has_learned],
         )
-
         card_table[col["cost"]] = 0
         need_review = card_table[col["due"]] <= today
         card_table[col["rand"]][need_review] = np.random.rand(np.sum(need_review))
@@ -139,11 +150,9 @@ def simulate(
         )
 
         card_table[col["ivl"]][true_review | true_learn] = np.clip(
-            np.round(
-                9
-                * card_table[col["stability"]][true_review | true_learn]
-                * (1 / request_retention - 1),
-                0,
+            next_interval(
+                card_table[col["stability"]][true_review | true_learn],
+                request_retention,
             ),
             1,
             max_ivl,
@@ -418,23 +427,23 @@ def brent(tol=0.01, maxiter=20, **kwargs):
 if __name__ == "__main__":
     default_params = {
         "w": [
-            0.4,
-            0.9,
-            2.3,
-            10.9,
-            4.93,
-            0.94,
-            0.86,
-            0.01,
-            1.49,
-            0.14,
-            0.94,
-            2.18,
-            0.05,
-            0.34,
-            1.26,
-            0.29,
-            2.61,
+            0.5888,
+            1.4616,
+            3.8226,
+            14.1364,
+            4.9214,
+            1.0325,
+            0.8731,
+            0.0613,
+            1.57,
+            0.1395,
+            0.988,
+            2.212,
+            0.0658,
+            0.3439,
+            1.3098,
+            0.2837,
+            2.7766,
         ],
         "deck_size": 10000,
         "learn_span": 365,

@@ -23,9 +23,19 @@ from tqdm.auto import tqdm
 import warnings
 
 try:
-    from .fsrs_simulator import optimal_retention, simulate
-except ImportError:
-    from fsrs_simulator import optimal_retention, simulate
+    from .fsrs_simulator import (
+        optimal_retention,
+        simulate,
+        next_interval,
+        power_forgetting_curve,
+    )
+except:
+    from fsrs_simulator import (
+        optimal_retention,
+        simulate,
+        next_interval,
+        power_forgetting_curve,
+    )
 
 warnings.filterwarnings("ignore", category=UserWarning)
 
@@ -34,13 +44,25 @@ Learning = 1
 Review = 2
 Relearning = 3
 
-
-def power_forgetting_curve(t, s):
-    return (1 + t / (9 * s)) ** -1
-
-
-def next_interval(s, r):
-    return np.maximum(1, np.round(9 * s * (1 / r - 1)))
+DEFAULT_WEIGHT = [
+    0.27,
+    0.74,
+    1.3,
+    5.52,
+    5.1,
+    1.02,
+    0.78,
+    0.06,
+    1.57,
+    0.14,
+    0.94,
+    2.16,
+    0.06,
+    0.31,
+    1.34,
+    0.21,
+    2.69,
+]
 
 
 class FSRS(nn.Module):
@@ -629,7 +651,10 @@ class Optimizer:
                 has_been_removed += count
             group = group[
                 group["delta_t"].isin(
-                    grouped_group[grouped_group[("y", "count")] >= count]["delta_t"]
+                    grouped_group[
+                        (grouped_group[("y", "count")] > count)
+                        & (grouped_group[("y", "mean")] < 1)
+                    ]["delta_t"]
                 )
             ]
             return group
@@ -776,25 +801,7 @@ class Optimizer:
 
     def define_model(self):
         """Step 3"""
-        self.init_w = [
-            0.4,
-            0.9,
-            2.3,
-            10.9,
-            4.93,
-            0.94,
-            0.86,
-            0.01,
-            1.49,
-            0.14,
-            0.94,
-            2.18,
-            0.05,
-            0.34,
-            1.26,
-            0.29,
-            2.61,
-        ]
+        self.init_w = DEFAULT_WEIGHT.copy()
         """
         For details about the parameters, please see: 
         https://github.com/open-spaced-repetition/fsrs4anki/wiki/The-Algorithm
@@ -821,7 +828,7 @@ class Optimizer:
         rating_count = {}
         average_recall = self.dataset["y"].mean()
         plots = []
-        r_s0_default = {"1": 0.4, "2": 0.9, "3": 2.3, "4": 10.9}
+        r_s0_default = {str(i): DEFAULT_WEIGHT[i - 1] for i in range(1, 5)}
 
         for first_rating in ("1", "2", "3", "4"):
             group = self.S0_dataset_group[
@@ -837,7 +844,7 @@ class Optimizer:
                 group["y"]["count"] + 1
             )
             count = group["y"]["count"]
-            total_count = sum(count)
+            weight = np.sqrt(count)
 
             init_s0 = r_s0_default[first_rating]
 
@@ -845,22 +852,21 @@ class Optimizer:
                 y_pred = power_forgetting_curve(delta_t, stability)
                 logloss = sum(
                     -(recall * np.log(y_pred) + (1 - recall) * np.log(1 - y_pred))
-                    * count
-                    / total_count
+                    * weight
                 )
-                l1 = np.abs(stability - init_s0) / total_count / 16
+                l1 = np.abs(stability - init_s0) / 16
                 return logloss + l1
 
             res = minimize(
                 loss,
                 x0=init_s0,
-                bounds=((0.1, 365),),
-                options={"maxiter": int(np.sqrt(total_count))},
+                bounds=((0.1, 100),),
+                options={"maxiter": int(sum(weight))},
             )
             params = res.x
             stability = params[0]
             rating_stability[int(first_rating)] = stability
-            rating_count[int(first_rating)] = total_count
+            rating_count[int(first_rating)] = sum(count)
             predict_recall = power_forgetting_curve(delta_t, *params)
             rmse = mean_squared_error(
                 recall, predict_recall, sample_weight=count, squared=False
@@ -875,7 +881,7 @@ class Optimizer:
                     power_forgetting_curve(np.linspace(0, 30), *params),
                     label=f"Weighted fit (RMSE: {rmse:.4f})",
                 )
-                count_percent = np.array([x / total_count for x in count])
+                count_percent = np.array([x / sum(count) for x in count])
                 ax.scatter(delta_t, recall, s=count_percent * 1000, alpha=0.5)
                 ax.legend(loc="upper right", fancybox=True, shadow=False)
                 ax.grid(True)
@@ -883,7 +889,7 @@ class Optimizer:
                 ax.set_xlabel("Interval")
                 ax.set_ylabel("Recall")
                 ax.set_title(
-                    f"Forgetting curve for first rating {first_rating} (n={total_count}, s={stability:.2f})"
+                    f"Forgetting curve for first rating {first_rating} (n={sum(count)}, s={stability:.2f})"
                 )
                 plots.append(fig)
                 tqdm.write(str(rating_stability))
@@ -983,7 +989,7 @@ class Optimizer:
                 item[1] for item in sorted(rating_stability.items(), key=lambda x: x[0])
             ]
 
-        self.init_w[0:4] = init_s0
+        self.init_w[0:4] = list(map(lambda x: max(min(100, x), 0.1), init_s0))
 
         tqdm.write(f"Pretrain finished!")
         return plots
