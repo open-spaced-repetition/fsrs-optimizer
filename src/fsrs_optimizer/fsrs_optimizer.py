@@ -651,7 +651,10 @@ class Optimizer:
                 has_been_removed += count
             group = group[
                 group["delta_t"].isin(
-                    grouped_group[grouped_group[("y", "count")] > count]["delta_t"]
+                    grouped_group[
+                        (grouped_group[("y", "count")] > count)
+                        & (grouped_group[("y", "mean")] < 1)
+                    ]["delta_t"]
                 )
             ]
             return group
@@ -798,7 +801,7 @@ class Optimizer:
 
     def define_model(self):
         """Step 3"""
-        self.init_w = DEFAULT_WEIGHT
+        self.init_w = DEFAULT_WEIGHT.copy()
         """
         For details about the parameters, please see: 
         https://github.com/open-spaced-repetition/fsrs4anki/wiki/The-Algorithm
