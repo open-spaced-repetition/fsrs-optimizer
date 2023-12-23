@@ -1524,8 +1524,7 @@ class Optimizer:
                                 recall * np.log(y_pred)
                                 + (1 - recall) * np.log(1 - y_pred)
                             )
-                            * count
-                            / total_count
+                            * np.sqrt(count)
                         )
                         return logloss
 
