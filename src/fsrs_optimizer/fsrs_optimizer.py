@@ -653,7 +653,6 @@ class Optimizer:
                 group["delta_t"].isin(
                     grouped_group[
                         (grouped_group[("y", "count")] >= count)
-                        & (grouped_group[("y", "mean")] < 1)
                     ]["delta_t"]
                 )
             ]
