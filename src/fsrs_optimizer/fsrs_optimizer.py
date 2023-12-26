@@ -646,13 +646,13 @@ class Optimizer:
             has_been_removed = 0
             for i in sort_index:
                 count = grouped_group.loc[i, ("y", "count")]
-                if has_been_removed + count >= total * 0.05:
+                if has_been_removed + count >= max(total * 0.05, 20):
                     break
                 has_been_removed += count
             group = group[
                 group["delta_t"].isin(
                     grouped_group[
-                        (grouped_group[("y", "count")] >= count)
+                        (grouped_group[("y", "count")] >= max(count, 6))
                     ]["delta_t"]
                 )
             ]
