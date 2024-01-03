@@ -64,6 +64,8 @@ DEFAULT_WEIGHT = [
     2.7849,
 ]
 
+S_MIN = 0.01
+
 
 class FSRS(nn.Module):
     def __init__(self, w: List[float]):
@@ -121,7 +123,7 @@ class FSRS(nn.Module):
             new_d = state[:, 1] - self.w[6] * (X[:, 1] - 3)
             new_d = self.mean_reversion(self.w[4], new_d)
             new_d = new_d.clamp(1, 10)
-        new_s = new_s.clamp(0.1, 36500)
+        new_s = new_s.clamp(S_MIN, 36500)
         return torch.stack([new_s, new_d], dim=1)
 
     def forward(self, inputs: Tensor, state: Optional[Tensor] = None) -> Tensor:
@@ -651,10 +653,11 @@ class Optimizer:
                 has_been_removed += count
             group = group[
                 group["delta_t"].isin(
-                    grouped_group[
-                        (grouped_group[("y", "count")] >= max(count, 6))
-                    ]["delta_t"]
+                    grouped_group[(grouped_group[("y", "count")] >= max(count, 6))][
+                        "delta_t"
+                    ]
                 )
+                & (group["delta_t"] <= (100 if group.name[0] != "4" else 365))
             ]
             return group
 
@@ -859,7 +862,7 @@ class Optimizer:
             res = minimize(
                 loss,
                 x0=init_s0,
-                bounds=((0.1, 100),),
+                bounds=((S_MIN, 100),),
                 options={"maxiter": int(sum(weight))},
             )
             params = res.x
@@ -902,6 +905,8 @@ class Optimizer:
             (1, 4),
         ):
             if small_rating in rating_stability and big_rating in rating_stability:
+                # if rating_count[small_rating] > 300 and rating_count[big_rating] > 300:
+                #     continue
                 if rating_stability[small_rating] > rating_stability[big_rating]:
                     if rating_count[small_rating] > rating_count[big_rating]:
                         rating_stability[big_rating] = rating_stability[small_rating]
@@ -988,7 +993,7 @@ class Optimizer:
                 item[1] for item in sorted(rating_stability.items(), key=lambda x: x[0])
             ]
 
-        self.init_w[0:4] = list(map(lambda x: max(min(100, x), 0.1), init_s0))
+        self.init_w[0:4] = list(map(lambda x: max(min(100, x), S_MIN), init_s0))
 
         tqdm.write(f"Pretrain finished!")
         return plots
@@ -1336,7 +1341,7 @@ class Optimizer:
 
         return (fig1, fig2, fig3, fig4)
 
-    def evaluate(self):
+    def evaluate(self, save_to_file=True):
         my_collection = Collection(self.init_w)
         stabilities, difficulties = my_collection.batch_predict(self.dataset)
         self.dataset["stability"] = stabilities
@@ -1362,29 +1367,29 @@ class Optimizer:
             axis=1,
         )
         loss_after = self.dataset["log_loss"].mean()
-
-        tmp = self.dataset.copy()
-        tmp["stability"] = tmp["stability"].map(lambda x: round(x, 2))
-        tmp["difficulty"] = tmp["difficulty"].map(lambda x: round(x, 2))
-        tmp["p"] = tmp["p"].map(lambda x: round(x, 2))
-        tmp["log_loss"] = tmp["log_loss"].map(lambda x: round(x, 2))
-        tmp.rename(columns={"p": "retrievability"}, inplace=True)
-        tmp[
-            [
-                "review_time",
-                "card_id",
-                "review_date",
-                "r_history",
-                "t_history",
-                "delta_t",
-                "review_rating",
-                "stability",
-                "difficulty",
-                "retrievability",
-                "log_loss",
-            ]
-        ].to_csv("./evaluation.tsv", sep="\t", index=False)
-        del tmp
+        if save_to_file:
+            tmp = self.dataset.copy()
+            tmp["stability"] = tmp["stability"].map(lambda x: round(x, 2))
+            tmp["difficulty"] = tmp["difficulty"].map(lambda x: round(x, 2))
+            tmp["p"] = tmp["p"].map(lambda x: round(x, 2))
+            tmp["log_loss"] = tmp["log_loss"].map(lambda x: round(x, 2))
+            tmp.rename(columns={"p": "retrievability"}, inplace=True)
+            tmp[
+                [
+                    "review_time",
+                    "card_id",
+                    "review_date",
+                    "r_history",
+                    "t_history",
+                    "delta_t",
+                    "review_rating",
+                    "stability",
+                    "difficulty",
+                    "retrievability",
+                    "log_loss",
+                ]
+            ].to_csv("./evaluation.tsv", sep="\t", index=False)
+            del tmp
         return loss_before, loss_after
 
     def calibration_graph(self, dataset=None):
@@ -1527,7 +1532,7 @@ class Optimizer:
                         )
                         return logloss
 
-                    res = minimize(loss, 1, bounds=((0.1, 3650),))
+                    res = minimize(loss, 1, bounds=((S_MIN, 3650),))
                     if res.success:
                         tmp["true_s"] = res.x[0]
                     else:
@@ -1572,7 +1577,7 @@ class Optimizer:
                 ax1.set_xlabel(group_key)
                 if group_key == "last_s_bin":
                     ax1.set_ylim(
-                        max(analysis_group["predicted_s"].min(), 0.1),
+                        max(analysis_group["predicted_s"].min(), S_MIN),
                         analysis_group["predicted_s"].max() * 1.1,
                     )
                     ax1.set_xscale("log")
@@ -1776,6 +1781,7 @@ def plot_brier(predictions, real, bins=20, ax=None, title=None):
         bin_correct_means[mask],
         label="Actual Calibration",
         color="#1f77b4",
+        marker="*",
     )
     ax.plot((0, 1), (0, 1), label="Perfect Calibration", color="#ff7f0e")
     bin_count = brier["detail"]["bin_count"]
