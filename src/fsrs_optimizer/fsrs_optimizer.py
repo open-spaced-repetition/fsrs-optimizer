@@ -657,7 +657,7 @@ class Optimizer:
                         "delta_t"
                     ]
                 )
-                & (group["delta_t"] <= 100)
+                & (group["delta_t"] <= (100 if group.name[0] != "4" else 365))
             ]
             return group
 
@@ -905,8 +905,8 @@ class Optimizer:
             (1, 4),
         ):
             if small_rating in rating_stability and big_rating in rating_stability:
-                if rating_count[small_rating] > 300 and rating_count[big_rating] > 300:
-                    continue
+                # if rating_count[small_rating] > 300 and rating_count[big_rating] > 300:
+                #     continue
                 if rating_stability[small_rating] > rating_stability[big_rating]:
                     if rating_count[small_rating] > rating_count[big_rating]:
                         rating_stability[big_rating] = rating_stability[small_rating]
