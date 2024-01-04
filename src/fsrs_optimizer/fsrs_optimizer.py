@@ -495,8 +495,9 @@ class Optimizer:
             "review_duration",
             "review_state",
         ]
+        df["i"] = df.groupby("card_id").cumcount() + 1
         df["is_learn_start"] = (df["review_state"] == 0) & (
-            df["review_state"].shift() != 0
+            (df["review_state"].shift() != 0) | (df["i"] == 1)
         )
         df["sequence_group"] = df["is_learn_start"].cumsum()
         last_learn_start = (
@@ -514,6 +515,7 @@ class Optimizer:
         )
         df.drop(
             columns=[
+                "i",
                 "is_learn_start",
                 "sequence_group",
                 "last_learn_start",
@@ -645,6 +647,8 @@ class Optimizer:
             ).index
 
             total = sum(grouped_group[("y", "count")])
+            if total <= 20:
+                return pd.DataFrame()
             has_been_removed = 0
             for i in sort_index:
                 count = grouped_group.loc[i, ("y", "count")]
