@@ -1549,6 +1549,7 @@ class Optimizer:
                     .apply(cal_stability)
                     .reset_index(drop=True)
                 )
+                analysis_group.dropna(inplace=True)
                 analysis_group.drop_duplicates(subset=[(group_key, "")], inplace=True)
                 analysis_group.sort_values(by=[group_key], inplace=True)
                 rmse = mean_squared_error(
