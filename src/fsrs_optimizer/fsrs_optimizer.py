@@ -1737,8 +1737,9 @@ def load_brier(predictions, real, bins=20):
 
 def plot_brier(predictions, real, bins=20, ax=None, title=None):
     y, p = zip(*sorted(zip(real, predictions), key=lambda x: x[1]))
-    observation = lowess(y, p, frac=1/3, it=0,
-                         is_sorted=True, return_sorted=False)
+    observation = lowess(
+        y, p, it=0, delta=0.01 * (max(p) - min(p)), is_sorted=True, return_sorted=False
+    )
     ici = np.mean(np.abs(observation - p))
     e_50 = np.median(np.abs(observation - p))
     e_90 = np.quantile(np.abs(observation - p), 0.9)
