@@ -8,6 +8,7 @@ import math
 from typing import List, Optional
 from datetime import timedelta, datetime
 import statsmodels.api as sm
+from statsmodels.nonparametric.smoothers_lowess import lowess
 import matplotlib.pyplot as plt
 import matplotlib.ticker as ticker
 import torch
@@ -1735,6 +1736,13 @@ def load_brier(predictions, real, bins=20):
 
 
 def plot_brier(predictions, real, bins=20, ax=None, title=None):
+    y, p = zip(*sorted(zip(real, predictions), key=lambda x: x[1]))
+    observation = lowess(y, p, frac=1/3, it=0,
+                         is_sorted=True, return_sorted=False)
+    ici = np.mean(np.abs(observation - p))
+    e_50 = np.median(np.abs(observation - p))
+    e_90 = np.quantile(np.abs(observation - p), 0.9)
+    e_max = np.max(np.abs(observation - p))
     brier = load_brier(predictions, real, bins=bins)
     bin_prediction_means = brier["detail"]["bin_prediction_means"]
     bin_correct_means = brier["detail"]["bin_correct_means"]
@@ -1759,6 +1767,10 @@ def plot_brier(predictions, real, bins=20, ax=None, title=None):
     tqdm.write(f"R-squared: {r2:.4f}")
     tqdm.write(f"RMSE: {rmse:.4f}")
     tqdm.write(f"MAE: {mae:.4f}")
+    tqdm.write(f"ICI: {ici:.4f}")
+    tqdm.write(f"E50: {e_50:.4f}")
+    tqdm.write(f"E90: {e_90:.4f}")
+    tqdm.write(f"EMax: {e_max:.4f}")
     ax.set_xlim([0, 1])
     ax.set_ylim([0, 1])
     ax.grid(True)
@@ -1785,6 +1797,7 @@ def plot_brier(predictions, real, bins=20, ax=None, title=None):
         color="#1f77b4",
         marker="*",
     )
+    ax.plot(p, observation, label="Lowess Smoothing", color="red")
     ax.plot((0, 1), (0, 1), label="Perfect Calibration", color="#ff7f0e")
     bin_count = brier["detail"]["bin_count"]
     counts = np.array(bin_counts)
@@ -1809,7 +1822,7 @@ def plot_brier(predictions, real, bins=20, ax=None, title=None):
     ax2.legend(loc="lower center")
     if title:
         ax.set_title(title)
-    metrics = {"R-squared": r2, "RMSE": rmse, "MAE": mae}
+    metrics = {"R-squared": r2, "RMSE": rmse, "MAE": mae, "ICI": ici}
     return metrics
 
 
