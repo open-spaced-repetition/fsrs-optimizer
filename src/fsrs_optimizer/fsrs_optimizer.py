@@ -362,8 +362,8 @@ class Trainer:
             outputs, _ = self.model(sequences.transpose(0, 1))
             stabilities = outputs[seq_lens - 1, torch.arange(real_batch_size), 0]
             retentions = power_forgetting_curve(delta_ts, stabilities)
-            tran_loss = self.loss_fn(retentions, labels).mean()
-            self.avg_train_losses.append(tran_loss)
+            train_loss = self.loss_fn(retentions, labels).mean()
+            self.avg_train_losses.append(train_loss)
 
             sequences, delta_ts, labels, seq_lens = (
                 self.test_set.x_train,
@@ -386,7 +386,7 @@ class Trainer:
             )
 
             weighted_loss = (
-                tran_loss * len(self.train_set) + test_loss * len(self.test_set)
+                train_loss * len(self.train_set) + test_loss * len(self.test_set)
             ) / (len(self.train_set) + len(self.test_set))
 
             return weighted_loss, w
