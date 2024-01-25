@@ -29,6 +29,7 @@ try:
         simulate,
         next_interval,
         power_forgetting_curve,
+        workload_graph,
     )
 except:
     from fsrs_simulator import (
@@ -36,6 +37,7 @@ except:
         simulate,
         next_interval,
         power_forgetting_curve,
+        workload_graph,
     )
 
 warnings.filterwarnings("ignore", category=UserWarning)
@@ -1273,35 +1275,27 @@ class Optimizer:
 
         forget_cost *= loss_aversion
 
-        self.optimal_retention = optimal_retention(
-            w=self.w,
-            deck_size=deck_size,
-            learn_span=learn_span,
-            max_cost_perday=max_cost_perday,
-            max_ivl=max_ivl,
-            recall_costs=self.recall_costs,
-            forget_cost=forget_cost,
-            learn_cost=self.learn_cost,
-            first_rating_prob=self.first_rating_prob,
-            review_rating_prob=self.review_rating_prob,
-        )
+        simulate_config = {
+            "w": self.w,
+            "deck_size": deck_size,
+            "learn_span": learn_span,
+            "max_cost_perday": max_cost_perday,
+            "max_ivl": max_ivl,
+            "recall_costs": self.recall_costs,
+            "forget_cost": forget_cost,
+            "learn_cost": self.learn_cost,
+            "first_rating_prob": self.first_rating_prob,
+            "review_rating_prob": self.review_rating_prob,
+        }
+
+        self.optimal_retention = optimal_retention(**simulate_config)
 
         tqdm.write(
             f"\n-----suggested retention (experimental): {self.optimal_retention:.2f}-----"
         )
 
         (_, review_cnt_per_day, learn_cnt_per_day, memorized_cnt_per_day) = simulate(
-            self.w,
-            deck_size=deck_size,
-            learn_span=learn_span,
-            max_cost_perday=max_cost_perday,
-            max_ivl=max_ivl,
-            request_retention=self.optimal_retention,
-            recall_costs=self.recall_costs,
-            forget_cost=forget_cost,
-            learn_cost=self.learn_cost,
-            first_rating_prob=self.first_rating_prob,
-            review_rating_prob=self.review_rating_prob,
+            **simulate_config
         )
 
         def moving_average(data, window_size=365 // 20):
@@ -1341,7 +1335,9 @@ class Optimizer:
         ax.legend()
         ax.grid(True)
 
-        return (fig1, fig2, fig3, fig4)
+        fig5 = workload_graph(simulate_config)
+
+        return (fig1, fig2, fig3, fig4, fig5)
 
     def evaluate(self, save_to_file=True):
         my_collection = Collection(self.init_w)
