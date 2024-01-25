@@ -1,3 +1,5 @@
+from math import ceil
+from matplotlib import pyplot as plt
 import numpy as np
 from tqdm import trange, tqdm
 
@@ -204,24 +206,6 @@ def sample(
     return np.mean(memorization)
 
 
-def native(**kwargs):
-    low = 0.75
-    high = 0.95
-    optimal = 0.85
-    epsilon = 0.01
-    for _ in range(10):
-        mid1 = low + (high - low) / 3
-        mid2 = high - (high - low) / 3
-        if sample(r=mid1, **kwargs) > sample(r=mid2, **kwargs):
-            high = mid2
-        else:
-            low = mid1
-        optimal = (low + high) / 2
-        if high - low < epsilon:
-            break
-    return optimal
-
-
 def bracket(xa=0.75, xb=0.95, maxiter=20, **kwargs):
     u_lim = 0.95
     l_lim = 0.75
@@ -424,6 +408,164 @@ def brent(tol=0.01, maxiter=20, **kwargs):
         raise Exception("The algorithm terminated without finding a valid value.")
 
 
+def workload_graph(default_params):
+    R = [x / 100 for x in range(70, 100)]
+    cost_per_memorization = [1 / sample(r, **default_params) for r in R]
+
+    # this is for testing
+    # cost_per_memorization = [min(x, 2.3 * min(cost_per_memorization)) for x in cost_per_memorization]
+    min_w = min(cost_per_memorization)  # minimum workload
+    max_w = max(cost_per_memorization)  # maximum workload
+    min1_index = R.index(R[cost_per_memorization.index(min_w)])
+
+    min_w2 = 0
+    min_w3 = 0
+    target2 = 2 * min_w
+    target3 = 3 * min_w
+
+    for i in range(len(cost_per_memorization) - 1):
+        if (cost_per_memorization[i] <= target2) and (
+            cost_per_memorization[i + 1] >= target2
+        ):
+            if abs(cost_per_memorization[i] - target2) < abs(
+                cost_per_memorization[i + 1] - target2
+            ):
+                min_w2 = cost_per_memorization[i]
+            else:
+                min_w2 = cost_per_memorization[i + 1]
+
+    for i in range(len(cost_per_memorization) - 1):
+        if (cost_per_memorization[i] <= target3) and (
+            cost_per_memorization[i + 1] >= target3
+        ):
+            if abs(cost_per_memorization[i] - target3) < abs(
+                cost_per_memorization[i + 1] - target3
+            ):
+                min_w3 = cost_per_memorization[i]
+            else:
+                min_w3 = cost_per_memorization[i + 1]
+
+    if min_w2 == 0:
+        min2_index = len(R)
+    else:
+        min2_index = R.index(R[cost_per_memorization.index(min_w2)])
+
+    min1_5_index = int(ceil((min2_index + 3 * min1_index) / 4))
+    if min_w3 == 0:
+        min3_index = len(R)
+    else:
+        min3_index = R.index(R[cost_per_memorization.index(min_w3)])
+
+    fig = plt.figure(figsize=(16, 8))
+    ax = fig.gca()
+    if min1_index > 0:
+        ax.fill_between(
+            x=R[: min1_index + 1],
+            y1=0,
+            y2=cost_per_memorization[: min1_index + 1],
+            color="red",
+            alpha=1,
+        )
+        ax.fill_between(
+            x=R[min1_index : min1_5_index + 1],
+            y1=0,
+            y2=cost_per_memorization[min1_index : min1_5_index + 1],
+            color="gold",
+            alpha=1,
+        )
+    else:
+        # handle the case when there is no red area to the left
+        ax.fill_between(
+            x=R[: min1_5_index + 1],
+            y1=0,
+            y2=cost_per_memorization[: min1_5_index + 1],
+            color="gold",
+            alpha=1,
+        )
+
+    ax.fill_between(
+        x=R[min1_5_index : min2_index + 1],
+        y1=0,
+        y2=cost_per_memorization[min1_5_index : min2_index + 1],
+        color="limegreen",
+        alpha=1,
+    )
+    ax.fill_between(
+        x=R[min2_index : min3_index + 1],
+        y1=0,
+        y2=cost_per_memorization[min2_index : min3_index + 1],
+        color="gold",
+        alpha=1,
+    )
+    ax.fill_between(
+        x=R[min3_index:],
+        y1=0,
+        y2=cost_per_memorization[min3_index:],
+        color="red",
+        alpha=1,
+    )
+    ax.set_yticks([])
+    ax.set_xticks([0.7, 0.75, 0.8, 0.85, 0.9, 0.95, 0.99])
+    ax.xaxis.set_tick_params(labelsize=14)
+    ax.set_xlim(0.7, 0.99)
+
+    if max_w >= 4.5 * min_w:
+        lim = 4.5 * min_w
+    elif max_w >= 3.5 * min_w:
+        lim = 3.5 * min_w
+    else:
+        lim = max_w
+
+    ax.set_ylim(0, lim)
+    ax.set_ylabel("Workload (minutes of study per day)", fontsize=20)
+    ax.set_xlabel("Retention", fontsize=20)
+    ax.axhline(y=min_w, color="black", alpha=0.75, ls="--")
+    ax.text(
+        0.701,
+        min_w,
+        "min. workload",
+        ha="left",
+        va="bottom",
+        color="black",
+        fontsize=12,
+    )
+    if max_w >= 2.3 * min_w:
+        ax.axhline(y=2 * min_w, color="black", alpha=0.75, ls="--")
+        ax.text(
+            0.701,
+            2 * min_w,
+            "min. workload x2",
+            ha="left",
+            va="bottom",
+            color="black",
+            fontsize=12,
+        )
+    if max_w >= 3.3 * min_w:
+        ax.axhline(y=3 * min_w, color="black", alpha=0.75, ls="--")
+        ax.text(
+            0.701,
+            3 * min_w,
+            "min. workload x3",
+            ha="left",
+            va="bottom",
+            color="black",
+            fontsize=12,
+        )
+    if max_w >= 4.3 * min_w:
+        ax.axhline(y=4 * min_w, color="black", alpha=0.75, ls="--")
+        ax.text(
+            0.701,
+            4 * min_w,
+            "min. workload x4",
+            ha="left",
+            va="bottom",
+            color="black",
+            fontsize=12,
+        )
+
+    return fig
+
+
 if __name__ == "__main__":
     default_params = {
         "w": [
@@ -455,16 +597,4 @@ if __name__ == "__main__":
         "first_rating_prob": np.array([0.15, 0.2, 0.6, 0.05]),
         "review_rating_prob": np.array([0.3, 0.6, 0.1]),
     }
-    import time
-
-    start = time.time()
-    memo1 = native(**default_params)
-    print("Native: ", memo1)
-    print("Time: ", time.time() - start)
-    print("Memorization: ", sample(r=memo1, **default_params))
-
-    start = time.time()
-    memo2 = brent(**default_params)
-    print("Brent: ", memo2)
-    print("Time: ", time.time() - start)
-    print("Memorization: ", sample(r=memo2, **default_params))
+    workload_graph(default_params).savefig("workload.png")
