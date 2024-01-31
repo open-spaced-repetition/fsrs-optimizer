@@ -254,6 +254,23 @@ def collate_fn(batch):
     return sequences_padded, delta_ts, labels, seq_lens
 
 
+class ICILoss(nn.Module):
+    def __init__(self):
+        super(ICILoss, self).__init__()
+
+    def forward(self, predictions: Tensor, labels: Tensor) -> Tensor:
+        observation = lowess(
+            labels.detach().numpy(),
+            predictions.detach().numpy(),
+            it=0,
+            delta=0.01
+            * (max(predictions.detach().numpy()) - min(predictions.detach().numpy())),
+            return_sorted=False,
+        )
+        observation = torch.as_tensor(observation, dtype=torch.float32)
+        return torch.abs(predictions - observation)
+
+
 class Trainer:
     def __init__(
         self,
@@ -276,7 +293,7 @@ class Trainer:
         )
         self.avg_train_losses = []
         self.avg_eval_losses = []
-        self.loss_fn = nn.BCELoss(reduction="none")
+        self.loss_fn = ICILoss()
 
     def build_dataset(self, train_set: pd.DataFrame, test_set: pd.DataFrame):
         pre_train_set = train_set[train_set["i"] == 2]
@@ -1010,9 +1027,9 @@ class Optimizer:
     def train(
         self,
         lr: float = 4e-2,
-        n_epoch: int = 5,
-        n_splits: int = 5,
-        batch_size: int = 512,
+        n_epoch: int = 8,
+        n_splits: int = 1,
+        batch_size: int = 1024,
         verbose: bool = True,
         split_by_time: bool = False,
     ):
