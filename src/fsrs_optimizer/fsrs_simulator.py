@@ -63,19 +63,23 @@ def simulate(
     def stability_after_success(s, r, d, response):
         hard_penalty = np.where(response == 2, w[15], 1)
         easy_bonus = np.where(response == 4, w[16], 1)
-        return s * (
-            1
-            + np.exp(w[8])
-            * (11 - d)
-            * np.power(s, -w[9])
-            * (np.exp((1 - r) * w[10]) - 1)
-            * hard_penalty
-            * easy_bonus
+        return np.maximum(
+            0.01,
+            s
+            * (
+                1
+                + np.exp(w[8])
+                * (11 - d)
+                * np.power(s, -w[9])
+                * (np.exp((1 - r) * w[10]) - 1)
+                * hard_penalty
+                * easy_bonus
+            ),
         )
 
     def stability_after_failure(s, r, d):
         return np.maximum(
-            0.1,
+            0.01,
             np.minimum(
                 w[11]
                 * np.power(d, -w[12])
