@@ -1229,6 +1229,7 @@ class Optimizer:
         max_cost_perday=1800,
         max_ivl=36500,
         loss_aversion=2.5,
+        verbose=True,
     ):
         """should not be called before predict_memory_states"""
         recall_cost = 8
@@ -1298,6 +1299,9 @@ class Optimizer:
         tqdm.write(
             f"\n-----suggested retention (experimental): {self.optimal_retention:.2f}-----"
         )
+
+        if not verbose:
+            return ()
 
         (_, review_cnt_per_day, learn_cnt_per_day, memorized_cnt_per_day) = simulate(
             **simulate_config
