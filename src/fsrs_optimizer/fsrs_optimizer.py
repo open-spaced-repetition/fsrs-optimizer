@@ -307,9 +307,11 @@ class Trainer:
         tqdm.write("dataset built")
 
     def train(self, verbose: bool = True):
+        self.verbose = verbose
         best_loss = np.inf
         epoch_len = len(self.next_train_data_loader)
-        pbar = tqdm(desc="train", colour="red", total=epoch_len * self.n_epoch)
+        if verbose:
+            pbar = tqdm(desc="train", colour="red", total=epoch_len * self.n_epoch)
         print_len = max(self.batch_nums * self.n_epoch // 10, 1)
         for k in range(self.n_epoch):
             weighted_loss, w = self.eval()
@@ -332,8 +334,8 @@ class Trainer:
                 self.optimizer.step()
                 self.scheduler.step()
                 self.model.apply(self.clipper)
-                pbar.update(real_batch_size)
-
+                if verbose:
+                    pbar.update(real_batch_size)
                 if verbose and (k * self.batch_nums + i + 1) % print_len == 0:
                     tqdm.write(
                         f"iteration: {k * epoch_len + (i + 1) * self.batch_size}"
@@ -342,7 +344,8 @@ class Trainer:
                         tqdm.write(
                             f"{name}: {list(map(lambda x: round(float(x), 4),param))}"
                         )
-        pbar.close()
+        if verbose:
+            pbar.close()
 
         weighted_loss, w = self.eval()
         if weighted_loss < best_loss:
@@ -365,6 +368,8 @@ class Trainer:
             stabilities = outputs[seq_lens - 1, torch.arange(real_batch_size), 0]
             retentions = power_forgetting_curve(delta_ts, stabilities)
             train_loss = self.loss_fn(retentions, labels).mean()
+            if self.verbose:
+                tqdm.write(f"train loss: {train_loss:.6f}")
             self.avg_train_losses.append(train_loss)
 
             sequences, delta_ts, labels, seq_lens = (
