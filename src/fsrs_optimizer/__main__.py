@@ -24,7 +24,7 @@ def prompt(msg: str, fallback):
     return response
 
 
-def process(filepath, filter_out_flags: list[str]):
+def process(filepath, filter_out_flags: list[int]):
     suffix = filepath.split("/")[-1].replace(".", "_").replace("@", "_")
     proj_dir = Path(f"{suffix}")
     proj_dir.mkdir(parents=True, exist_ok=True)
@@ -94,6 +94,7 @@ def process(filepath, filter_out_flags: list[str]):
         remembered_fallbacks["timezone"],
         remembered_fallbacks["revlog_start_date"],
         remembered_fallbacks["next_day"],
+        save_graphs,
     )
     print(analysis)
 
