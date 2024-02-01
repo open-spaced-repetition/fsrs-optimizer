@@ -1643,7 +1643,7 @@ class Optimizer:
             bins=20,
             ax=fig1.add_subplot(111),
         )
-        fig2 = cross_comparison(dataset, "SM2", "FSRS")
+        _, fig2 = cross_comparison(dataset, "SM2", "FSRS")
         return fig1, fig2
 
 
@@ -1865,5 +1865,4 @@ def cross_comparison(dataset, algoA, algoB):
     ax.set_ylabel("B-W Metric")
     ax.set_xlim(0, 1)
     ax.set_xticks(np.arange(0, 1.1, 0.1))
-    fig.show()
-    return fig
+    return universal_metric_list, fig
