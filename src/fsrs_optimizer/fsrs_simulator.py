@@ -1,7 +1,7 @@
-from math import ceil
-from matplotlib import pyplot as plt
+import math
 import numpy as np
-from tqdm import trange, tqdm
+from matplotlib import pyplot as plt
+from tqdm import trange
 
 
 DECAY = -0.5
@@ -42,6 +42,8 @@ def simulate(
     deck_size=10000,
     learn_span=365,
     max_cost_perday=1800,
+    learn_limit_perday=math.inf,
+    review_limit_perday=math.inf,
     max_ivl=36500,
     recall_costs=np.array([14, 10, 6]),
     forget_cost=50,
@@ -110,8 +112,10 @@ def simulate(
             card_table[col["rating"]][need_review & ~forget].astype(int) - 2,
             recall_costs,
         )
-        true_review = need_review & (
-            np.cumsum(card_table[col["cost"]]) <= max_cost_perday
+        true_review = (
+            need_review
+            & (np.cumsum(card_table[col["cost"]]) <= max_cost_perday)
+            & (np.cumsum(need_review) < review_limit_perday)
         )
         card_table[col["last_date"]][true_review] = today
 
@@ -143,8 +147,10 @@ def simulate(
 
         need_learn = card_table[col["due"]] == learn_span
         card_table[col["cost"]][need_learn] = learn_cost
-        true_learn = need_learn & (
-            np.cumsum(card_table[col["cost"]]) <= max_cost_perday
+        true_learn = (
+            need_learn
+            & (np.cumsum(card_table[col["cost"]]) <= max_cost_perday)
+            & (np.cumsum(need_learn) < learn_limit_perday)
         )
         card_table[col["last_date"]][true_learn] = today
         first_ratings = np.random.choice(
@@ -183,6 +189,8 @@ def sample(
     deck_size,
     learn_span,
     max_cost_perday,
+    learn_limit_perday,
+    review_limit_perday,
     max_ivl,
     recall_costs,
     forget_cost,
@@ -199,6 +207,8 @@ def sample(
             learn_span=learn_span,
             max_cost_perday=max_cost_perday,
             max_ivl=max_ivl,
+            learn_limit_perday=learn_limit_perday,
+            review_limit_perday=review_limit_perday,
             recall_costs=recall_costs,
             forget_cost=forget_cost,
             learn_cost=learn_cost,
@@ -454,7 +464,7 @@ def workload_graph(default_params):
     else:
         min2_index = R.index(R[cost_per_memorization.index(min_w2)])
 
-    min1_5_index = int(ceil((min2_index + 3 * min1_index) / 4))
+    min1_5_index = int(math.ceil((min2_index + 3 * min1_index) / 4))
     if min_w3 == 0:
         min3_index = len(R)
     else:
@@ -594,6 +604,8 @@ if __name__ == "__main__":
         "deck_size": 10000,
         "learn_span": 365,
         "max_cost_perday": 1800,
+        "learn_limit_perday": math.inf,
+        "review_limit_perday": math.inf,
         "max_ivl": 36500,
         "recall_costs": np.array([14, 10, 6]),
         "forget_cost": 50,
@@ -601,4 +613,40 @@ if __name__ == "__main__":
         "first_rating_prob": np.array([0.15, 0.2, 0.6, 0.05]),
         "review_rating_prob": np.array([0.3, 0.6, 0.1]),
     }
+    (_, review_cnt_per_day, learn_cnt_per_day, memorized_cnt_per_day) = simulate(
+        w=default_params["w"],
+        max_cost_perday=math.inf,
+        learn_limit_perday=10,
+        review_limit_perday=50,
+    )
+
+    def moving_average(data, window_size=365 // 20):
+        weights = np.ones(window_size) / window_size
+        return np.convolve(data, weights, mode="valid")
+
+    fig1 = plt.figure()
+    ax = fig1.gca()
+    ax.plot(
+        moving_average(review_cnt_per_day),
+    )
+    ax.set_title("Review Count per Day")
+    ax.grid(True)
+    fig2 = plt.figure()
+    ax = fig2.gca()
+    ax.plot(
+        moving_average(learn_cnt_per_day),
+    )
+    ax.set_title("Learn Count per Day")
+    ax.grid(True)
+    fig3 = plt.figure()
+    ax = fig3.gca()
+    ax.plot(np.cumsum(learn_cnt_per_day))
+    ax.set_title("Cumulative Learn Count")
+    ax.grid(True)
+    fig4 = plt.figure()
+    ax = fig4.gca()
+    ax.plot(memorized_cnt_per_day)
+    ax.set_title("Memorized Count per Day")
+    ax.grid(True)
+    plt.show()
     workload_graph(default_params).savefig("workload.png")
