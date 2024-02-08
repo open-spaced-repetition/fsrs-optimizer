@@ -72,6 +72,8 @@ def process(filepath, filter_out_flags: list[int]):
 
     if graphs_input.lower() != "y":
         remembered_fallbacks["preview"] = "n"
+    else:
+        remembered_fallbacks["preview"] = "y"
 
     with open(
         config_save, "w+"

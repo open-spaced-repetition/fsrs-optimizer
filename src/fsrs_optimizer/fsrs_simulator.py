@@ -115,7 +115,7 @@ def simulate(
         true_review = (
             need_review
             & (np.cumsum(card_table[col["cost"]]) <= max_cost_perday)
-            & (np.cumsum(need_review) < review_limit_perday)
+            & (np.cumsum(need_review) <= review_limit_perday)
         )
         card_table[col["last_date"]][true_review] = today
 
@@ -150,7 +150,7 @@ def simulate(
         true_learn = (
             need_learn
             & (np.cumsum(card_table[col["cost"]]) <= max_cost_perday)
-            & (np.cumsum(need_learn) < learn_limit_perday)
+            & (np.cumsum(need_learn) <= learn_limit_perday)
         )
         card_table[col["last_date"]][true_learn] = today
         first_ratings = np.random.choice(
