@@ -1228,6 +1228,8 @@ class Optimizer:
         learn_span=365,
         max_cost_perday=1800,
         max_ivl=36500,
+        learn_limit_perday=math.inf,
+        review_limit_perday=math.inf,
         loss_aversion=2.5,
         verbose=True,
     ):
@@ -1286,6 +1288,8 @@ class Optimizer:
             "deck_size": deck_size,
             "learn_span": learn_span,
             "max_cost_perday": max_cost_perday,
+            "learn_limit_perday": learn_limit_perday,
+            "review_limit_perday": review_limit_perday,
             "max_ivl": max_ivl,
             "recall_costs": self.recall_costs,
             "forget_cost": forget_cost,
