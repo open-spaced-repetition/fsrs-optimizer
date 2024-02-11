@@ -710,10 +710,10 @@ class Optimizer:
         if not analysis:
             return
 
-        df["retention"] = df.groupby(by=["r_history", "delta_t"], group_keys=False)[
+        df["retention"] = df.groupby(by=["i", "r_history", "delta_t"], group_keys=False)[
             "y"
         ].transform("mean")
-        df["total_cnt"] = df.groupby(by=["r_history", "delta_t"], group_keys=False)[
+        df["total_cnt"] = df.groupby(by=["i", "r_history", "delta_t"], group_keys=False)[
             "review_time"
         ].transform("count")
         tqdm.write("Retention calculated.")
@@ -728,6 +728,7 @@ class Optimizer:
                 "real_days",
                 "review_rating",
                 "t_history",
+                "last_rating",
                 "y",
             ],
             inplace=True,
@@ -767,7 +768,7 @@ class Optimizer:
             del group["delta_t"]
             return group
 
-        df = df.groupby(by=["r_history"], group_keys=False).progress_apply(
+        df = df.groupby(by=["i", "r_history"], group_keys=False).progress_apply(
             cal_stability
         )
         if df.empty:
@@ -775,7 +776,7 @@ class Optimizer:
         tqdm.write("Stability calculated.")
         df.reset_index(drop=True, inplace=True)
         df.drop_duplicates(inplace=True)
-        df.sort_values(by=["r_history"], inplace=True, ignore_index=True)
+        df.sort_values(by=["i", "r_history"], inplace=True, ignore_index=True)
 
         if df.shape[0] > 0:
             for idx in tqdm(df.index, desc="analysis"):
@@ -797,8 +798,11 @@ class Optimizer:
             df.to_csv("./stability_for_analysis.tsv", sep="\t", index=None)
             tqdm.write("Analysis saved!")
             caption = "1:again, 2:hard, 3:good, 4:easy\n"
+            df["first_rating"] = df["r_history"].map(lambda x: x[0])
             analysis = df[df["r_history"].str.contains(r"^[1-4][^124]*$", regex=True)][
-                [
+                [   
+                    "first_rating",
+                    "i",
                     "r_history",
                     "avg_interval",
                     "avg_retention",
@@ -806,7 +810,7 @@ class Optimizer:
                     "factor",
                     "group_cnt",
                 ]
-            ].to_string(index=False)
+            ].sort_values(by=["first_rating", "i"]).to_string(index=False)
             return caption + analysis
 
     def define_model(self):
