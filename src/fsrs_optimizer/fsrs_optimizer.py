@@ -98,7 +98,7 @@ class FSRS(nn.Module):
             * (torch.pow(state[:, 0] + 1, self.w[13]) - 1)
             * torch.exp((1 - r) * self.w[14])
         )
-        return new_s
+        return torch.minimum(new_s, state[:, 0])
 
     def step(self, X: Tensor, state: Tensor) -> Tensor:
         """
