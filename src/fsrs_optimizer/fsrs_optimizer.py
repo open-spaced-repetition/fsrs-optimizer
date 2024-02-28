@@ -155,16 +155,16 @@ class WeightClipper:
             w[4] = w[4].clamp(1, 10)
             w[5] = w[5].clamp(0.1, 5)
             w[6] = w[6].clamp(0.1, 5)
-            w[7] = w[7].clamp(0, 0.5)
-            w[8] = w[8].clamp(0, 3)
-            w[9] = w[9].clamp(0.1, 0.8)
-            w[10] = w[10].clamp(0.01, 2.5)
+            w[7] = w[7].clamp(0, 0.75)
+            w[8] = w[8].clamp(0, 4)
+            w[9] = w[9].clamp(0, 0.8)
+            w[10] = w[10].clamp(0.01, 3)
             w[11] = w[11].clamp(0.5, 5)
             w[12] = w[12].clamp(0.01, 0.2)
             w[13] = w[13].clamp(0.01, 0.9)
-            w[14] = w[14].clamp(0.01, 2)
+            w[14] = w[14].clamp(0.01, 3)
             w[15] = w[15].clamp(0, 1)
-            w[16] = w[16].clamp(1, 4)
+            w[16] = w[16].clamp(1, 6)
             module.w.data = w
 
 
