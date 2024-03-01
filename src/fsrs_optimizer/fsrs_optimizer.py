@@ -1850,13 +1850,23 @@ def rmse_matrix(df):
     tmp = df.copy()
     tmp["lapse"] = tmp["r_history"].map(lambda x: x.count("1"))
     tmp["delta_t"] = tmp["delta_t"].map(
-        lambda x: round(2.48 * np.power(3.62, np.floor(np.log(x)/np.log(3.62))), 2)
+        lambda x: round(2.48 * np.power(3.62, np.floor(np.log(x) / np.log(3.62))), 2)
     )
     tmp["i"] = tmp["i"].map(
-        lambda x: round(1.99 * np.power(1.89, np.floor(np.log(x)/np.log(1.89))), 0)
+        lambda x: round(1.99 * np.power(1.89, np.floor(np.log(x) / np.log(1.89))), 0)
     )
     tmp["lapse"] = tmp["lapse"].map(
-        lambda x: round(1.65 * np.power(1.73, np.floor(np.log(x)/np.log(1.73))), 0) if x != 0 else 0
+        lambda x: (
+            round(1.65 * np.power(1.73, np.floor(np.log(x) / np.log(1.73))), 0)
+            if x != 0
+            else 0
+        )
     )
-    tmp = tmp.groupby(["delta_t", "i", "lapse"]).agg({"y": "mean", "p": "mean", "card_id": "count"}).reset_index()
-    return mean_squared_error(tmp["y"], tmp["p"], sample_weight=tmp["card_id"], squared=False)
+    tmp = (
+        tmp.groupby(["delta_t", "i", "lapse"])
+        .agg({"y": "mean", "p": "mean", "card_id": "count"})
+        .reset_index()
+    )
+    return mean_squared_error(
+        tmp["y"], tmp["p"], sample_weight=tmp["card_id"], squared=False
+    )
