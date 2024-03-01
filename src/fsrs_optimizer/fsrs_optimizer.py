@@ -1329,7 +1329,7 @@ class Optimizer:
         return (fig1, fig2, fig3, fig4, fig5)
 
     def evaluate(self, save_to_file=True):
-        my_collection = Collection(self.init_w)
+        my_collection = Collection(DEFAULT_WEIGHT)
         stabilities, difficulties = my_collection.batch_predict(self.dataset)
         self.dataset["stability"] = stabilities
         self.dataset["difficulty"] = difficulties
@@ -1383,15 +1383,20 @@ class Optimizer:
         if dataset is None:
             dataset = self.dataset
         fig1 = plt.figure()
+        rmse = rmse_matrix(dataset)
+        tqdm.write(f"RMSE(bins): {rmse:.4f}")
         metrics = plot_brier(
             dataset["p"], dataset["y"], bins=20, ax=fig1.add_subplot(111)
         )
+        metrics["rmse"] = rmse
         fig2 = plt.figure(figsize=(16, 12))
         for last_rating in ("1", "2", "3", "4"):
             calibration_data = dataset[dataset["r_history"].str.endswith(last_rating)]
             if calibration_data.empty:
                 continue
             tqdm.write(f"\nLast rating: {last_rating}")
+            rmse = rmse_matrix(calibration_data)
+            tqdm.write(f"RMSE(bins): {rmse:.4f}")
             plot_brier(
                 calibration_data["p"],
                 calibration_data["y"],
@@ -1679,19 +1684,12 @@ def plot_brier(predictions, real, bins=20, ax=None, title=None):
         bin_prediction_means[mask],
         sample_weight=bin_counts[mask],
     )
-    rmse = mean_squared_error(
-        bin_correct_means[mask],
-        bin_prediction_means[mask],
-        sample_weight=bin_counts[mask],
-        squared=False,
-    )
     mae = mean_absolute_error(
         bin_correct_means[mask],
         bin_prediction_means[mask],
         sample_weight=bin_counts[mask],
     )
     tqdm.write(f"R-squared: {r2:.4f}")
-    tqdm.write(f"RMSE: {rmse:.4f}")
     tqdm.write(f"MAE: {mae:.4f}")
     tqdm.write(f"ICI: {ici:.4f}")
     tqdm.write(f"E50: {e_50:.4f}")
@@ -1748,7 +1746,7 @@ def plot_brier(predictions, real, bins=20, ax=None, title=None):
     ax2.legend(loc="lower center")
     if title:
         ax.set_title(title)
-    metrics = {"R-squared": r2, "RMSE": rmse, "MAE": mae, "ICI": ici}
+    metrics = {"R-squared": r2, "MAE": mae, "ICI": ici}
     return metrics
 
 
@@ -1846,3 +1844,19 @@ def cross_comparison(dataset, algoA, algoB):
     ax.set_xlim(0, 1)
     ax.set_xticks(np.arange(0, 1.1, 0.1))
     return universal_metric_list, fig
+
+
+def rmse_matrix(df):
+    tmp = df.copy()
+    tmp["lapse"] = tmp["r_history"].map(lambda x: x.count("1"))
+    tmp["delta_t"] = tmp["delta_t"].map(
+        lambda x: round(2.48 * np.power(3.62, np.floor(np.log(x)/np.log(3.62))), 2)
+    )
+    tmp["i"] = tmp["i"].map(
+        lambda x: round(1.99 * np.power(1.89, np.floor(np.log(x)/np.log(1.89))), 0)
+    )
+    tmp["lapse"] = tmp["lapse"].map(
+        lambda x: round(1.65 * np.power(1.73, np.floor(np.log(x)/np.log(1.73))), 0) if x != 0 else 0
+    )
+    tmp = tmp.groupby(["delta_t", "i", "lapse"]).agg({"y": "mean", "p": "mean", "card_id": "count"}).reset_index()
+    return mean_squared_error(tmp["y"], tmp["p"], sample_weight=tmp["card_id"], squared=False)
