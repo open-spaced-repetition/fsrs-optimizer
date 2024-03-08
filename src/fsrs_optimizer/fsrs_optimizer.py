@@ -1145,7 +1145,9 @@ class Optimizer:
                     (
                         f"{ivl}d"
                         if ivl < 30
-                        else f"{ivl / 30:.1f}m" if ivl < 365 else f"{ivl / 365:.1f}y"
+                        else f"{ivl / 30:.1f}m"
+                        if ivl < 365
+                        else f"{ivl / 365:.1f}y"
                     )
                     for ivl in map(int, t_history.split(","))
                 ]
@@ -1193,9 +1195,9 @@ class Optimizer:
         self.difficulty_distribution_padding = np.zeros(10)
         for i in range(10):
             if i + 1 in self.difficulty_distribution.index:
-                self.difficulty_distribution_padding[i] = (
-                    self.difficulty_distribution.loc[i + 1]
-                )
+                self.difficulty_distribution_padding[
+                    i
+                ] = self.difficulty_distribution.loc[i + 1]
         return self.difficulty_distribution
 
     def find_optimal_retention(
@@ -1870,3 +1872,22 @@ def rmse_matrix(df):
     return mean_squared_error(
         tmp["y"], tmp["p"], sample_weight=tmp["card_id"], squared=False
     )
+
+
+if __name__ == "__main__":
+    model = FSRS(DEFAULT_WEIGHT)
+    stability = torch.tensor([5.0] * 4)
+    difficulty = torch.tensor([1.0, 2.0, 3.0, 4.0])
+    retention = torch.tensor([0.9, 0.8, 0.7, 0.6])
+    rating = torch.tensor([1, 2, 3, 4])
+    state = torch.stack([stability, difficulty]).unsqueeze(0)
+    s_recall = model.stability_after_success(state, retention, rating)
+    print(s_recall)
+    s_forget = model.stability_after_failure(state, retention)
+    print(s_forget)
+
+    retentions = torch.tensor([0.1, 0.2, 0.3, 0.4])
+    labels = torch.tensor([0.0, 1.0, 0.0, 1.0])
+    loss_fn = nn.BCELoss()
+    loss = loss_fn(retentions, labels)
+    print(loss)
