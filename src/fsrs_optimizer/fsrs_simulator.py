@@ -61,6 +61,7 @@ def simulate(
     review_cnt_per_day = np.zeros(learn_span)
     learn_cnt_per_day = np.zeros(learn_span)
     memorized_cnt_per_day = np.zeros(learn_span)
+    cost_per_day = np.zeros(learn_span)
 
     def stability_after_success(s, r, d, response):
         hard_penalty = np.where(response == 2, w[15], 1)
@@ -176,7 +177,14 @@ def simulate(
         review_cnt_per_day[today] = np.sum(true_review)
         learn_cnt_per_day[today] = np.sum(true_learn)
         memorized_cnt_per_day[today] = card_table[col["retrievability"]].sum()
-    return card_table, review_cnt_per_day, learn_cnt_per_day, memorized_cnt_per_day
+        cost_per_day[today] = card_table[col["cost"]][true_review | true_learn].sum()
+    return (
+        card_table,
+        review_cnt_per_day,
+        learn_cnt_per_day,
+        memorized_cnt_per_day,
+        cost_per_day,
+    )
 
 
 def optimal_retention(**kwargs):
@@ -200,7 +208,7 @@ def sample(
 ):
     memorization = []
     for i in range(SAMPLE_SIZE):
-        _, _, _, memorized_cnt_per_day = simulate(
+        _, _, _, memorized_cnt_per_day, _ = simulate(
             w,
             request_retention=r,
             deck_size=deck_size,
@@ -613,7 +621,7 @@ if __name__ == "__main__":
         "first_rating_prob": np.array([0.15, 0.2, 0.6, 0.05]),
         "review_rating_prob": np.array([0.3, 0.6, 0.1]),
     }
-    (_, review_cnt_per_day, learn_cnt_per_day, memorized_cnt_per_day) = simulate(
+    (_, review_cnt_per_day, learn_cnt_per_day, memorized_cnt_per_day, _) = simulate(
         w=default_params["w"],
         max_cost_perday=math.inf,
         learn_limit_perday=10,

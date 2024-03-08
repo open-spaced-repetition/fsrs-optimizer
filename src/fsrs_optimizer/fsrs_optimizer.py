@@ -1283,9 +1283,13 @@ class Optimizer:
         if not verbose:
             return ()
 
-        (_, review_cnt_per_day, learn_cnt_per_day, memorized_cnt_per_day) = simulate(
-            **simulate_config
-        )
+        (
+            _,
+            review_cnt_per_day,
+            learn_cnt_per_day,
+            memorized_cnt_per_day,
+            cost_per_day,
+        ) = simulate(**simulate_config)
 
         def moving_average(data, window_size=365 // 20):
             weights = np.ones(window_size) / window_size
@@ -1324,9 +1328,16 @@ class Optimizer:
         ax.legend()
         ax.grid(True)
 
-        fig5 = workload_graph(simulate_config)
+        fig5 = plt.figure()
+        ax = fig5.gca()
+        ax.plot(cost_per_day, label=f"R={self.optimal_retention*100:.0f}%")
+        ax.set_title("Cost per Day")
+        ax.legend()
+        ax.grid(True)
 
-        return (fig1, fig2, fig3, fig4, fig5)
+        fig6 = workload_graph(simulate_config)
+
+        return (fig1, fig2, fig3, fig4, fig5, fig6)
 
     def evaluate(self, save_to_file=True):
         my_collection = Collection(DEFAULT_WEIGHT)
@@ -1870,3 +1881,22 @@ def rmse_matrix(df):
     return mean_squared_error(
         tmp["y"], tmp["p"], sample_weight=tmp["card_id"], squared=False
     )
+
+
+if __name__ == "__main__":
+    model = FSRS(DEFAULT_WEIGHT)
+    stability = torch.tensor([5.0] * 4)
+    difficulty = torch.tensor([1.0, 2.0, 3.0, 4.0])
+    retention = torch.tensor([0.9, 0.8, 0.7, 0.6])
+    rating = torch.tensor([1, 2, 3, 4])
+    state = torch.stack([stability, difficulty]).unsqueeze(0)
+    s_recall = model.stability_after_success(state, retention, rating)
+    print(s_recall)
+    s_forget = model.stability_after_failure(state, retention)
+    print(s_forget)
+
+    retentions = torch.tensor([0.1, 0.2, 0.3, 0.4])
+    labels = torch.tensor([0.0, 1.0, 0.0, 1.0])
+    loss_fn = nn.BCELoss()
+    loss = loss_fn(retentions, labels)
+    print(loss)
