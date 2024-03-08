@@ -1145,9 +1145,7 @@ class Optimizer:
                     (
                         f"{ivl}d"
                         if ivl < 30
-                        else f"{ivl / 30:.1f}m"
-                        if ivl < 365
-                        else f"{ivl / 365:.1f}y"
+                        else f"{ivl / 30:.1f}m" if ivl < 365 else f"{ivl / 365:.1f}y"
                     )
                     for ivl in map(int, t_history.split(","))
                 ]
@@ -1195,9 +1193,9 @@ class Optimizer:
         self.difficulty_distribution_padding = np.zeros(10)
         for i in range(10):
             if i + 1 in self.difficulty_distribution.index:
-                self.difficulty_distribution_padding[
-                    i
-                ] = self.difficulty_distribution.loc[i + 1]
+                self.difficulty_distribution_padding[i] = (
+                    self.difficulty_distribution.loc[i + 1]
+                )
         return self.difficulty_distribution
 
     def find_optimal_retention(
@@ -1285,9 +1283,13 @@ class Optimizer:
         if not verbose:
             return ()
 
-        (_, review_cnt_per_day, learn_cnt_per_day, memorized_cnt_per_day) = simulate(
-            **simulate_config
-        )
+        (
+            _,
+            review_cnt_per_day,
+            learn_cnt_per_day,
+            memorized_cnt_per_day,
+            cost_per_day,
+        ) = simulate(**simulate_config)
 
         def moving_average(data, window_size=365 // 20):
             weights = np.ones(window_size) / window_size
@@ -1326,9 +1328,16 @@ class Optimizer:
         ax.legend()
         ax.grid(True)
 
-        fig5 = workload_graph(simulate_config)
+        fig5 = plt.figure()
+        ax = fig5.gca()
+        ax.plot(cost_per_day, label=f"R={self.optimal_retention*100:.0f}%")
+        ax.set_title("Cost per Day")
+        ax.legend()
+        ax.grid(True)
 
-        return (fig1, fig2, fig3, fig4, fig5)
+        fig6 = workload_graph(simulate_config)
+
+        return (fig1, fig2, fig3, fig4, fig5, fig6)
 
     def evaluate(self, save_to_file=True):
         my_collection = Collection(DEFAULT_WEIGHT)
