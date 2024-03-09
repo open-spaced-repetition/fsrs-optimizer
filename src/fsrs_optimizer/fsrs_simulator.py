@@ -208,7 +208,7 @@ def sample(
 ):
     memorization = []
     for i in range(SAMPLE_SIZE):
-        _, _, _, memorized_cnt_per_day, _ = simulate(
+        _, _, _, memorized_cnt_per_day, cost_per_day = simulate(
             w,
             request_retention=r,
             deck_size=deck_size,
@@ -224,7 +224,7 @@ def sample(
             review_rating_prob=review_rating_prob,
             seed=42 + i,
         )
-        memorization.append(memorized_cnt_per_day[-1])
+        memorization.append(cost_per_day.sum() / memorized_cnt_per_day[-1])
     return np.mean(memorization)
 
 
@@ -236,15 +236,15 @@ def bracket(xa=0.75, xb=0.95, maxiter=20, **kwargs):
     gold = 1.6180339
     verysmall_num = 1e-21
 
-    fa = -sample(xa, **kwargs)
-    fb = -sample(xb, **kwargs)
+    fa = sample(xa, **kwargs)
+    fb = sample(xb, **kwargs)
     funccalls = 2
 
     if fa < fb:  # Switch so fa > fb
         xa, xb = xb, xa
         fa, fb = fb, fa
     xc = max(min(xb + gold * (xb - xa), u_lim), l_lim)
-    fc = -sample(xc, **kwargs)
+    fc = sample(xc, **kwargs)
     funccalls += 1
 
     iter = 0
@@ -265,7 +265,7 @@ def bracket(xa=0.75, xb=0.95, maxiter=20, **kwargs):
 
         iter += 1
         if (w - xc) * (xb - w) > 0.0:
-            fw = -sample(w, **kwargs)
+            fw = sample(w, **kwargs)
             funccalls += 1
             if fw < fc:
                 xa = max(min(xb, u_lim), l_lim)
@@ -278,14 +278,14 @@ def bracket(xa=0.75, xb=0.95, maxiter=20, **kwargs):
                 fc = fw
                 break
             w = max(min(xc + gold * (xc - xb), u_lim), l_lim)
-            fw = -sample(w, **kwargs)
+            fw = sample(w, **kwargs)
             funccalls += 1
         elif (w - wlim) * (wlim - xc) >= 0.0:
             w = wlim
-            fw = -sample(w, **kwargs)
+            fw = sample(w, **kwargs)
             funccalls += 1
         elif (w - wlim) * (xc - w) > 0.0:
-            fw = -sample(w, **kwargs)
+            fw = sample(w, **kwargs)
             funccalls += 1
             if fw < fc:
                 xb = max(min(xc, u_lim), l_lim)
@@ -293,11 +293,11 @@ def bracket(xa=0.75, xb=0.95, maxiter=20, **kwargs):
                 w = max(min(xc + gold * (xc - xb), u_lim), l_lim)
                 fb = fc
                 fc = fw
-                fw = -sample(w, **kwargs)
+                fw = sample(w, **kwargs)
                 funccalls += 1
         else:
             w = max(min(xc + gold * (xc - xb), u_lim), l_lim)
-            fw = -sample(w, **kwargs)
+            fw = sample(w, **kwargs)
             funccalls += 1
         xa = max(min(xb, u_lim), l_lim)
         xb = max(min(xc, u_lim), l_lim)
@@ -382,7 +382,7 @@ def brent(tol=0.01, maxiter=20, **kwargs):
                 u = x - tol1
         else:
             u = x + rat
-        fu = -sample(u, **kwargs)  # calculate new output value
+        fu = sample(u, **kwargs)  # calculate new output value
         funccalls += 1
 
         if fu > fx:  # if it's bigger than current

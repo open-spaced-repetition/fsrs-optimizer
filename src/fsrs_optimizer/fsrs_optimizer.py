@@ -1200,13 +1200,13 @@ class Optimizer:
 
     def find_optimal_retention(
         self,
-        deck_size=10000,
+        deck_size=3650,
         learn_span=365,
-        max_cost_perday=1800,
+        max_cost_perday=math.inf,
         max_ivl=36500,
-        learn_limit_perday=math.inf,
+        learn_limit_perday=10,
         review_limit_perday=math.inf,
-        loss_aversion=2.5,
+        loss_aversion=1,
         verbose=True,
     ):
         """should not be called before predict_memory_states"""
