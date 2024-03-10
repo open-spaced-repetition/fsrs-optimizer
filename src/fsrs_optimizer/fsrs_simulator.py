@@ -33,7 +33,7 @@ columns = [
 ]
 col = {key: i for i, key in enumerate(columns)}
 
-SAMPLE_SIZE = 5
+SAMPLE_SIZE = 4
 
 
 def simulate(

@@ -1200,12 +1200,8 @@ class Optimizer:
 
     def find_optimal_retention(
         self,
-        deck_size=3650,
         learn_span=365,
-        max_cost_perday=math.inf,
         max_ivl=36500,
-        learn_limit_perday=10,
-        review_limit_perday=math.inf,
         loss_aversion=1,
         verbose=True,
     ):
@@ -1261,11 +1257,11 @@ class Optimizer:
 
         simulate_config = {
             "w": self.w,
-            "deck_size": deck_size,
+            "deck_size": learn_span * 10,
             "learn_span": learn_span,
-            "max_cost_perday": max_cost_perday,
-            "learn_limit_perday": learn_limit_perday,
-            "review_limit_perday": review_limit_perday,
+            "max_cost_perday": math.inf,
+            "learn_limit_perday": 10,
+            "review_limit_perday": math.inf,
             "max_ivl": max_ivl,
             "recall_costs": self.recall_costs,
             "forget_cost": forget_cost,
