@@ -432,7 +432,7 @@ def brent(tol=0.01, maxiter=20, **kwargs):
 
 def workload_graph(default_params):
     R = [x / 100 for x in range(70, 100)]
-    cost_per_memorization = [1 / sample(r, **default_params) for r in R]
+    cost_per_memorization = [sample(r, **default_params) for r in R]
 
     # this is for testing
     # cost_per_memorization = [min(x, 2.3 * min(cost_per_memorization)) for x in cost_per_memorization]
