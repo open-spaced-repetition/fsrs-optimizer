@@ -179,10 +179,12 @@ def lineToTensor(line: str) -> Tensor:
 
 
 class BatchDataset(Dataset):
-    def __init__(self, dataframe: pd.DataFrame, batch_size: int = 0):
+    def __init__(
+        self, dataframe: pd.DataFrame, batch_size: int = 0, sort_by_length: bool = True
+    ):
         if dataframe.empty:
             raise ValueError("Training data is inadequate.")
-        if batch_size > 0:
+        if sort_by_length > 0:
             dataframe = dataframe.sort_values(by=["i"])
         self.x_train = pad_sequence(
             dataframe["tensor"].to_list(), batch_first=True, padding_value=0
@@ -219,20 +221,23 @@ class BatchDataset(Dataset):
 
 
 class BatchLoader:
-    def __init__(self, dataset: BatchDataset):
+    def __init__(self, dataset: BatchDataset, shuffle: bool = True, seed: int = 2023):
         self.dataset = dataset
         self.batch_nums = len(dataset.batches)
-        seed = 2023
+        self.shuffle = shuffle
         self.generator = torch.Generator()
         self.generator.manual_seed(seed)
 
     def __iter__(self):
-        yield from (
-            self.dataset[idx]
-            for idx in torch.randperm(
-                self.batch_nums, generator=self.generator
-            ).tolist()
-        )
+        if self.shuffle:
+            yield from (
+                self.dataset[idx]
+                for idx in torch.randperm(
+                    self.batch_nums, generator=self.generator
+                ).tolist()
+            )
+        else:
+            yield from (self.dataset[idx] for idx in range(self.batch_nums))
 
     def __len__(self):
         return self.batch_nums
