@@ -17,7 +17,7 @@ from torch import Tensor
 from torch.utils.data import Dataset
 from torch.nn.utils.rnn import pad_sequence
 from sklearn.model_selection import StratifiedGroupKFold, TimeSeriesSplit
-from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
+from sklearn.metrics import root_mean_squared_error, mean_absolute_error, r2_score
 from scipy.optimize import minimize
 from itertools import accumulate
 from tqdm.auto import tqdm
@@ -184,7 +184,7 @@ class BatchDataset(Dataset):
     ):
         if dataframe.empty:
             raise ValueError("Training data is inadequate.")
-        if sort_by_length > 0:
+        if sort_by_length:
             dataframe = dataframe.sort_values(by=["i"])
         self.x_train = pad_sequence(
             dataframe["tensor"].to_list(), batch_first=True, padding_value=0
@@ -624,7 +624,7 @@ class Optimizer:
         ).to_julian_date()
         df.drop_duplicates(["card_id", "real_days"], keep="first", inplace=True)
         df["delta_t"] = df.real_days.diff()
-        df["delta_t"].fillna(0, inplace=True)
+        df.fillna({"delta_t": 0}, inplace=True)
         df["i"] = df.groupby("card_id").cumcount() + 1
         df.loc[df["i"] == 1, "delta_t"] = 0
         if df.empty:
@@ -856,8 +856,8 @@ class Optimizer:
             rating_stability[int(first_rating)] = stability
             rating_count[int(first_rating)] = sum(count)
             predict_recall = power_forgetting_curve(delta_t, *params)
-            rmse = mean_squared_error(
-                recall, predict_recall, sample_weight=count, squared=False
+            rmse = root_mean_squared_error(
+                recall, predict_recall, sample_weight=count
             )
 
             if verbose:
@@ -1555,11 +1555,10 @@ class Optimizer:
                 analysis_group.dropna(inplace=True)
                 analysis_group.drop_duplicates(subset=[(group_key, "")], inplace=True)
                 analysis_group.sort_values(by=[group_key], inplace=True)
-                rmse = mean_squared_error(
+                rmse = root_mean_squared_error(
                     analysis_group["true_s"],
                     analysis_group["predicted_s"],
                     sample_weight=analysis_group["total_count"],
-                    squared=False,
                 )
                 fig = plt.figure()
                 ax1 = fig.add_subplot(111)
@@ -1824,11 +1823,10 @@ def cross_comparison(dataset, algoA, algoB):
         cross_comparison_group = cross_comparison_record.groupby(by=f"{algoA}_bin").agg(
             {"y": ["mean"], f"{algoB}_B-W": ["mean"], f"R ({algoB})": ["mean", "count"]}
         )
-        universal_metric = mean_squared_error(
+        universal_metric = root_mean_squared_error(
             y_true=cross_comparison_group["y", "mean"],
             y_pred=cross_comparison_group[f"R ({algoB})", "mean"],
             sample_weight=cross_comparison_group[f"R ({algoB})", "count"],
-            squared=False,
         )
         cross_comparison_group[f"R ({algoB})", "percent"] = (
             cross_comparison_group[f"R ({algoB})", "count"]
@@ -1879,8 +1877,8 @@ def rmse_matrix(df):
         .agg({"y": "mean", "p": "mean", "card_id": "count"})
         .reset_index()
     )
-    return mean_squared_error(
-        tmp["y"], tmp["p"], sample_weight=tmp["card_id"], squared=False
+    return root_mean_squared_error(
+        tmp["y"], tmp["p"], sample_weight=tmp["card_id"]
     )
 
 
