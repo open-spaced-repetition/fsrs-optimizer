@@ -400,7 +400,7 @@ class Collection:
             return output_t[-1][0]
 
     def batch_predict(self, dataset):
-        fast_dataset = BatchDataset(dataset)
+        fast_dataset = BatchDataset(dataset, sort_by_length=False)
         with torch.no_grad():
             outputs, _ = self.model(fast_dataset.x_train.transpose(0, 1))
             stabilities, difficulties = outputs[
