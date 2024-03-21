@@ -856,9 +856,7 @@ class Optimizer:
             rating_stability[int(first_rating)] = stability
             rating_count[int(first_rating)] = sum(count)
             predict_recall = power_forgetting_curve(delta_t, *params)
-            rmse = root_mean_squared_error(
-                recall, predict_recall, sample_weight=count
-            )
+            rmse = root_mean_squared_error(recall, predict_recall, sample_weight=count)
 
             if verbose:
                 fig = plt.figure()
@@ -1506,7 +1504,8 @@ class Optimizer:
                     analysis_df[analysis_df["r_history"].str.endswith(last_rating)]
                     .groupby(
                         by=["last_s_bin", "last_d_bin", "last_r_bin", "delta_t"],
-                        group_keys=False,
+                        group_keys=True,
+                        as_index=False,
                     )
                     .agg(
                         {
@@ -1517,12 +1516,15 @@ class Optimizer:
                         }
                     )
                 )
-                analysis_group.reset_index(inplace=True)
+                analysis_group.columns = [
+                    "_".join(col_name).rstrip("_")
+                    for col_name in analysis_group.columns
+                ]
 
                 def cal_stability(tmp):
                     delta_t = tmp["delta_t"]
-                    recall = tmp["y"]["mean"]
-                    count = tmp["y"]["count"]
+                    recall = tmp["y_mean"]
+                    count = tmp["y_count"]
                     total_count = sum(count)
 
                     def loss(stability):
@@ -1542,18 +1544,16 @@ class Optimizer:
                     else:
                         tmp["true_s"] = np.nan
                     tmp["predicted_s"] = np.average(
-                        tmp["stability"]["mean"], weights=count
+                        tmp["stability_mean"], weights=count
                     )
                     tmp["total_count"] = total_count
                     return tmp
 
-                analysis_group = (
-                    analysis_group.groupby(by=[group_key], group_keys=False)
-                    .apply(cal_stability)
-                    .reset_index(drop=True)
-                )
+                analysis_group = analysis_group.groupby(
+                    by=[group_key], group_keys=False
+                ).apply(cal_stability)
                 analysis_group.dropna(inplace=True)
-                analysis_group.drop_duplicates(subset=[(group_key, "")], inplace=True)
+                analysis_group.drop_duplicates(subset=[group_key], inplace=True)
                 analysis_group.sort_values(by=[group_key], inplace=True)
                 rmse = root_mean_squared_error(
                     analysis_group["true_s"],
@@ -1877,9 +1877,7 @@ def rmse_matrix(df):
         .agg({"y": "mean", "p": "mean", "card_id": "count"})
         .reset_index()
     )
-    return root_mean_squared_error(
-        tmp["y"], tmp["p"], sample_weight=tmp["card_id"]
-    )
+    return root_mean_squared_error(tmp["y"], tmp["p"], sample_weight=tmp["card_id"])
 
 
 if __name__ == "__main__":
