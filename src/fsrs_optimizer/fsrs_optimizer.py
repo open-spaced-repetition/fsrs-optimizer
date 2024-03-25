@@ -247,7 +247,7 @@ class Trainer:
     def __init__(
         self,
         train_set: pd.DataFrame,
-        test_set: pd.DataFrame,
+        test_set: Optional[pd.DataFrame],
         init_w: List[float],
         n_epoch: int = 1,
         lr: float = 1e-2,
@@ -267,7 +267,7 @@ class Trainer:
         self.avg_eval_losses = []
         self.loss_fn = nn.BCELoss(reduction="none")
 
-    def build_dataset(self, train_set: pd.DataFrame, test_set: pd.DataFrame):
+    def build_dataset(self, train_set: pd.DataFrame, test_set: Optional[pd.DataFrame]):
         pre_train_set = train_set[train_set["i"] == 2]
         self.pre_train_set = BatchDataset(pre_train_set, batch_size=self.batch_size)
         self.pre_train_data_loader = BatchLoader(self.pre_train_set)
@@ -279,8 +279,11 @@ class Trainer:
         self.train_set = BatchDataset(train_set, batch_size=self.batch_size)
         self.train_data_loader = BatchLoader(self.train_set)
 
-        self.test_set = BatchDataset(test_set, batch_size=self.batch_size)
-        self.test_data_loader = BatchLoader(self.test_set)
+        self.test_set = (
+            []
+            if test_set is None
+            else BatchDataset(test_set, batch_size=self.batch_size)
+        )
 
     def train(self, verbose: bool = True):
         self.verbose = verbose
@@ -333,33 +336,25 @@ class Trainer:
     def eval(self):
         self.model.eval()
         with torch.no_grad():
-            sequences, delta_ts, labels, seq_lens = (
-                self.train_set.x_train,
-                self.train_set.t_train,
-                self.train_set.y_train,
-                self.train_set.seq_len,
-            )
-            real_batch_size = seq_lens.shape[0]
-            outputs, _ = self.model(sequences.transpose(0, 1))
-            stabilities = outputs[seq_lens - 1, torch.arange(real_batch_size), 0]
-            retentions = power_forgetting_curve(delta_ts, stabilities)
-            train_loss = self.loss_fn(retentions, labels).mean()
-            if self.verbose:
-                tqdm.write(f"train loss: {train_loss:.6f}")
-            self.avg_train_losses.append(train_loss)
-
-            sequences, delta_ts, labels, seq_lens = (
-                self.test_set.x_train,
-                self.test_set.t_train,
-                self.test_set.y_train,
-                self.test_set.seq_len,
-            )
-            real_batch_size = seq_lens.shape[0]
-            outputs, _ = self.model(sequences.transpose(0, 1))
-            stabilities = outputs[seq_lens - 1, torch.arange(real_batch_size), 0]
-            retentions = power_forgetting_curve(delta_ts, stabilities)
-            test_loss = self.loss_fn(retentions, labels).mean()
-            self.avg_eval_losses.append(test_loss)
+            losses = []
+            for dataset in (self.train_set, self.test_set):
+                if len(dataset) == 0:
+                    losses.append(0)
+                    continue
+                sequences, delta_ts, labels, seq_lens = (
+                    dataset.x_train,
+                    dataset.t_train,
+                    dataset.y_train,
+                    dataset.seq_len,
+                )
+                real_batch_size = seq_lens.shape[0]
+                outputs, _ = self.model(sequences.transpose(0, 1))
+                stabilities = outputs[seq_lens - 1, torch.arange(real_batch_size), 0]
+                retentions = power_forgetting_curve(delta_ts, stabilities)
+                loss = self.loss_fn(retentions, labels).mean()
+                losses.append(loss)
+            self.avg_train_losses.append(losses[0])
+            self.avg_eval_losses.append(losses[1])
 
             w = list(
                 map(
@@ -369,7 +364,7 @@ class Trainer:
             )
 
             weighted_loss = (
-                train_loss * len(self.train_set) + test_loss * len(self.test_set)
+                losses[0] * len(self.train_set) + losses[1] * len(self.test_set)
             ) / (len(self.train_set) + len(self.test_set))
 
             return weighted_loss, w
