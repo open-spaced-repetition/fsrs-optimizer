@@ -427,8 +427,6 @@ def remove_outliers(group: pd.DataFrame) -> pd.DataFrame:
     ).index
 
     total = sum(grouped_group[("y", "count")])
-    if total <= 20:
-        return pd.DataFrame()
     has_been_removed = 0
     for i in sort_index:
         count = grouped_group.loc[i, ("y", "count")]
