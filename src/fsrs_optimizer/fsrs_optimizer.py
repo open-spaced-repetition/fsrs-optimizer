@@ -814,10 +814,11 @@ class Optimizer:
             group = self.S0_dataset_group[
                 self.S0_dataset_group["r_history"] == first_rating
             ]
-            if group.empty and verbose:
-                tqdm.write(
-                    f"Not enough data for first rating {first_rating}. Expected at least 1, got 0."
-                )
+            if group.empty:
+                if verbose:
+                    tqdm.write(
+                        f"Not enough data for first rating {first_rating}. Expected at least 1, got 0."
+                    )
                 continue
             delta_t = group["delta_t"]
             recall = (group["y"]["mean"] * group["y"]["count"] + average_recall * 1) / (
