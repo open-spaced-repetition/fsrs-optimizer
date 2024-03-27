@@ -60,7 +60,7 @@ def process(filepath, filter_out_flags: list[int]):
 
         remembered_fallback_prompt("next_day", "used next day start hour")
         remembered_fallback_prompt(
-            "revlog_start_date", "the date at which before reviews will be ignored"
+            "revlog_start_date", "the date at which before reviews will be ignored | YYYY-MM-DD"
         )
         remembered_fallback_prompt(
             "filter_out_suspended_cards", "filter out suspended cards? (y/n)"
