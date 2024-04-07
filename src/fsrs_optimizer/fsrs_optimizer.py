@@ -18,7 +18,7 @@ from torch.utils.data import Dataset
 from torch.nn.utils.rnn import pad_sequence
 from sklearn.model_selection import TimeSeriesSplit
 from sklearn.metrics import root_mean_squared_error, mean_absolute_error, r2_score
-from scipy.optimize import minimize
+from scipy.optimize import minimize, curve_fit
 from itertools import accumulate
 from tqdm.auto import tqdm
 import warnings
@@ -709,15 +709,15 @@ class Optimizer:
                 return pd.DataFrame()
             group["group_cnt"] = group_cnt
             if group["i"].values[0] > 1:
-                r_ivl_cnt = sum(
-                    group["delta_t"]
-                    * group["retention"].map(np.log)
-                    * pow(group["total_cnt"], 2)
+                group["stability"] = round(
+                    curve_fit(
+                        power_forgetting_curve,
+                        group["delta_t"],
+                        group["retention"],
+                        sigma=1 / group["total_cnt"],
+                    )[0][0],
+                    1,
                 )
-                ivl_ivl_cnt = sum(
-                    group["delta_t"].map(lambda x: x**2) * pow(group["total_cnt"], 2)
-                )
-                group["stability"] = round(np.log(0.9) / (r_ivl_cnt / ivl_ivl_cnt), 1)
             else:
                 group["stability"] = 0.0
             group["avg_retention"] = round(
@@ -1011,9 +1011,7 @@ class Optimizer:
                 w.append(trainer.train(verbose=verbose))
                 self.w = w[-1]
                 self.evaluate()
-                metrics, figures = self.calibration_graph(
-                    self.dataset.iloc[test_index]
-                )
+                metrics, figures = self.calibration_graph(self.dataset.iloc[test_index])
                 for j, f in enumerate(figures):
                     f.savefig(f"graph_{j}_test_{i}.png")
                     plt.close(f)
