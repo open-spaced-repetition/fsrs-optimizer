@@ -714,7 +714,7 @@ class Optimizer:
                         power_forgetting_curve,
                         group["delta_t"],
                         group["retention"],
-                        sigma=1 / group["total_cnt"],
+                        sigma=1 / np.sqrt(group["total_cnt"]),
                     )[0][0],
                     1,
                 )
