@@ -60,7 +60,8 @@ def process(filepath, filter_out_flags: list[int]):
 
         remembered_fallback_prompt("next_day", "used next day start hour")
         remembered_fallback_prompt(
-            "revlog_start_date", "the date at which before reviews will be ignored | YYYY-MM-DD"
+            "revlog_start_date",
+            "the date at which before reviews will be ignored | YYYY-MM-DD",
         )
         remembered_fallback_prompt(
             "filter_out_suspended_cards", "filter out suspended cards? (y/n)"
@@ -113,10 +114,14 @@ def process(filepath, filter_out_flags: list[int]):
         plt.close(f)
 
     optimizer.predict_memory_states()
-    figures = optimizer.find_optimal_retention(verbose=save_graphs)
-    for i, f in enumerate(figures):
-        f.savefig(f"find_optimal_retention_{i}.png")
-        plt.close(f)
+    try:
+        figures = optimizer.find_optimal_retention(verbose=save_graphs)
+        for i, f in enumerate(figures):
+            f.savefig(f"find_optimal_retention_{i}.png")
+            plt.close(f)
+    except:
+        print("Failed to find optimal retention")
+        optimizer.optimal_retention = 0.9
 
     optimizer.preview(optimizer.optimal_retention)
 
