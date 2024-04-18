@@ -598,8 +598,7 @@ class Optimizer:
                 1,
             )
 
-            df["review_duration"] = df["review_duration"].astype(int)
-            df["review_state"] = df["review_state"].astype(int)
+            df.drop(columns=["review_duration", "review_state"], inplace=True)
 
         df["review_date"] = pd.to_datetime(df["review_time"] // 1000, unit="s")
         df["review_date"] = (
@@ -690,8 +689,6 @@ class Optimizer:
             columns=[
                 "review_time",
                 "card_id",
-                "review_duration",
-                "review_state",
                 "review_date",
                 "real_days",
                 "review_rating",
