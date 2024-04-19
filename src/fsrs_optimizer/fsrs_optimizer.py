@@ -820,7 +820,6 @@ class Optimizer:
                 group["y"]["count"] + 1
             )
             count = group["y"]["count"]
-            weight = np.sqrt(count)
 
             init_s0 = r_s0_default[first_rating]
 
@@ -828,7 +827,7 @@ class Optimizer:
                 y_pred = power_forgetting_curve(delta_t, stability)
                 logloss = sum(
                     -(recall * np.log(y_pred) + (1 - recall) * np.log(1 - y_pred))
-                    * weight
+                    * count
                 )
                 l1 = np.abs(stability - init_s0) / 16
                 return logloss + l1
@@ -837,7 +836,7 @@ class Optimizer:
                 loss,
                 x0=init_s0,
                 bounds=((S_MIN, 100),),
-                options={"maxiter": int(sum(weight))},
+                options={"maxiter": int(sum(count))},
             )
             params = res.x
             stability = params[0]
