@@ -443,6 +443,18 @@ def remove_non_continuous_rows(group):
         return group.loc[: first_non_continuous_index - 1]
 
 
+def fit_stability(delta_t, retention, size):
+    def loss(stability):
+        y_pred = power_forgetting_curve(delta_t, stability)
+        loss = sum(
+            -(retention * np.log(y_pred) + (1 - retention) * np.log(1 - y_pred)) * size
+        )
+        return loss
+
+    res = minimize(loss, x0=1, bounds=[(S_MIN, 36500)])
+    return res.x[0]
+
+
 class Optimizer:
     def __init__(self) -> None:
         tqdm.pandas()
@@ -707,12 +719,9 @@ class Optimizer:
             group["group_cnt"] = group_cnt
             if group["i"].values[0] > 1:
                 group["stability"] = round(
-                    curve_fit(
-                        power_forgetting_curve,
-                        group["delta_t"],
-                        group["retention"],
-                        sigma=1 / np.sqrt(group["total_cnt"]),
-                    )[0][0],
+                    fit_stability(
+                        group["delta_t"], group["retention"], group["total_cnt"]
+                    ),
                     1,
                 )
             else:
@@ -1493,22 +1502,7 @@ class Optimizer:
                     count = tmp["y_count"]
                     total_count = sum(count)
 
-                    def loss(stability):
-                        y_pred = power_forgetting_curve(delta_t, stability)
-                        logloss = sum(
-                            -(
-                                recall * np.log(y_pred)
-                                + (1 - recall) * np.log(1 - y_pred)
-                            )
-                            * np.sqrt(count)
-                        )
-                        return logloss
-
-                    res = minimize(loss, 1, bounds=((S_MIN, 3650),))
-                    if res.success:
-                        tmp["true_s"] = res.x[0]
-                    else:
-                        tmp["true_s"] = np.nan
+                    tmp["true_s"] = fit_stability(delta_t, recall, count)
                     tmp["predicted_s"] = np.average(
                         tmp["stability_mean"], weights=count
                     )
