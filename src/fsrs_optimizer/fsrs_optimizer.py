@@ -426,11 +426,12 @@ def remove_outliers(group: pd.DataFrame) -> pd.DataFrame:
         count = grouped_group.loc[i, ("y", "count")]
         delta_t = grouped_group.loc[i, "delta_t"].values[0]
         if has_been_removed + count >= max(total * 0.05, 20):
-            break
-        else:
             if count < 6 or delta_t > (100 if group.name[0] != "4" else 365):
                 group.drop(group[group["delta_t"] == delta_t].index, inplace=True)
                 has_been_removed += count
+        else:
+            group.drop(group[group["delta_t"] == delta_t].index, inplace=True)
+            has_been_removed += count
     return group
 
 
