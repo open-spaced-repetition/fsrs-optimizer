@@ -597,15 +597,22 @@ class Optimizer:
             )
 
             self.recall_costs = np.zeros(3)
+            recall_card_revlog = recall_card_revlog[
+                recall_card_revlog["review_duration"] > 0
+            ]
             recall_costs = recall_card_revlog.groupby(by="review_rating")[
                 "review_duration"
             ].median()
             self.recall_costs[recall_costs.index - 2] = recall_costs / 1000
 
-            self.state_sequence = np.array(df["review_state"])
-            self.duration_sequence = np.array(df["review_duration"])
+            self.state_sequence = np.array(
+                df[df["review_duration"] > 0]["review_state"]
+            )
+            self.duration_sequence = np.array(
+                df[df["review_duration"] > 0]["review_duration"]
+            )
             self.learn_cost = round(
-                df[df["review_state"] == Learning]
+                df[(df["review_state"] == Learning) & (df["review_duration"] > 0)]
                 .groupby("card_id")
                 .agg({"review_duration": "sum"})["review_duration"]
                 .median()
@@ -1127,7 +1134,9 @@ class Optimizer:
                     (
                         f"{ivl}d"
                         if ivl < 30
-                        else f"{ivl / 30:.1f}m" if ivl < 365 else f"{ivl / 365:.1f}y"
+                        else f"{ivl / 30:.1f}m"
+                        if ivl < 365
+                        else f"{ivl / 365:.1f}y"
                     )
                     for ivl in map(int, t_history.split(","))
                 ]
@@ -1174,9 +1183,9 @@ class Optimizer:
         self.difficulty_distribution_padding = np.zeros(10)
         for i in range(10):
             if i + 1 in self.difficulty_distribution.index:
-                self.difficulty_distribution_padding[i] = (
-                    self.difficulty_distribution.loc[i + 1]
-                )
+                self.difficulty_distribution_padding[
+                    i
+                ] = self.difficulty_distribution.loc[i + 1]
         return self.difficulty_distribution
 
     def find_optimal_retention(
