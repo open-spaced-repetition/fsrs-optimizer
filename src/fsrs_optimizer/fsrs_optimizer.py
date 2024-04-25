@@ -598,7 +598,8 @@ class Optimizer:
 
             self.recall_costs = np.zeros(3)
             recall_card_revlog = recall_card_revlog[
-                recall_card_revlog["review_duration"] > 0
+                (recall_card_revlog["review_duration"] > 0)
+                & (df["review_duration"] < 1200000)
             ]
             recall_costs = recall_card_revlog.groupby(by="review_rating")[
                 "review_duration"
@@ -606,13 +607,21 @@ class Optimizer:
             self.recall_costs[recall_costs.index - 2] = recall_costs / 1000
 
             self.state_sequence = np.array(
-                df[df["review_duration"] > 0]["review_state"]
+                df[(df["review_duration"] > 0) & (df["review_duration"] < 1200000)][
+                    "review_state"
+                ]
             )
             self.duration_sequence = np.array(
-                df[df["review_duration"] > 0]["review_duration"]
+                df[(df["review_duration"] > 0) & (df["review_duration"] < 1200000)][
+                    "review_duration"
+                ]
             )
             self.learn_cost = round(
-                df[(df["review_state"] == Learning) & (df["review_duration"] > 0)]
+                df[
+                    (df["review_state"] == Learning)
+                    & (df["review_duration"] > 0)
+                    & (df["review_duration"] < 1200000)
+                ]
                 .groupby("card_id")
                 .agg({"review_duration": "sum"})["review_duration"]
                 .median()
