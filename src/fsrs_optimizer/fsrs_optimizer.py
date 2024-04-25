@@ -605,9 +605,10 @@ class Optimizer:
             self.state_sequence = np.array(df["review_state"])
             self.duration_sequence = np.array(df["review_duration"])
             self.learn_cost = round(
-                df[df["review_state"] == Learning].groupby("card_id").agg({"review_duration": "sum"})[
-                    "review_duration"
-                ].median()
+                df[df["review_state"] == Learning]
+                .groupby("card_id")
+                .agg({"review_duration": "sum"})["review_duration"]
+                .median()
                 / 1000,
                 1,
             )
@@ -1186,34 +1187,25 @@ class Optimizer:
         verbose=True,
     ):
         """should not be called before predict_memory_states"""
-        recall_cost = 8
-        forget_cost = 25
-
-        state_block = dict()
-        state_count = dict()
-        state_duration = dict()
-
+        state_durations = dict()
         last_state = self.state_sequence[0]
-        state_block[last_state] = 1
-        state_count[last_state] = 1
-        state_duration[last_state] = self.duration_sequence[0]
-        for i, state in enumerate(self.state_sequence[1:]):
-            state_count[state] = state_count.setdefault(state, 0) + 1
-            state_duration[state] = (
-                state_duration.setdefault(state, 0) + self.duration_sequence[i]
-            )
-            if state != last_state:
-                state_block[state] = state_block.setdefault(state, 0) + 1
+        state_durations[last_state] = [self.duration_sequence[0]]
+        for i, state in enumerate(self.state_sequence[1:], start=1):
+            if state not in state_durations:
+                state_durations[state] = []
+            if state == Review:
+                state_durations[state].append(self.duration_sequence[i])
+            else:
+                if state == last_state:
+                    state_durations[state][-1] += self.duration_sequence[i]
+                else:
+                    state_durations[state].append(self.duration_sequence[i])
             last_state = state
 
-        recall_cost = round(state_duration[Review] / state_count[Review] / 1000, 1)
-
-        if Relearning in state_count and Relearning in state_block:
-            forget_cost = round(
-                state_duration[Relearning] / state_block[Relearning] / 1000
-                + recall_cost,
-                1,
-            )
+        recall_cost = round(np.median(state_durations[Review]) / 1000, 1)
+        forget_cost = round(
+            np.median(state_durations[Relearning]) / 1000 + recall_cost, 1
+        )
         if verbose:
             tqdm.write(f"average time for failed reviews: {forget_cost}s")
             tqdm.write(f"average time for recalled reviews: {recall_cost}s")
