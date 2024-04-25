@@ -1134,9 +1134,7 @@ class Optimizer:
                     (
                         f"{ivl}d"
                         if ivl < 30
-                        else f"{ivl / 30:.1f}m"
-                        if ivl < 365
-                        else f"{ivl / 365:.1f}y"
+                        else f"{ivl / 30:.1f}m" if ivl < 365 else f"{ivl / 365:.1f}y"
                     )
                     for ivl in map(int, t_history.split(","))
                 ]
@@ -1183,9 +1181,9 @@ class Optimizer:
         self.difficulty_distribution_padding = np.zeros(10)
         for i in range(10):
             if i + 1 in self.difficulty_distribution.index:
-                self.difficulty_distribution_padding[
-                    i
-                ] = self.difficulty_distribution.loc[i + 1]
+                self.difficulty_distribution_padding[i] = (
+                    self.difficulty_distribution.loc[i + 1]
+                )
         return self.difficulty_distribution
 
     def find_optimal_retention(
