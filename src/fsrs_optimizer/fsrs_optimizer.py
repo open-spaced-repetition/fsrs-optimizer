@@ -18,7 +18,7 @@ from torch.utils.data import Dataset
 from torch.nn.utils.rnn import pad_sequence
 from sklearn.model_selection import TimeSeriesSplit
 from sklearn.metrics import root_mean_squared_error, mean_absolute_error, r2_score
-from scipy.optimize import minimize
+from scipy.optimize import minimize, curve_fit
 from itertools import accumulate
 from tqdm.auto import tqdm
 import warnings
@@ -48,23 +48,23 @@ Review = 2
 Relearning = 3
 
 DEFAULT_WEIGHT = [
-    0.5701,
-    1.4436,
-    4.1386,
-    10.9355,
-    5.1443,
-    1.2006,
-    0.8627,
-    0.0362,
-    1.629,
-    0.1342,
-    1.0166,
-    2.1174,
-    0.0839,
-    0.3204,
-    1.4676,
-    0.219,
-    2.8237,
+    0.4872,
+    1.4003,
+    3.7145,
+    13.8206,
+    5.1618,
+    1.2298,
+    0.8975,
+    0.031,
+    1.6474,
+    0.1367,
+    1.0461,
+    2.1072,
+    0.0793,
+    0.3246,
+    1.587,
+    0.2272,
+    2.8755,
     0.2,
     0,
     1,
@@ -453,11 +453,12 @@ def remove_outliers(group: pd.DataFrame) -> pd.DataFrame:
         count = grouped_group.loc[i, ("y", "count")]
         delta_t = grouped_group.loc[i, "delta_t"].values[0]
         if has_been_removed + count >= max(total * 0.05, 20):
-            break
-        else:
             if count < 6 or delta_t > (100 if group.name[0] != "4" else 365):
                 group.drop(group[group["delta_t"] == delta_t].index, inplace=True)
                 has_been_removed += count
+        else:
+            group.drop(group[group["delta_t"] == delta_t].index, inplace=True)
+            has_been_removed += count
     return group
 
 
@@ -468,6 +469,18 @@ def remove_non_continuous_rows(group):
     else:
         first_non_continuous_index = discontinuity.idxmax()
         return group.loc[: first_non_continuous_index - 1]
+
+
+def fit_stability(delta_t, retention, size):
+    def loss(stability):
+        y_pred = power_forgetting_curve(delta_t, stability)
+        loss = sum(
+            -(retention * np.log(y_pred) + (1 - retention) * np.log(1 - y_pred)) * size
+        )
+        return loss
+
+    res = minimize(loss, x0=1, bounds=[(S_MIN, 36500)])
+    return res.x[0]
 
 
 class Optimizer:
@@ -611,22 +624,39 @@ class Optimizer:
             )
 
             self.recall_costs = np.zeros(3)
+            recall_card_revlog = recall_card_revlog[
+                (recall_card_revlog["review_duration"] > 0)
+                & (df["review_duration"] < 1200000)
+            ]
             recall_costs = recall_card_revlog.groupby(by="review_rating")[
                 "review_duration"
-            ].mean()
+            ].median()
             self.recall_costs[recall_costs.index - 2] = recall_costs / 1000
 
-            self.state_sequence = np.array(df["review_state"])
-            self.duration_sequence = np.array(df["review_duration"])
+            self.state_sequence = np.array(
+                df[(df["review_duration"] > 0) & (df["review_duration"] < 1200000)][
+                    "review_state"
+                ]
+            )
+            self.duration_sequence = np.array(
+                df[(df["review_duration"] > 0) & (df["review_duration"] < 1200000)][
+                    "review_duration"
+                ]
+            )
             self.learn_cost = round(
-                df[df["review_state"] == Learning]["review_duration"].sum()
-                / len(df["card_id"].unique())
+                df[
+                    (df["review_state"] == Learning)
+                    & (df["review_duration"] > 0)
+                    & (df["review_duration"] < 1200000)
+                ]
+                .groupby("card_id")
+                .agg({"review_duration": "sum"})["review_duration"]
+                .median()
                 / 1000,
                 1,
             )
 
-            df["review_duration"] = df["review_duration"].astype(int)
-            df["review_state"] = df["review_state"].astype(int)
+            df.drop(columns=["review_duration", "review_state"], inplace=True)
 
         df["review_date"] = pd.to_datetime(df["review_time"] // 1000, unit="s")
         df["review_date"] = (
@@ -734,8 +764,6 @@ class Optimizer:
             columns=[
                 "review_time",
                 "card_id",
-                "review_duration",
-                "review_state",
                 "review_date",
                 "real_days",
                 "review_rating",
@@ -754,15 +782,12 @@ class Optimizer:
                 return pd.DataFrame()
             group["group_cnt"] = group_cnt
             if group["i"].values[0] > 1:
-                r_ivl_cnt = sum(
-                    group["delta_t"]
-                    * group["retention"].map(np.log)
-                    * pow(group["total_cnt"], 2)
+                group["stability"] = round(
+                    fit_stability(
+                        group["delta_t"], group["retention"], group["total_cnt"]
+                    ),
+                    1,
                 )
-                ivl_ivl_cnt = sum(
-                    group["delta_t"].map(lambda x: x**2) * pow(group["total_cnt"], 2)
-                )
-                group["stability"] = round(np.log(0.9) / (r_ivl_cnt / ivl_ivl_cnt), 1)
             else:
                 group["stability"] = 0.0
             group["avg_retention"] = round(
@@ -871,7 +896,6 @@ class Optimizer:
                 group["y"]["count"] + 1
             )
             count = group["y"]["count"]
-            weight = np.sqrt(count)
 
             init_s0 = r_s0_default[first_rating]
 
@@ -879,7 +903,7 @@ class Optimizer:
                 y_pred = power_forgetting_curve(delta_t, stability)
                 logloss = sum(
                     -(recall * np.log(y_pred) + (1 - recall) * np.log(1 - y_pred))
-                    * weight
+                    * count
                 )
                 l1 = np.abs(stability - init_s0) / 16
                 return logloss + l1
@@ -888,7 +912,7 @@ class Optimizer:
                 loss,
                 x0=init_s0,
                 bounds=((S_MIN, 100),),
-                options={"maxiter": int(sum(weight))},
+                options={"maxiter": int(sum(count))},
             )
             params = res.x
             stability = params[0]
@@ -1059,9 +1083,7 @@ class Optimizer:
                 w.append(trainer.train(verbose=verbose))
                 self.w = w[-1]
                 self.evaluate()
-                metrics, figures = self.calibration_graph(
-                    self.dataset.iloc[test_index]
-                )
+                metrics, figures = self.calibration_graph(self.dataset.iloc[test_index])
                 for j, f in enumerate(figures):
                     f.savefig(f"graph_{j}_test_{i}.png")
                     plt.close(f)
@@ -1229,36 +1251,25 @@ class Optimizer:
         verbose=True,
     ):
         """should not be called before predict_memory_states"""
-        recall_cost = 8
-        forget_cost = 25
-
-        state_block = dict()
-        state_count = dict()
-        state_duration = dict()
-        try:
-            last_state = self.state_sequence[0]
-        except:
-            return ()
-        state_block[last_state] = 1
-        state_count[last_state] = 1
-        state_duration[last_state] = self.duration_sequence[0]
-        for i, state in enumerate(self.state_sequence[1:]):
-            state_count[state] = state_count.setdefault(state, 0) + 1
-            state_duration[state] = (
-                state_duration.setdefault(state, 0) + self.duration_sequence[i]
-            )
-            if state != last_state:
-                state_block[state] = state_block.setdefault(state, 0) + 1
+        state_durations = dict()
+        last_state = self.state_sequence[0]
+        state_durations[last_state] = [self.duration_sequence[0]]
+        for i, state in enumerate(self.state_sequence[1:], start=1):
+            if state not in state_durations:
+                state_durations[state] = []
+            if state == Review:
+                state_durations[state].append(self.duration_sequence[i])
+            else:
+                if state == last_state:
+                    state_durations[state][-1] += self.duration_sequence[i]
+                else:
+                    state_durations[state].append(self.duration_sequence[i])
             last_state = state
 
-        recall_cost = round(state_duration[Review] / state_count[Review] / 1000, 1)
-
-        if Relearning in state_count and Relearning in state_block:
-            forget_cost = round(
-                state_duration[Relearning] / state_block[Relearning] / 1000
-                + recall_cost,
-                1,
-            )
+        recall_cost = round(np.median(state_durations[Review]) / 1000, 1)
+        forget_cost = round(
+            np.median(state_durations[Relearning]) / 1000 + recall_cost, 1
+        )
         if verbose:
             tqdm.write(f"average time for failed reviews: {forget_cost}s")
             tqdm.write(f"average time for recalled reviews: {recall_cost}s")
@@ -1549,22 +1560,7 @@ class Optimizer:
                     count = tmp["y_count"]
                     total_count = sum(count)
 
-                    def loss(stability):
-                        y_pred = power_forgetting_curve(delta_t, stability)
-                        logloss = sum(
-                            -(
-                                recall * np.log(y_pred)
-                                + (1 - recall) * np.log(1 - y_pred)
-                            )
-                            * np.sqrt(count)
-                        )
-                        return logloss
-
-                    res = minimize(loss, 1, bounds=((S_MIN, 3650),))
-                    if res.success:
-                        tmp["true_s"] = res.x[0]
-                    else:
-                        tmp["true_s"] = np.nan
+                    tmp["true_s"] = fit_stability(delta_t, recall, count)
                     tmp["predicted_s"] = np.average(
                         tmp["stability_mean"], weights=count
                     )
