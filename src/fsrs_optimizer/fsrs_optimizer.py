@@ -66,7 +66,6 @@ DEFAULT_WEIGHT = [
     0.2272,
     2.8755,
     0.2,
-    0,
     1,
 ]
 
@@ -102,9 +101,9 @@ class FSRS(nn.Module):
             * torch.exp((1 - r) * self.w[14])
         )
         return torch.minimum(new_s, state[:, 0])
-    
+
     def stability_short_term(self, state: Tensor, rating: Tensor) -> Tensor:
-        new_s = state[:, 0] * torch.exp(self.w[17] * (rating - 3 + self.w[18]))
+        new_s = state[:, 0] * torch.exp(self.w[17] * (rating - 3))
         return new_s
 
     def next_d(self, state: Tensor, rating: Tensor) -> Tensor:
@@ -112,7 +111,7 @@ class FSRS(nn.Module):
         return new_d
 
     def next_d_short_term(self, state: Tensor, rating: Tensor) -> Tensor:
-        new_d = state[:, 1] - self.w[19] * (rating - 3)
+        new_d = state[:, 1] - self.w[18] * (rating - 3)
         return new_d
 
     def step(self, X: Tensor, state: Tensor) -> Tensor:
@@ -190,8 +189,7 @@ class WeightClipper:
             w[15] = w[15].clamp(0, 1)
             w[16] = w[16].clamp(1, 6)
             w[17] = w[17].clamp(0, 1)
-            w[18] = w[18].clamp(0, 1)
-            w[19] = w[19].clamp(0.1, 5)
+            w[18] = w[18].clamp(0.1, 5)
             module.w.data = w
 
 
@@ -684,13 +682,17 @@ class Optimizer:
             lambda x: cum_concat([[int(i)] for i in x])
         )
         df["t_history"] = [
-            ",".join(map(str, item[:-1])) for sublist in t_history_list for item in sublist
+            ",".join(map(str, item[:-1]))
+            for sublist in t_history_list
+            for item in sublist
         ]
         r_history_list = df.groupby("card_id", group_keys=False)["review_rating"].apply(
             lambda x: cum_concat([[i] for i in x])
         )
         df["r_history"] = [
-            ",".join(map(str, item[:-1])) for sublist in r_history_list for item in sublist
+            ",".join(map(str, item[:-1]))
+            for sublist in r_history_list
+            for item in sublist
         ]
         last_rating = []
         for t_sublist, r_sublist in zip(t_history_list, r_history_list):
@@ -711,7 +713,9 @@ class Optimizer:
             * 1000
         )
         df = df[
-            (df["review_rating"] != 0) & (df["r_history"].str.contains("0") == 0) & (df["delta_t"] != 0)
+            (df["review_rating"] != 0)
+            & (df["r_history"].str.contains("0") == 0)
+            & (df["delta_t"] != 0)
         ].copy()
         df["i"] = df.groupby("card_id").cumcount() + 1
         df["first_rating"] = df["r_history"].map(lambda x: x[0] if len(x) > 0 else "")
@@ -740,7 +744,10 @@ class Optimizer:
         df.to_csv("revlog_history.tsv", sep="\t", index=False)
         tqdm.write("Trainset saved.")
 
-        S0_dataset = df[df["i"] == 2]
+        S0_dataset = df[
+            (df["i"] == 2) & (df["r_history"].str.endswith("3"))
+            | (df["r_history"] == "4")
+        ]
         self.S0_dataset_group = (
             S0_dataset.groupby(by=["first_rating", "delta_t"], group_keys=False)
             .agg({"y": ["mean", "count"]})
@@ -752,12 +759,12 @@ class Optimizer:
         if not analysis:
             return
 
-        df["retention"] = df.groupby(by=["i", "r_history", "delta_t"], group_keys=False)[
-            "y"
-        ].transform("mean")
-        df["total_cnt"] = df.groupby(by=["i", "r_history", "delta_t"], group_keys=False)[
-            "review_time"
-        ].transform("count")
+        df["retention"] = df.groupby(
+            by=["i", "r_history", "delta_t"], group_keys=False
+        )["y"].transform("mean")
+        df["total_cnt"] = df.groupby(
+            by=["i", "r_history", "delta_t"], group_keys=False
+        )["review_time"].transform("count")
         tqdm.write("Retention calculated.")
 
         df.drop(
@@ -836,18 +843,22 @@ class Optimizer:
             tqdm.write("Analysis saved!")
             caption = "1:again, 2:hard, 3:good, 4:easy\n"
             df["first_rating"] = df["r_history"].map(lambda x: x[0])
-            analysis = df[df["r_history"].str.contains(r"^[1-4][^124]*$", regex=True)][
-                [   
-                    "first_rating",
-                    "i",
-                    "r_history",
-                    "avg_interval",
-                    "avg_retention",
-                    "stability",
-                    "factor",
-                    "group_cnt",
+            analysis = (
+                df[df["r_history"].str.contains(r"^[1-4][^124]*$", regex=True)][
+                    [
+                        "first_rating",
+                        "i",
+                        "r_history",
+                        "avg_interval",
+                        "avg_retention",
+                        "stability",
+                        "factor",
+                        "group_cnt",
+                    ]
                 ]
-            ].sort_values(by=["first_rating", "i"]).to_string(index=False)
+                .sort_values(by=["first_rating", "i"])
+                .to_string(index=False)
+            )
             return caption + analysis
 
     def define_model(self):
@@ -869,8 +880,7 @@ class Optimizer:
         else:
             self.dataset = dataset
         self.dataset = self.dataset[
-            (self.dataset["i"] > 1)
-            & (self.dataset["delta_t"] > 0)
+            (self.dataset["i"] > 1) & (self.dataset["delta_t"] > 0)
         ]
         if self.dataset.empty:
             raise ValueError("Training data is inadequate.")
@@ -879,7 +889,6 @@ class Optimizer:
         average_recall = self.dataset["y"].mean()
         plots = []
         r_s0_default = {str(i): DEFAULT_WEIGHT[i - 1] for i in range(1, 5)}
-
 
         for first_rating in ("1", "2", "3", "4"):
             group = self.S0_dataset_group[
@@ -1876,7 +1885,17 @@ def cross_comparison(dataset, algoA, algoB):
 
 def rmse_matrix(df):
     tmp = df.copy()
-    tmp["lapse"] = tmp["r_history"].map(lambda x: x.count("1"))
+
+    def count_lapse(r_history, t_history):
+        lapse = 0
+        for r, t in zip(r_history.split(","), t_history.split(",")):
+            if t != "0" and r == "1":
+                lapse += 1
+        return lapse
+
+    tmp["lapse"] = tmp.apply(
+        lambda x: count_lapse(x["r_history"], x["t_history"]), axis=1
+    )
     tmp["delta_t"] = tmp["delta_t"].map(
         lambda x: round(2.48 * np.power(3.62, np.floor(np.log(x) / np.log(3.62))), 2)
     )
