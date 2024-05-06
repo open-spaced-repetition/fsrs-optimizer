@@ -65,8 +65,7 @@ DEFAULT_WEIGHT = [
     1.587,
     0.2272,
     2.8755,
-    0.2,
-    1,
+    0,
 ]
 
 S_MIN = 0.01
@@ -108,11 +107,12 @@ class FSRS(nn.Module):
 
     def next_d(self, state: Tensor, rating: Tensor) -> Tensor:
         new_d = state[:, 1] - self.w[6] * (rating - 3)
+        new_d = self.mean_reversion(self.w[4], new_d)
         return new_d
 
-    def next_d_short_term(self, state: Tensor, rating: Tensor) -> Tensor:
-        new_d = state[:, 1] - self.w[18] * (rating - 3)
-        return new_d
+    # def next_d_short_term(self, state: Tensor, rating: Tensor) -> Tensor:
+    #     new_d = state[:, 1] - self.w[18] * (rating - 3)
+    #     return new_d
 
     def step(self, X: Tensor, state: Tensor) -> Tensor:
         """
@@ -144,10 +144,9 @@ class FSRS(nn.Module):
             )
             new_d = torch.where(
                 short_term,
-                self.next_d_short_term(state, X[:, 1]),
+                state[:, 1],
                 self.next_d(state, X[:, 1]),
             )
-            new_d = self.mean_reversion(self.w[4], new_d)
             new_d = new_d.clamp(1, 10)
         new_s = new_s.clamp(S_MIN, 36500)
         return torch.stack([new_s, new_d], dim=1)
@@ -189,7 +188,6 @@ class WeightClipper:
             w[15] = w[15].clamp(0, 1)
             w[16] = w[16].clamp(1, 6)
             w[17] = w[17].clamp(0, 1)
-            w[18] = w[18].clamp(0.1, 5)
             module.w.data = w
 
 
