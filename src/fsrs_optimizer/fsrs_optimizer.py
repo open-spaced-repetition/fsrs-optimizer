@@ -205,12 +205,17 @@ def lineToTensor(line: str) -> Tensor:
 
 class BatchDataset(Dataset):
     def __init__(
-        self, dataframe: pd.DataFrame, batch_size: int = 0, sort_by_length: bool = True
+        self,
+        dataframe: pd.DataFrame,
+        batch_size: int = 0,
+        sort_by_length: bool = True,
+        max_len: int = math.inf,
     ):
         if dataframe.empty:
             raise ValueError("Training data is inadequate.")
         if sort_by_length:
             dataframe = dataframe.sort_values(by=["i"])
+        dataframe = dataframe[dataframe["tensor"].map(len) <= max_len]
         self.x_train = pad_sequence(
             dataframe["tensor"].to_list(), batch_first=True, padding_value=0
         )
@@ -294,20 +299,26 @@ class Trainer:
 
     def build_dataset(self, train_set: pd.DataFrame, test_set: Optional[pd.DataFrame]):
         pre_train_set = train_set[train_set["i"] == 2]
-        self.pre_train_set = BatchDataset(pre_train_set, batch_size=self.batch_size)
+        self.pre_train_set = BatchDataset(
+            pre_train_set, batch_size=self.batch_size, max_len=128
+        )
         self.pre_train_data_loader = BatchLoader(self.pre_train_set)
 
         next_train_set = train_set[train_set["i"] > 2]
-        self.next_train_set = BatchDataset(next_train_set, batch_size=self.batch_size)
+        self.next_train_set = BatchDataset(
+            next_train_set, batch_size=self.batch_size, max_len=128
+        )
         self.next_train_data_loader = BatchLoader(self.next_train_set)
 
-        self.train_set = BatchDataset(train_set, batch_size=self.batch_size)
+        self.train_set = BatchDataset(
+            train_set, batch_size=self.batch_size, max_len=128
+        )
         self.train_data_loader = BatchLoader(self.train_set)
 
         self.test_set = (
             []
             if test_set is None
-            else BatchDataset(test_set, batch_size=self.batch_size)
+            else BatchDataset(test_set, batch_size=self.batch_size, max_len=128)
         )
 
     def train(self, verbose: bool = True):
