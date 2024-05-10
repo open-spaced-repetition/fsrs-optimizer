@@ -755,12 +755,9 @@ class Optimizer:
         df.to_csv("revlog_history.tsv", sep="\t", index=False)
         tqdm.write("Trainset saved.")
 
-        S0_dataset = df[
-            (df["i"] == 2) & (df["r_history"].str.endswith("3"))
-            | (df["r_history"] == "4")
-        ]
         self.S0_dataset_group = (
-            S0_dataset.groupby(by=["first_rating", "delta_t"], group_keys=False)
+            df[df["i"] == 2]
+            .groupby(by=["first_rating", "delta_t"], group_keys=False)
             .agg({"y": ["mean", "count"]})
             .reset_index()
         )
