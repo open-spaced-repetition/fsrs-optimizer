@@ -332,7 +332,7 @@ class Trainer:
     def train(self, verbose: bool = True):
         self.verbose = verbose
         best_loss = np.inf
-        epoch_len = len(self.next_train_set.y_train)
+        epoch_len = len(self.train_set.y_train)
         if verbose:
             pbar = tqdm(desc="train", colour="red", total=epoch_len * self.n_epoch)
         print_len = max(self.batch_nums * self.n_epoch // 10, 1)
