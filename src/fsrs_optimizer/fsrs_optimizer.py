@@ -67,7 +67,6 @@ DEFAULT_WEIGHT = [
     2.8755,
     0,
     0,
-    0,
 ]
 
 S_MIN = 0.01
@@ -113,7 +112,7 @@ class FSRS(nn.Module):
         return new_d
 
     def next_d_short_term(self, state: Tensor, rating: Tensor) -> Tensor:
-        new_d = state[:, 1] - self.w[19] * (rating - 3)
+        new_d = state[:, 1] - self.w[6] * (rating - 3)
         return new_d
 
     def step(self, X: Tensor, state: Tensor) -> Tensor:
@@ -176,6 +175,10 @@ class WeightClipper:
     def __call__(self, module):
         if hasattr(module, "w"):
             w = module.w.data
+            w[0] = w[0].clamp(S_MIN, 100)
+            w[1] = w[1].clamp(S_MIN, 100)
+            w[2] = w[2].clamp(S_MIN, 100)
+            w[3] = w[3].clamp(S_MIN, 100)
             w[4] = w[4].clamp(1, 10)
             w[5] = w[5].clamp(0.1, 5)
             w[6] = w[6].clamp(0.1, 5)
@@ -191,7 +194,6 @@ class WeightClipper:
             w[16] = w[16].clamp(1, 6)
             w[17] = w[17].clamp(0, 1)
             w[18] = w[18].clamp(0, 1)
-            w[19] = w[19].clamp(0, 1)
             module.w.data = w
 
 
@@ -211,13 +213,13 @@ class BatchDataset(Dataset):
         dataframe: pd.DataFrame,
         batch_size: int = 0,
         sort_by_length: bool = True,
-        max_len: int = math.inf,
+        max_seq_len: int = math.inf,
     ):
         if dataframe.empty:
             raise ValueError("Training data is inadequate.")
         if sort_by_length:
             dataframe = dataframe.sort_values(by=["i"])
-        dataframe = dataframe[dataframe["tensor"].map(len) <= max_len]
+        dataframe = dataframe[dataframe["tensor"].map(len) <= max_seq_len]
         self.x_train = pad_sequence(
             dataframe["tensor"].to_list(), batch_first=True, padding_value=0
         )
@@ -236,8 +238,8 @@ class BatchDataset(Dataset):
                 end_index = min((i + 1) * batch_size, length)
                 sequences = self.x_train[start_index:end_index]
                 seq_lens = self.seq_len[start_index:end_index]
-                max_len = max(seq_lens)
-                sequences_truncated = sequences[:, :max_len]
+                max_seq_len = max(seq_lens)
+                sequences_truncated = sequences[:, :max_seq_len]
                 self.batches[i] = (
                     sequences_truncated.transpose(0, 1),
                     self.t_train[start_index:end_index],
@@ -284,11 +286,13 @@ class Trainer:
         n_epoch: int = 1,
         lr: float = 1e-2,
         batch_size: int = 256,
+        max_seq_len: int = 64,
     ) -> None:
         self.model = FSRS(init_w)
         self.optimizer = torch.optim.Adam(self.model.parameters(), lr=lr)
         self.clipper = WeightClipper()
         self.batch_size = batch_size
+        self.max_seq_len = max_seq_len
         self.build_dataset(train_set, test_set)
         self.n_epoch = n_epoch
         self.batch_nums = self.next_train_data_loader.batch_nums
@@ -302,25 +306,27 @@ class Trainer:
     def build_dataset(self, train_set: pd.DataFrame, test_set: Optional[pd.DataFrame]):
         pre_train_set = train_set[train_set["i"] == 2]
         self.pre_train_set = BatchDataset(
-            pre_train_set, batch_size=self.batch_size, max_len=128
+            pre_train_set, batch_size=self.batch_size, max_seq_len=self.max_seq_len
         )
         self.pre_train_data_loader = BatchLoader(self.pre_train_set)
 
         next_train_set = train_set[train_set["i"] > 2]
         self.next_train_set = BatchDataset(
-            next_train_set, batch_size=self.batch_size, max_len=128
+            next_train_set, batch_size=self.batch_size, max_seq_len=self.max_seq_len
         )
         self.next_train_data_loader = BatchLoader(self.next_train_set)
 
         self.train_set = BatchDataset(
-            train_set, batch_size=self.batch_size, max_len=128
+            train_set, batch_size=self.batch_size, max_seq_len=self.max_seq_len
         )
         self.train_data_loader = BatchLoader(self.train_set)
 
         self.test_set = (
             []
             if test_set is None
-            else BatchDataset(test_set, batch_size=self.batch_size, max_len=128)
+            else BatchDataset(
+                test_set, batch_size=self.batch_size, max_seq_len=self.max_seq_len
+            )
         )
 
     def train(self, verbose: bool = True):
