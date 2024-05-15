@@ -58,7 +58,7 @@ DEFAULT_WEIGHT = [
     0.031,
     1.6474,
     0.1367,
-    1.0461,
+    0.8442,
     2.1072,
     0.0793,
     0.3246,
@@ -85,7 +85,7 @@ class FSRS(nn.Module):
             + torch.exp(self.w[8])
             * (11 - state[:, 1])
             * torch.pow(state[:, 0], -self.w[9])
-            * (torch.exp((1 - r) * self.w[10]) - 1)
+            * torch.pow((1 - r).clamp(0.001, 0.999), self.w[10])
             * hard_penalty
             * easy_bonus
         )
