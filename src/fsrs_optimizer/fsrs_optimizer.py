@@ -52,8 +52,8 @@ DEFAULT_WEIGHT = [
     1.2083,
     3.1154,
     15.0193,
-    5.2038,
-    1.2899,
+    7,
+    0.6,
     0.981,
     0.0257,
     1.7054,
@@ -128,7 +128,7 @@ class FSRS(nn.Module):
             # first learn, init memory states
             new_s = torch.ones_like(state[:, 0])
             new_s[index[0]] = self.w[index[1]]
-            new_d = self.w[4] - self.w[5] * (X[:, 1] - 3)
+            new_d = self.w[4] - torch.exp(self.w[5] * (X[:, 1] - 1)) + 1
             new_d = new_d.clamp(1, 10)
         else:
             r = power_forgetting_curve(X[:, 0], state[:, 0])
