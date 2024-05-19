@@ -18,7 +18,7 @@ from torch.utils.data import Dataset
 from torch.nn.utils.rnn import pad_sequence
 from sklearn.model_selection import TimeSeriesSplit
 from sklearn.metrics import root_mean_squared_error, mean_absolute_error, r2_score
-from scipy.optimize import minimize, curve_fit
+from scipy.optimize import minimize
 from itertools import accumulate
 from tqdm.auto import tqdm
 import warnings
@@ -48,23 +48,25 @@ Review = 2
 Relearning = 3
 
 DEFAULT_WEIGHT = [
-    0.4872,
-    1.4003,
-    3.7145,
-    13.8206,
-    5.1618,
-    1.2298,
-    0.8975,
-    0.031,
-    1.6474,
-    0.1367,
-    1.0461,
-    2.1072,
-    0.0793,
-    0.3246,
-    1.587,
-    0.2272,
-    2.8755,
+    0.4498,
+    1.2083,
+    3.1154,
+    15.0193,
+    5.2038,
+    1.2899,
+    0.981,
+    0.0257,
+    1.7054,
+    0.181,
+    1.1457,
+    2.0609,
+    0.0904,
+    0.307,
+    2.0169,
+    0.251,
+    2.9466,
+    0.4766,
+    0.607,
 ]
 
 S_MIN = 0.01
@@ -100,6 +102,19 @@ class FSRS(nn.Module):
         )
         return torch.minimum(new_s, state[:, 0])
 
+    def stability_short_term(self, state: Tensor, rating: Tensor) -> Tensor:
+        new_s = state[:, 0] * torch.exp(self.w[17] * (rating - 3 + self.w[18]))
+        return new_s
+
+    def next_d(self, state: Tensor, rating: Tensor) -> Tensor:
+        new_d = state[:, 1] - self.w[6] * (rating - 3)
+        new_d = self.mean_reversion(self.w[4], new_d)
+        return new_d
+
+    def next_d_short_term(self, state: Tensor, rating: Tensor) -> Tensor:
+        new_d = state[:, 1] - self.w[6] * (rating - 3)
+        return new_d
+
     def step(self, X: Tensor, state: Tensor) -> Tensor:
         """
         :param X: shape[batch_size, 2], X[:,0] is elapsed time, X[:,1] is rating
@@ -117,14 +132,22 @@ class FSRS(nn.Module):
             new_d = new_d.clamp(1, 10)
         else:
             r = power_forgetting_curve(X[:, 0], state[:, 0])
-            condition = X[:, 1] > 1
+            short_term = X[:, 0] < 1
+            success = X[:, 1] > 1
             new_s = torch.where(
-                condition,
-                self.stability_after_success(state, r, X[:, 1]),
-                self.stability_after_failure(state, r),
+                short_term,
+                self.stability_short_term(state, X[:, 1]),
+                torch.where(
+                    success,
+                    self.stability_after_success(state, r, X[:, 1]),
+                    self.stability_after_failure(state, r),
+                ),
             )
-            new_d = state[:, 1] - self.w[6] * (X[:, 1] - 3)
-            new_d = self.mean_reversion(self.w[4], new_d)
+            new_d = torch.where(
+                short_term,
+                self.next_d_short_term(state, X[:, 1]),
+                self.next_d(state, X[:, 1]),
+            )
             new_d = new_d.clamp(1, 10)
         new_s = new_s.clamp(S_MIN, 36500)
         return torch.stack([new_s, new_d], dim=1)
@@ -152,19 +175,25 @@ class WeightClipper:
     def __call__(self, module):
         if hasattr(module, "w"):
             w = module.w.data
+            w[0] = w[0].clamp(S_MIN, 100)
+            w[1] = w[1].clamp(S_MIN, 100)
+            w[2] = w[2].clamp(S_MIN, 100)
+            w[3] = w[3].clamp(S_MIN, 100)
             w[4] = w[4].clamp(1, 10)
-            w[5] = w[5].clamp(0.1, 5)
-            w[6] = w[6].clamp(0.1, 5)
+            w[5] = w[5].clamp(0.01, 4)
+            w[6] = w[6].clamp(0.01, 4)
             w[7] = w[7].clamp(0, 0.75)
-            w[8] = w[8].clamp(0, 4)
+            w[8] = w[8].clamp(0, 4.5)
             w[9] = w[9].clamp(0, 0.8)
-            w[10] = w[10].clamp(0.01, 3)
-            w[11] = w[11].clamp(0.5, 5)
-            w[12] = w[12].clamp(0.01, 0.2)
+            w[10] = w[10].clamp(0.01, 3.5)
+            w[11] = w[11].clamp(0.1, 5)
+            w[12] = w[12].clamp(0.01, 0.25)
             w[13] = w[13].clamp(0.01, 0.9)
-            w[14] = w[14].clamp(0.01, 3)
+            w[14] = w[14].clamp(0.01, 4)
             w[15] = w[15].clamp(0, 1)
             w[16] = w[16].clamp(1, 6)
+            w[17] = w[17].clamp(0, 1.5)
+            w[18] = w[18].clamp(0, 1.5)
             module.w.data = w
 
 
@@ -180,12 +209,17 @@ def lineToTensor(line: str) -> Tensor:
 
 class BatchDataset(Dataset):
     def __init__(
-        self, dataframe: pd.DataFrame, batch_size: int = 0, sort_by_length: bool = True
+        self,
+        dataframe: pd.DataFrame,
+        batch_size: int = 0,
+        sort_by_length: bool = True,
+        max_seq_len: int = math.inf,
     ):
         if dataframe.empty:
             raise ValueError("Training data is inadequate.")
         if sort_by_length:
             dataframe = dataframe.sort_values(by=["i"])
+        dataframe = dataframe[dataframe["tensor"].map(len) <= max_seq_len]
         self.x_train = pad_sequence(
             dataframe["tensor"].to_list(), batch_first=True, padding_value=0
         )
@@ -204,8 +238,8 @@ class BatchDataset(Dataset):
                 end_index = min((i + 1) * batch_size, length)
                 sequences = self.x_train[start_index:end_index]
                 seq_lens = self.seq_len[start_index:end_index]
-                max_len = max(seq_lens)
-                sequences_truncated = sequences[:, :max_len]
+                max_seq_len = max(seq_lens)
+                sequences_truncated = sequences[:, :max_seq_len]
                 self.batches[i] = (
                     sequences_truncated.transpose(0, 1),
                     self.t_train[start_index:end_index],
@@ -252,14 +286,16 @@ class Trainer:
         n_epoch: int = 1,
         lr: float = 1e-2,
         batch_size: int = 256,
+        max_seq_len: int = 64,
     ) -> None:
         self.model = FSRS(init_w)
         self.optimizer = torch.optim.Adam(self.model.parameters(), lr=lr)
         self.clipper = WeightClipper()
         self.batch_size = batch_size
+        self.max_seq_len = max_seq_len
         self.build_dataset(train_set, test_set)
         self.n_epoch = n_epoch
-        self.batch_nums = self.next_train_data_loader.batch_nums
+        self.batch_nums = self.train_data_loader.batch_nums
         self.scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
             self.optimizer, T_max=self.batch_nums * n_epoch
         )
@@ -268,27 +304,23 @@ class Trainer:
         self.loss_fn = nn.BCELoss(reduction="none")
 
     def build_dataset(self, train_set: pd.DataFrame, test_set: Optional[pd.DataFrame]):
-        pre_train_set = train_set[train_set["i"] == 2]
-        self.pre_train_set = BatchDataset(pre_train_set, batch_size=self.batch_size)
-        self.pre_train_data_loader = BatchLoader(self.pre_train_set)
-
-        next_train_set = train_set[train_set["i"] > 2]
-        self.next_train_set = BatchDataset(next_train_set, batch_size=self.batch_size)
-        self.next_train_data_loader = BatchLoader(self.next_train_set)
-
-        self.train_set = BatchDataset(train_set, batch_size=self.batch_size)
+        self.train_set = BatchDataset(
+            train_set, batch_size=self.batch_size, max_seq_len=self.max_seq_len
+        )
         self.train_data_loader = BatchLoader(self.train_set)
 
         self.test_set = (
             []
             if test_set is None
-            else BatchDataset(test_set, batch_size=self.batch_size)
+            else BatchDataset(
+                test_set, batch_size=self.batch_size, max_seq_len=self.max_seq_len
+            )
         )
 
     def train(self, verbose: bool = True):
         self.verbose = verbose
         best_loss = np.inf
-        epoch_len = len(self.next_train_set.y_train)
+        epoch_len = len(self.train_set.y_train)
         if verbose:
             pbar = tqdm(desc="train", colour="red", total=epoch_len * self.n_epoch)
         print_len = max(self.batch_nums * self.n_epoch // 10, 1)
@@ -298,7 +330,7 @@ class Trainer:
                 best_loss = weighted_loss
                 best_w = w
 
-            for i, batch in enumerate(self.next_train_data_loader):
+            for i, batch in enumerate(self.train_data_loader):
                 self.model.train()
                 self.optimizer.zero_grad()
                 sequences, delta_ts, labels, seq_lens = batch
@@ -308,8 +340,6 @@ class Trainer:
                 retentions = power_forgetting_curve(delta_ts, stabilities)
                 loss = self.loss_fn(retentions, labels).sum()
                 loss.backward()
-                for param in self.model.parameters():
-                    param.grad[:4] = torch.zeros(4)
                 self.optimizer.step()
                 self.scheduler.step()
                 self.model.apply(self.clipper)
@@ -412,7 +442,7 @@ def remove_outliers(group: pd.DataFrame) -> pd.DataFrame:
     # threshold = Q3 + 1.5 * IQR
     # group = group[group['delta_t'] <= threshold]
     grouped_group = (
-        group.groupby(by=["r_history", "delta_t"], group_keys=False)
+        group.groupby(by=["first_rating", "delta_t"], group_keys=False)
         .agg({"y": ["mean", "count"]})
         .reset_index()
     )
@@ -642,42 +672,63 @@ class Optimizer:
                 "D", ambiguous="infer", nonexistent="shift_forward"
             )
         ).to_julian_date()
-        df.drop_duplicates(["card_id", "real_days"], keep="first", inplace=True)
+        # df.drop_duplicates(["card_id", "real_days"], keep="first", inplace=True)
         df["delta_t"] = df.real_days.diff()
         df.fillna({"delta_t": 0}, inplace=True)
         df["i"] = df.groupby("card_id").cumcount() + 1
-        df.loc[df["i"] == 1, "delta_t"] = 0
+        df.loc[df["i"] == 1, "delta_t"] = -1
         if df.empty:
             raise ValueError("Training data is inadequate.")
 
         def cum_concat(x):
             return list(accumulate(x))
 
-        t_history = df.groupby("card_id", group_keys=False)["delta_t"].apply(
+        t_history_list = df.groupby("card_id", group_keys=False)["delta_t"].apply(
             lambda x: cum_concat([[int(i)] for i in x])
         )
         df["t_history"] = [
-            ",".join(map(str, item[:-1])) for sublist in t_history for item in sublist
+            ",".join(map(str, item[:-1]))
+            for sublist in t_history_list
+            for item in sublist
         ]
-        r_history = df.groupby("card_id", group_keys=False)["review_rating"].apply(
+        r_history_list = df.groupby("card_id", group_keys=False)["review_rating"].apply(
             lambda x: cum_concat([[i] for i in x])
         )
         df["r_history"] = [
-            ",".join(map(str, item[:-1])) for sublist in r_history for item in sublist
+            ",".join(map(str, item[:-1]))
+            for sublist in r_history_list
+            for item in sublist
         ]
+        last_rating = []
+        for t_sublist, r_sublist in zip(t_history_list, r_history_list):
+            for t_history, r_history in zip(t_sublist, r_sublist):
+                flag = True
+                for t, r in zip(reversed(t_history[:-1]), reversed(r_history[:-1])):
+                    if t > 0:
+                        last_rating.append(r)
+                        flag = False
+                        break
+                if flag:
+                    last_rating.append(r_history[0])
+        df["last_rating"] = last_rating
+
         df = df.groupby("card_id").filter(
             lambda group: group["review_time"].min()
             > time.mktime(datetime.strptime(revlog_start_date, "%Y-%m-%d").timetuple())
             * 1000
         )
         df = df[
-            (df["review_rating"] != 0) & (df["r_history"].str.contains("0") == 0)
+            (df["review_rating"] != 0)
+            & (df["r_history"].str.contains("0") == 0)
+            & (df["delta_t"] != 0)
         ].copy()
+        df["i"] = df.groupby("card_id").cumcount() + 1
+        df["first_rating"] = df["r_history"].map(lambda x: x[0] if len(x) > 0 else "")
         df["y"] = df["review_rating"].map(lambda x: {1: 0, 2: 1, 3: 1, 4: 1}[x])
 
         df[df["i"] == 2] = (
             df[df["i"] == 2]
-            .groupby(by=["r_history", "t_history"], as_index=False, group_keys=False)
+            .groupby(by=["first_rating"], as_index=False, group_keys=False)
             .apply(remove_outliers)
         )
         df.dropna(inplace=True)
@@ -692,21 +743,28 @@ class Optimizer:
         df["i"] = df["i"].astype(int)
         df["t_history"] = df["t_history"].astype(str)
         df["r_history"] = df["r_history"].astype(str)
+        df["last_rating"] = df["last_rating"].astype(int)
         df["y"] = df["y"].astype(int)
 
         df.to_csv("revlog_history.tsv", sep="\t", index=False)
         tqdm.write("Trainset saved.")
 
-        S0_dataset = df[df["i"] == 2]
         self.S0_dataset_group = (
-            S0_dataset.groupby(by=["r_history", "delta_t"], group_keys=False)
+            df[df["i"] == 2]
+            .groupby(by=["first_rating", "delta_t"], group_keys=False)
             .agg({"y": ["mean", "count"]})
             .reset_index()
         )
         self.S0_dataset_group.to_csv("stability_for_pretrain.tsv", sep="\t", index=None)
+        del df["first_rating"]
 
         if not analysis:
             return
+
+        df["r_history"] = df.apply(
+            lambda row: wrap_short_term_ratings(row["r_history"], row["t_history"]),
+            axis=1,
+        )
 
         df["retention"] = df.groupby(by=["r_history", "delta_t"], group_keys=False)[
             "y"
@@ -724,6 +782,7 @@ class Optimizer:
                 "real_days",
                 "review_rating",
                 "t_history",
+                "last_rating",
                 "y",
             ],
             inplace=True,
@@ -782,7 +841,7 @@ class Optimizer:
             df = df[(df["i"] >= 2) & (df["group_cnt"] >= 100)].copy()
             df["last_recall"] = df["r_history"].map(lambda x: x[-1])
             df = df[
-                df.groupby(["i", "r_history"], group_keys=False)["group_cnt"].transform(
+                df.groupby(["r_history"], group_keys=False)["group_cnt"].transform(
                     "max"
                 )
                 == df["group_cnt"]
@@ -790,16 +849,23 @@ class Optimizer:
             df.to_csv("./stability_for_analysis.tsv", sep="\t", index=None)
             tqdm.write("Analysis saved!")
             caption = "1:again, 2:hard, 3:good, 4:easy\n"
-            analysis = df[df["r_history"].str.contains(r"^[1-4][^124]*$", regex=True)][
-                [
-                    "r_history",
-                    "avg_interval",
-                    "avg_retention",
-                    "stability",
-                    "factor",
-                    "group_cnt",
+            df["first_rating"] = df["r_history"].map(lambda x: x[1])
+            analysis = (
+                df[df["r_history"].str.contains(r"^\([1-4][^124]*$", regex=True)][
+                    [
+                        "first_rating",
+                        "i",
+                        "r_history",
+                        "avg_interval",
+                        "avg_retention",
+                        "stability",
+                        "factor",
+                        "group_cnt",
+                    ]
                 ]
-            ].to_string(index=False)
+                .sort_values(by=["first_rating", "i"])
+                .to_string(index=False)
+            )
             return caption + analysis
 
     def define_model(self):
@@ -821,9 +887,7 @@ class Optimizer:
         else:
             self.dataset = dataset
         self.dataset = self.dataset[
-            (self.dataset["i"] > 1)
-            & (self.dataset["delta_t"] > 0)
-            & (self.dataset["t_history"].str.count(",0") == 0)
+            (self.dataset["i"] > 1) & (self.dataset["delta_t"] > 0)
         ]
         if self.dataset.empty:
             raise ValueError("Training data is inadequate.")
@@ -835,7 +899,7 @@ class Optimizer:
 
         for first_rating in ("1", "2", "3", "4"):
             group = self.S0_dataset_group[
-                self.S0_dataset_group["r_history"] == first_rating
+                self.S0_dataset_group["first_rating"] == first_rating
             ]
             if group.empty:
                 if verbose:
@@ -1384,8 +1448,8 @@ class Optimizer:
         )
         metrics["rmse"] = rmse
         fig2 = plt.figure(figsize=(16, 12))
-        for last_rating in ("1", "2", "3", "4"):
-            calibration_data = dataset[dataset["r_history"].str.endswith(last_rating)]
+        for last_rating in (1, 2, 3, 4):
+            calibration_data = dataset[dataset["last_rating"] == last_rating]
             if calibration_data.empty:
                 continue
             rmse = rmse_matrix(calibration_data)
@@ -1484,9 +1548,9 @@ class Optimizer:
         )
         figs = []
         for group_key in ("last_s_bin", "last_d_bin", "last_r_bin"):
-            for last_rating in ("1", "3"):
+            for last_rating in (1, 3):
                 analysis_group = (
-                    analysis_df[analysis_df["r_history"].str.endswith(last_rating)]
+                    analysis_df[analysis_df["last_rating"] == last_rating]
                     .groupby(
                         by=["last_s_bin", "last_d_bin", "last_r_bin", "delta_t"],
                         group_keys=True,
@@ -1830,7 +1894,17 @@ def cross_comparison(dataset, algoA, algoB):
 
 def rmse_matrix(df):
     tmp = df.copy()
-    tmp["lapse"] = tmp["r_history"].map(lambda x: x.count("1"))
+
+    def count_lapse(r_history, t_history):
+        lapse = 0
+        for r, t in zip(r_history.split(","), t_history.split(",")):
+            if t != "0" and r == "1":
+                lapse += 1
+        return lapse
+
+    tmp["lapse"] = tmp.apply(
+        lambda x: count_lapse(x["r_history"], x["t_history"]), axis=1
+    )
     tmp["delta_t"] = tmp["delta_t"].map(
         lambda x: round(2.48 * np.power(3.62, np.floor(np.log(x) / np.log(3.62))), 2)
     )
@@ -1850,6 +1924,31 @@ def rmse_matrix(df):
         .reset_index()
     )
     return root_mean_squared_error(tmp["y"], tmp["p"], sample_weight=tmp["card_id"])
+
+
+def wrap_short_term_ratings(r_history, t_history):
+    result = []
+    in_zero_sequence = False
+
+    for t, r in zip(t_history.split(","), r_history.split(",")):
+        if t in ("-1", "0"):
+            if not in_zero_sequence:
+                result.append("(")
+                in_zero_sequence = True
+            result.append(r)
+            result.append(",")
+        else:
+            if in_zero_sequence:
+                result[-1] = "),"
+                in_zero_sequence = False
+            result.append(r)
+            result.append(",")
+
+    if in_zero_sequence:
+        result[-1] = ")"
+    else:
+        result.pop()
+    return "".join(result)
 
 
 if __name__ == "__main__":
