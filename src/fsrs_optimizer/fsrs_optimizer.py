@@ -1609,7 +1609,11 @@ class Optimizer:
             bins=20,
             ax=fig1.add_subplot(111),
         )
-        _, fig2 = cross_comparison(dataset, "SM2", "FSRS")
+        universal_metrics, fig2 = cross_comparison(dataset, "SM2", "FSRS")
+
+        tqdm.write(f"Universal Metric of FSRS: {universal_metrics[0]:.4f}")
+        tqdm.write(f"Universal Metric of SM2: {universal_metrics[1]:.4f}")
+
         return fig1, fig2
 
 
@@ -1813,8 +1817,6 @@ def cross_comparison(dataset, algoA, algoB):
             label=f"{algoB} by {algoA}, UM={universal_metric:.4f}",
         )
         universal_metric_list.append(universal_metric)
-
-        tqdm.write(f"Universal Metric of {algoB}: {universal_metric:.4f}")
 
     ax.legend(loc="lower center")
     ax.grid(linestyle="--")
