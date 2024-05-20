@@ -123,7 +123,7 @@ def process(filepath, filter_out_flags: list[int]):
         print("Failed to find optimal retention")
         optimizer.optimal_retention = 0.9
 
-    optimizer.preview(optimizer.optimal_retention)
+    print(optimizer.preview(optimizer.optimal_retention))
 
     profile = f"""{{
     // Generated, Optimized anki deck settings

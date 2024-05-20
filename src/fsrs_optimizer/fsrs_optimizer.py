@@ -1130,25 +1130,37 @@ class Optimizer:
     def preview(self, requestRetention: float, verbose=False):
         my_collection = Collection(self.w)
         preview_text = "1:again, 2:hard, 3:good, 4:easy\n"
+        n_learning_steps = 3
         for first_rating in (1, 2, 3, 4):
             preview_text += f"\nfirst rating: {first_rating}\n"
             t_history = "0"
             d_history = "0"
+            s_history = "0"
             r_history = f"{first_rating}"  # the first rating of the new card
+            if first_rating in (1, 2):
+                left = n_learning_steps
+            elif first_rating == 3:
+                left = n_learning_steps - 1
+            else:
+                left = 1
             # print("stability, difficulty, lapses")
             for i in range(10):
                 states = my_collection.predict(t_history, r_history)
+                stability = round(float(states[0]), 1)
+                difficulty = round(float(states[1]), 1)
                 if verbose:
                     print(
                         "{0:9.2f} {1:11.2f} {2:7.0f}".format(
                             *list(map(lambda x: round(float(x), 4), states))
                         )
                     )
-                next_t = next_interval(states[0], requestRetention)
-                difficulty = round(float(states[1]), 1)
+                left -= 1
+                next_t = next_interval(states[0], requestRetention) if left <= 0 else 0
                 t_history += f",{int(next_t)}"
                 d_history += f",{difficulty}"
+                s_history += f",{stability}"
                 r_history += f",3"
+            r_history = wrap_short_term_ratings(r_history, t_history)
             preview_text += f"rating history: {r_history}\n"
             preview_text += (
                 "interval history: "
