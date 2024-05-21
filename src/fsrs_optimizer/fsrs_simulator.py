@@ -159,7 +159,7 @@ def simulate(
         )
         card_table[col["stability"]][true_learn] = np.choose(first_ratings - 1, w[:4])
         card_table[col["difficulty"]][true_learn] = np.clip(
-            w[4] - w[5] * (first_ratings - 3), 1, 10
+            w[4] - np.exp(w[5] * (first_ratings - 1)) + 1, 1, 10
         )
 
         card_table[col["ivl"]][true_review | true_learn] = np.clip(
