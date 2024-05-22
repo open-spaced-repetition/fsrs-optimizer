@@ -47,7 +47,7 @@ Learning = 1
 Review = 2
 Relearning = 3
 
-DEFAULT_WEIGHT = [
+DEFAULT_PARAMETER = [
     0.4197,
     1.1869,
     3.0412,
@@ -168,7 +168,7 @@ class FSRS(nn.Module):
         return self.w[7] * init + (1 - self.w[7]) * current
 
 
-class WeightClipper:
+class ParameterClipper:
     def __init__(self, frequency: int = 1):
         self.frequency = frequency
 
@@ -290,7 +290,7 @@ class Trainer:
     ) -> None:
         self.model = FSRS(init_w)
         self.optimizer = torch.optim.Adam(self.model.parameters(), lr=lr)
-        self.clipper = WeightClipper()
+        self.clipper = ParameterClipper()
         self.batch_size = batch_size
         self.max_seq_len = max_seq_len
         self.build_dataset(train_set, test_set)
@@ -870,7 +870,7 @@ class Optimizer:
 
     def define_model(self):
         """Step 3"""
-        self.init_w = DEFAULT_WEIGHT.copy()
+        self.init_w = DEFAULT_PARAMETER.copy()
         """
         For details about the parameters, please see: 
         https://github.com/open-spaced-repetition/fsrs4anki/wiki/The-Algorithm
@@ -895,7 +895,7 @@ class Optimizer:
         rating_count = {}
         average_recall = self.dataset["y"].mean()
         plots = []
-        r_s0_default = {str(i): DEFAULT_WEIGHT[i - 1] for i in range(1, 5)}
+        r_s0_default = {str(i): DEFAULT_PARAMETER[i - 1] for i in range(1, 5)}
 
         for first_rating in ("1", "2", "3", "4"):
             group = self.S0_dataset_group[
@@ -1399,7 +1399,7 @@ class Optimizer:
         return (fig1, fig2, fig3, fig4, fig5, fig6)
 
     def evaluate(self, save_to_file=True):
-        my_collection = Collection(DEFAULT_WEIGHT)
+        my_collection = Collection(DEFAULT_PARAMETER)
         stabilities, difficulties = my_collection.batch_predict(self.dataset)
         self.dataset["stability"] = stabilities
         self.dataset["difficulty"] = difficulties
@@ -1686,7 +1686,11 @@ class Optimizer:
             bins=20,
             ax=fig1.add_subplot(111),
         )
-        _, fig2 = cross_comparison(dataset, "SM2", "FSRS")
+        universal_metrics, fig2 = cross_comparison(dataset, "SM2", "FSRS")
+
+        tqdm.write(f"Universal Metric of FSRS: {universal_metrics[0]:.4f}")
+        tqdm.write(f"Universal Metric of SM2: {universal_metrics[1]:.4f}")
+
         return fig1, fig2
 
 
@@ -1891,8 +1895,6 @@ def cross_comparison(dataset, algoA, algoB):
         )
         universal_metric_list.append(universal_metric)
 
-        tqdm.write(f"Universal Metric of {algoB}: {universal_metric:.4f}")
-
     ax.legend(loc="lower center")
     ax.grid(linestyle="--")
     ax.set_title(f"{algoA} vs {algoB}")
@@ -1963,7 +1965,7 @@ def wrap_short_term_ratings(r_history, t_history):
 
 
 if __name__ == "__main__":
-    model = FSRS(DEFAULT_WEIGHT)
+    model = FSRS(DEFAULT_PARAMETER)
     stability = torch.tensor([5.0] * 4)
     difficulty = torch.tensor([1.0, 2.0, 3.0, 4.0])
     retention = torch.tensor([0.9, 0.8, 0.7, 0.6])
