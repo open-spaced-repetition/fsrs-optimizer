@@ -1197,6 +1197,7 @@ class Optimizer:
                 + "\n"
             )
             preview_text += f"difficulty history: {d_history}\n"
+            preview_text += f"stability history: {s_history}\n"
         return preview_text
 
     def preview_sequence(self, test_rating_sequence: str, requestRetention: float):
