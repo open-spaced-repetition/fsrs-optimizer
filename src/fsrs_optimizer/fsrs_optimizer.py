@@ -65,6 +65,7 @@ DEFAULT_PARAMETER = [
     1.587,
     0.2272,
     2.8755,
+    0,
 ]
 
 S_MIN = 0.01
@@ -123,7 +124,7 @@ class FSRS(nn.Module):
                 self.stability_after_success(state, r, X[:, 1]),
                 self.stability_after_failure(state, r),
             )
-            new_d = state[:, 1] - self.w[6] * (X[:, 1] - 3)
+            new_d = state[:, 1] - self.w[6] * (X[:, 1] - 3 + self.w[17])
             new_d = self.mean_reversion(self.w[4], new_d)
             new_d = new_d.clamp(1, 10)
         new_s = new_s.clamp(S_MIN, 36500)
