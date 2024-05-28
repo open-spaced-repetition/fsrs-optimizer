@@ -65,6 +65,7 @@ DEFAULT_PARAMETER = [
     1.587,
     0.2272,
     2.8755,
+    0,
 ]
 
 S_MIN = 0.01
@@ -123,7 +124,7 @@ class FSRS(nn.Module):
                 self.stability_after_success(state, r, X[:, 1]),
                 self.stability_after_failure(state, r),
             )
-            new_d = state[:, 1] - self.w[6] * (X[:, 1] - 3)
+            new_d = state[:, 1] - self.w[6] * (X[:, 1] - 3) * torch.exp(-self.w[17] * state[:, 1])
             new_d = self.mean_reversion(self.w[4], new_d)
             new_d = new_d.clamp(1, 10)
         new_s = new_s.clamp(S_MIN, 36500)
@@ -165,6 +166,7 @@ class ParameterClipper:
             w[14] = w[14].clamp(0.01, 3)
             w[15] = w[15].clamp(0, 1)
             w[16] = w[16].clamp(1, 6)
+            w[17] = w[17].clamp(0, 1)
             module.w.data = w
 
 
