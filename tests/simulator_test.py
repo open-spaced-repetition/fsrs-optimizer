@@ -4,13 +4,13 @@ from src.fsrs_optimizer import *
 class Test_Simulator:
     def test_simulate(self):
         (_, _, _, memorized_cnt_per_day, _) = simulate(
-            w=DEFAULT_WEIGHT, forget_cost=125
+            w=DEFAULT_PARAMETER, forget_cost=125
         )
         assert memorized_cnt_per_day[-1] == 3145.3779679589484
 
     def test_optimal_retention(self):
         default_params = {
-            "w": DEFAULT_WEIGHT,
+            "w": DEFAULT_PARAMETER,
             "deck_size": 10000,
             "learn_span": 1000,
             "max_cost_perday": math.inf,
