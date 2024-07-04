@@ -111,10 +111,6 @@ class FSRS(nn.Module):
         new_d = self.mean_reversion(self.w[4], new_d)
         return new_d
 
-    def next_d_short_term(self, state: Tensor, rating: Tensor) -> Tensor:
-        new_d = state[:, 1] - self.w[6] * (rating - 3)
-        return new_d
-
     def step(self, X: Tensor, state: Tensor) -> Tensor:
         """
         :param X: shape[batch_size, 2], X[:,0] is elapsed time, X[:,1] is rating
@@ -143,11 +139,7 @@ class FSRS(nn.Module):
                     self.stability_after_failure(state, r),
                 ),
             )
-            new_d = torch.where(
-                short_term,
-                self.next_d_short_term(state, X[:, 1]),
-                self.next_d(state, X[:, 1]),
-            )
+            new_d = self.next_d(state, X[:, 1])
             new_d = new_d.clamp(1, 10)
         new_s = new_s.clamp(S_MIN, 36500)
         return torch.stack([new_s, new_d], dim=1)
