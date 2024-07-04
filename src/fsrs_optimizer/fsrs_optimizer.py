@@ -626,15 +626,21 @@ class Optimizer:
                 lambda x: x if x != New else Learning
             )
 
-            self.recall_costs = np.zeros(3)
             recall_card_revlog = recall_card_revlog[
                 (recall_card_revlog["review_duration"] > 0)
                 & (df["review_duration"] < 1200000)
             ]
+            self.recall_costs = np.zeros(3)
             recall_costs = recall_card_revlog.groupby(by="review_rating")[
                 "review_duration"
             ].median()
             self.recall_costs[recall_costs.index - 2] = recall_costs / 1000
+
+            self.recall_button_cnts = np.zeros(3)
+            recall_button_cnts = recall_card_revlog.groupby(by="review_rating")[
+                "review_duration"
+            ].count()
+            self.recall_button_cnts[recall_button_cnts.index - 2] = recall_button_cnts
 
             self.state_sequence = np.array(
                 df[(df["review_duration"] > 0) & (df["review_duration"] < 1200000)][
@@ -646,18 +652,20 @@ class Optimizer:
                     "review_duration"
                 ]
             )
+
+            learn_card_revlog = df[
+                (df["review_state"] == Learning)
+                & (df["review_duration"] > 0)
+                & (df["review_duration"] < 1200000)
+            ]
             self.learn_cost = round(
-                df[
-                    (df["review_state"] == Learning)
-                    & (df["review_duration"] > 0)
-                    & (df["review_duration"] < 1200000)
-                ]
-                .groupby("card_id")
+                learn_card_revlog.groupby("card_id")
                 .agg({"review_duration": "sum"})["review_duration"]
                 .median()
                 / 1000,
                 1,
             )
+            self.learn_cnt = learn_card_revlog["card_id"].nunique()
 
             df.drop(columns=["review_duration", "review_state"], inplace=True)
 
@@ -1299,6 +1307,7 @@ class Optimizer:
         forget_cost = round(
             np.median(state_durations[Relearning]) / 1000 + recall_cost, 1
         )
+        forget_cnt = len(state_durations[Relearning])
         if verbose:
             tqdm.write(f"average time for failed reviews: {forget_cost}s")
             tqdm.write(f"average time for recalled reviews: {recall_cost}s")
@@ -1315,6 +1324,28 @@ class Optimizer:
                 "Ratio of `again`, `hard`, `good` and `easy` ratings for new cards: %.2f, %.2f, %.2f, %.2f"
                 % tuple(self.first_rating_prob)
             )
+
+        default_learn_cost = 22.8
+        default_forget_cost = 18.0
+        default_recall_costs = np.array([11.8, 7.3, 5.7])
+        default_first_rating_prob = np.array([0.256, 0.084, 0.483, 0.177])
+        default_review_rating_prob = np.array([0.224, 0.632, 0.144])
+
+        weight = self.recall_button_cnts / (50 + self.recall_button_cnts)
+        self.recall_costs = self.recall_costs * weight + default_recall_costs * (
+            1 - weight
+        )
+        weight = forget_cnt / (50 + forget_cnt)
+        forget_cost = forget_cost * weight + default_forget_cost * (1 - weight)
+        weight = self.learn_cnt / (50 + self.learn_cnt)
+        self.learn_cost = self.learn_cost * weight + default_learn_cost * (1 - weight)
+        weight = len(self.dataset) / (50 + len(self.dataset))
+        self.first_rating_prob = (
+            self.first_rating_prob * weight + default_first_rating_prob * (1 - weight)
+        )
+        self.review_rating_prob = (
+            self.review_rating_prob * weight + default_review_rating_prob * (1 - weight)
+        )
 
         forget_cost *= loss_aversion
 
