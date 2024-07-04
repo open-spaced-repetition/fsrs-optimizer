@@ -18,7 +18,7 @@ from torch.utils.data import Dataset
 from torch.nn.utils.rnn import pad_sequence
 from sklearn.model_selection import TimeSeriesSplit
 from sklearn.metrics import root_mean_squared_error, mean_absolute_error, r2_score
-from scipy.optimize import minimize, curve_fit
+from scipy.optimize import minimize
 from itertools import accumulate
 from tqdm.auto import tqdm
 import warnings
@@ -47,7 +47,7 @@ Learning = 1
 Review = 2
 Relearning = 3
 
-DEFAULT_WEIGHT = [
+DEFAULT_PARAMETER = [
     0.4872,
     1.4003,
     3.7145,
@@ -145,7 +145,7 @@ class FSRS(nn.Module):
         return self.w[7] * init + (1 - self.w[7]) * current
 
 
-class WeightClipper:
+class ParameterClipper:
     def __init__(self, frequency: int = 1):
         self.frequency = frequency
 
@@ -255,7 +255,7 @@ class Trainer:
     ) -> None:
         self.model = FSRS(init_w)
         self.optimizer = torch.optim.Adam(self.model.parameters(), lr=lr)
-        self.clipper = WeightClipper()
+        self.clipper = ParameterClipper()
         self.batch_size = batch_size
         self.build_dataset(train_set, test_set)
         self.n_epoch = n_epoch
@@ -596,15 +596,21 @@ class Optimizer:
                 lambda x: x if x != New else Learning
             )
 
-            self.recall_costs = np.zeros(3)
             recall_card_revlog = recall_card_revlog[
                 (recall_card_revlog["review_duration"] > 0)
                 & (df["review_duration"] < 1200000)
             ]
+            self.recall_costs = np.zeros(3)
             recall_costs = recall_card_revlog.groupby(by="review_rating")[
                 "review_duration"
             ].median()
             self.recall_costs[recall_costs.index - 2] = recall_costs / 1000
+
+            self.recall_button_cnts = np.zeros(3)
+            recall_button_cnts = recall_card_revlog.groupby(by="review_rating")[
+                "review_duration"
+            ].count()
+            self.recall_button_cnts[recall_button_cnts.index - 2] = recall_button_cnts
 
             self.state_sequence = np.array(
                 df[(df["review_duration"] > 0) & (df["review_duration"] < 1200000)][
@@ -616,18 +622,20 @@ class Optimizer:
                     "review_duration"
                 ]
             )
+
+            learn_card_revlog = df[
+                (df["review_state"] == Learning)
+                & (df["review_duration"] > 0)
+                & (df["review_duration"] < 1200000)
+            ]
             self.learn_cost = round(
-                df[
-                    (df["review_state"] == Learning)
-                    & (df["review_duration"] > 0)
-                    & (df["review_duration"] < 1200000)
-                ]
-                .groupby("card_id")
+                learn_card_revlog.groupby("card_id")
                 .agg({"review_duration": "sum"})["review_duration"]
                 .median()
                 / 1000,
                 1,
             )
+            self.learn_cnt = learn_card_revlog["card_id"].nunique()
 
             df.drop(columns=["review_duration", "review_state"], inplace=True)
 
@@ -804,7 +812,7 @@ class Optimizer:
 
     def define_model(self):
         """Step 3"""
-        self.init_w = DEFAULT_WEIGHT.copy()
+        self.init_w = DEFAULT_PARAMETER.copy()
         """
         For details about the parameters, please see: 
         https://github.com/open-spaced-repetition/fsrs4anki/wiki/The-Algorithm
@@ -831,7 +839,7 @@ class Optimizer:
         rating_count = {}
         average_recall = self.dataset["y"].mean()
         plots = []
-        r_s0_default = {str(i): DEFAULT_WEIGHT[i - 1] for i in range(1, 5)}
+        r_s0_default = {str(i): DEFAULT_PARAMETER[i - 1] for i in range(1, 5)}
 
         for first_rating in ("1", "2", "3", "4"):
             group = self.S0_dataset_group[
@@ -1222,6 +1230,7 @@ class Optimizer:
         forget_cost = round(
             np.median(state_durations[Relearning]) / 1000 + recall_cost, 1
         )
+        forget_cnt = len(state_durations[Relearning])
         if verbose:
             tqdm.write(f"average time for failed reviews: {forget_cost}s")
             tqdm.write(f"average time for recalled reviews: {recall_cost}s")
@@ -1238,6 +1247,28 @@ class Optimizer:
                 "Ratio of `again`, `hard`, `good` and `easy` ratings for new cards: %.2f, %.2f, %.2f, %.2f"
                 % tuple(self.first_rating_prob)
             )
+
+        default_learn_cost = 22.8
+        default_forget_cost = 18.0
+        default_recall_costs = np.array([11.8, 7.3, 5.7])
+        default_first_rating_prob = np.array([0.256, 0.084, 0.483, 0.177])
+        default_review_rating_prob = np.array([0.224, 0.632, 0.144])
+
+        weight = self.recall_button_cnts / (50 + self.recall_button_cnts)
+        self.recall_costs = self.recall_costs * weight + default_recall_costs * (
+            1 - weight
+        )
+        weight = forget_cnt / (50 + forget_cnt)
+        forget_cost = forget_cost * weight + default_forget_cost * (1 - weight)
+        weight = self.learn_cnt / (50 + self.learn_cnt)
+        self.learn_cost = self.learn_cost * weight + default_learn_cost * (1 - weight)
+        weight = len(self.dataset) / (50 + len(self.dataset))
+        self.first_rating_prob = (
+            self.first_rating_prob * weight + default_first_rating_prob * (1 - weight)
+        )
+        self.review_rating_prob = (
+            self.review_rating_prob * weight + default_review_rating_prob * (1 - weight)
+        )
 
         forget_cost *= loss_aversion
 
@@ -1322,7 +1353,7 @@ class Optimizer:
         return (fig1, fig2, fig3, fig4, fig5, fig6)
 
     def evaluate(self, save_to_file=True):
-        my_collection = Collection(DEFAULT_WEIGHT)
+        my_collection = Collection(DEFAULT_PARAMETER)
         stabilities, difficulties = my_collection.batch_predict(self.dataset)
         self.dataset["stability"] = stabilities
         self.dataset["difficulty"] = difficulties
@@ -1609,7 +1640,11 @@ class Optimizer:
             bins=20,
             ax=fig1.add_subplot(111),
         )
-        _, fig2 = cross_comparison(dataset, "SM2", "FSRS")
+        universal_metrics, fig2 = cross_comparison(dataset, "SM2", "FSRS")
+
+        tqdm.write(f"Universal Metric of FSRS: {universal_metrics[0]:.4f}")
+        tqdm.write(f"Universal Metric of SM2: {universal_metrics[1]:.4f}")
+
         return fig1, fig2
 
 
@@ -1814,8 +1849,6 @@ def cross_comparison(dataset, algoA, algoB):
         )
         universal_metric_list.append(universal_metric)
 
-        tqdm.write(f"Universal Metric of {algoB}: {universal_metric:.4f}")
-
     ax.legend(loc="lower center")
     ax.grid(linestyle="--")
     ax.set_title(f"{algoA} vs {algoB}")
@@ -1851,7 +1884,7 @@ def rmse_matrix(df):
 
 
 if __name__ == "__main__":
-    model = FSRS(DEFAULT_WEIGHT)
+    model = FSRS(DEFAULT_PARAMETER)
     stability = torch.tensor([5.0] * 4)
     difficulty = torch.tensor([1.0, 2.0, 3.0, 4.0])
     retention = torch.tensor([0.9, 0.8, 0.7, 0.6])
