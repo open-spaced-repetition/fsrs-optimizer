@@ -581,6 +581,96 @@ class Optimizer:
         df.to_csv("revlog.csv", index=False)
         tqdm.write("revlog.csv saved.")
 
+    def extract_simulation_config(self, df, verbose: bool = True):
+        def rating_counts(x):
+            tmp = x.value_counts().to_dict()
+            first = x.iloc[0]
+            tmp[first] -= 1
+            for i in range(1, 5):
+                if i not in tmp:
+                    tmp[i] = 0
+            return tmp
+
+        df1 = (
+            df[(df["review_duration"] > 0) & (df["review_duration"] < 1200000)]
+            .groupby(by=["card_id", "real_days"])
+            .agg(
+                {
+                    "review_state": "first",
+                    "review_rating": ["first", rating_counts],
+                    "review_duration": "sum",
+                    "i": "size",
+                }
+            )
+            .reset_index()
+        )
+        df1.columns = [
+            "card_id",
+            "real_days",
+            "first_review_state",
+            "first_review_rating",
+            "review_rating_counts",
+            "sum_review_duration",
+            "review_count",
+        ]
+        rating_counts_df = (
+            df1["review_rating_counts"].apply(pd.Series).fillna(0).astype(int)
+        )
+        df1 = pd.concat(
+            [df1.drop("review_rating_counts", axis=1), rating_counts_df], axis=1
+        )
+
+        cost_dict = (
+            df1.groupby(by=["first_review_state", "first_review_rating"])[
+                "sum_review_duration"
+            ]
+            .median()
+            .to_dict()
+        )
+        self.learn_costs = np.array(
+            [cost_dict.get((1, i), 0) / 1000 for i in range(1, 5)]
+        )
+        self.review_costs = np.array(
+            [cost_dict.get((2, i), 0) / 1000 for i in range(1, 5)]
+        )
+        button_usage_dict = (
+            df1.groupby(by=["first_review_state", "first_review_rating"])["card_id"]
+            .count()
+            .to_dict()
+        )
+        self.learn_buttons = np.array(
+            [button_usage_dict.get((1, i), 0) for i in range(1, 5)]
+        )
+        self.review_buttons = np.array(
+            [button_usage_dict.get((2, i), 0) for i in range(2, 5)]
+        )
+        self.first_rating_prob = self.learn_buttons / self.learn_buttons.sum()
+        self.review_rating_prob = self.review_buttons / self.review_buttons.sum()
+
+        df2 = df1.groupby(by=["first_review_state", "first_review_rating"])[
+            [1, 2, 3, 4]
+        ].mean()
+        df2["rating_offset"] = sum([df2[g] * (g - 3) for g in range(1, 5)])
+        df2["rating_count"] = sum([df2[g] for g in range(1, 5)])
+        short_term_dict = df2[["rating_offset", "rating_count"]].to_dict("index")
+        self.learn_short_term = [
+            short_term_dict.get((1, i), {"rating_offset": 0, "rating_count": 0})
+            for i in range(1, 5)
+        ]
+        self.review_short_term = short_term_dict.get(
+            (2, 1), {"rating_offset": 0, "rating_count": 0}
+        )
+
+        if verbose:
+            print("Learn costs: ", self.learn_costs)
+            print("Review costs: ", self.review_costs)
+            print("Learn buttons: ", self.learn_buttons)
+            print("Review buttons: ", self.review_buttons)
+            print("First rating prob: ", self.first_rating_prob)
+            print("Review rating prob: ", self.review_rating_prob)
+            print("Learn short term: ", self.learn_short_term)
+            print("Review short term: ", self.review_short_term)
+
     def create_time_series(
         self,
         timezone: str,
@@ -659,8 +749,6 @@ class Optimizer:
             )
             self.learn_cnt = learn_card_revlog["card_id"].nunique()
 
-            df.drop(columns=["review_duration", "review_state"], inplace=True)
-
         df["review_date"] = pd.to_datetime(df["review_time"] // 1000, unit="s")
         df["review_date"] = (
             df["review_date"].dt.tz_localize("UTC").dt.tz_convert(timezone)
@@ -679,6 +767,10 @@ class Optimizer:
         df.loc[df["i"] == 1, "delta_t"] = -1
         if df.empty:
             raise ValueError("Training data is inadequate.")
+
+        if "review_state" in df.columns and "review_duration" in df.columns:
+            self.extract_simulation_config(df)
+            df.drop(columns=["review_duration", "review_state"], inplace=True)
 
         def cum_concat(x):
             return list(accumulate(x))
