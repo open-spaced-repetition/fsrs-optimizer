@@ -647,19 +647,19 @@ class Optimizer:
         self.first_rating_prob = self.learn_buttons / self.learn_buttons.sum()
         self.review_rating_prob = self.review_buttons / self.review_buttons.sum()
 
-        df2 = df1.groupby(by=["first_review_state", "first_review_rating"])[
-            [1, 2, 3, 4]
-        ].mean().round(2)
+        df2 = (
+            df1.groupby(by=["first_review_state", "first_review_rating"])[[1, 2, 3, 4]]
+            .mean()
+            .round(2)
+        )
         rating_offset_dict = sum([df2[g] * (g - 3) for g in range(1, 5)]).to_dict()
         session_len_dict = sum([df2[g] for g in range(1, 5)]).to_dict()
-        self.first_rating_offset = np.array([
-            rating_offset_dict.get((1, i), 0)
-            for i in range(1, 5)
-        ])
-        self.first_session_len = np.array([
-            session_len_dict.get((1, i), 0)
-            for i in range(1, 5)
-        ])
+        self.first_rating_offset = np.array(
+            [rating_offset_dict.get((1, i), 0) for i in range(1, 5)]
+        )
+        self.first_session_len = np.array(
+            [session_len_dict.get((1, i), 0) for i in range(1, 5)]
+        )
         self.forget_rating_offset = rating_offset_dict.get((2, 1), 0)
         self.forget_session_len = session_len_dict.get((2, 1), 0)
 
