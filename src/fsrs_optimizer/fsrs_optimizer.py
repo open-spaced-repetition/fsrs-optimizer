@@ -24,21 +24,9 @@ from tqdm.auto import tqdm
 import warnings
 
 try:
-    from .fsrs_simulator import (
-        optimal_retention,
-        simulate,
-        next_interval,
-        power_forgetting_curve,
-        workload_graph,
-    )
+    from .fsrs_simulator import *
 except:
-    from fsrs_simulator import (
-        optimal_retention,
-        simulate,
-        next_interval,
-        power_forgetting_curve,
-        workload_graph,
-    )
+    from fsrs_simulator import *
 
 warnings.filterwarnings("ignore", category=UserWarning)
 
@@ -1312,27 +1300,38 @@ class Optimizer:
     ):
         """should not be called before predict_memory_states"""
 
-        # default_learn_cost = 22.8
-        # default_forget_cost = 18.0
-        # default_recall_costs = np.array([11.8, 7.3, 5.7])
-        # default_first_rating_prob = np.array([0.256, 0.084, 0.483, 0.177])
-        # default_review_rating_prob = np.array([0.224, 0.632, 0.144])
+        weight = self.learn_buttons / (50 + self.learn_buttons)
+        self.learn_costs = self.learn_costs * weight + DEFAULT_LEARN_COSTS * (
+            1 - weight
+        )
+        self.first_rating_offset = (
+            self.first_rating_offset * weight
+            + DEFAULT_FIRST_RATING_OFFSETS * (1 - weight)
+        )
+        self.first_session_len = (
+            self.first_session_len * weight + DEFAULT_FIRST_SESSION_LENS * (1 - weight)
+        )
 
-        # weight = self.recall_button_cnts / (50 + self.recall_button_cnts)
-        # self.recall_costs = self.recall_costs * weight + default_recall_costs * (
-        #     1 - weight
-        # )
-        # weight = forget_cnt / (50 + forget_cnt)
-        # forget_cost = forget_cost * weight + default_forget_cost * (1 - weight)
-        # weight = self.learn_cnt / (50 + self.learn_cnt)
-        # self.learn_cost = self.learn_cost * weight + default_learn_cost * (1 - weight)
-        # weight = len(self.dataset) / (50 + len(self.dataset))
-        # self.first_rating_prob = (
-        #     self.first_rating_prob * weight + default_first_rating_prob * (1 - weight)
-        # )
-        # self.review_rating_prob = (
-        #     self.review_rating_prob * weight + default_review_rating_prob * (1 - weight)
-        # )
+        weight = self.review_buttons / (50 + self.review_buttons)
+        self.review_costs = self.review_costs * weight[1:] + DEFAULT_REVIEW_COSTS * (
+            1 - weight[1:]
+        )
+        self.forget_rating_offset = self.forget_rating_offset * weight[
+            0
+        ] + DEFAULT_FORGET_RATING_OFFSET * (1 - weight[0])
+        self.forget_session_len = self.forget_session_len * weight[
+            0
+        ] + DEFAULT_FORGET_SESSION_LEN * (1 - weight[0])
+
+        weight = sum(self.learn_buttons) / (50 + sum(self.learn_buttons))
+        self.first_rating_prob = (
+            self.first_rating_prob * weight + DEFAULT_FIRST_RATING_PROB * (1 - weight)
+        )
+
+        weight = sum(self.review_buttons) / (50 + sum(self.review_buttons))
+        self.review_rating_prob = (
+            self.review_rating_prob * weight + DEFAULT_REVIEW_RATING_PROB * (1 - weight)
+        )
 
         self.review_costs[0] *= loss_aversion
         self.first_rating_offset[-1] = 0
@@ -1346,8 +1345,8 @@ class Optimizer:
             "learn_limit_perday": 10,
             "review_limit_perday": math.inf,
             "max_ivl": max_ivl,
-            "review_costs": self.review_costs,
             "learn_costs": self.learn_costs,
+            "review_costs": self.review_costs,
             "first_rating_prob": self.first_rating_prob,
             "review_rating_prob": self.review_rating_prob,
             "first_rating_offset": self.first_rating_offset,
@@ -1355,7 +1354,6 @@ class Optimizer:
             "forget_rating_offset": self.forget_rating_offset,
             "forget_session_len": self.forget_session_len,
         }
-
         self.optimal_retention = optimal_retention(**simulate_config)
 
         tqdm.write(

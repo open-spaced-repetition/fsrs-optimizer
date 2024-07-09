@@ -36,6 +36,16 @@ col = {key: i for i, key in enumerate(columns)}
 SAMPLE_SIZE = 4
 
 
+DEFAULT_LEARN_COSTS = np.array([33.79, 24.3, 13.68, 6.5])
+DEFAULT_REVIEW_COSTS = np.array([23.0, 11.68, 7.33, 5.6])
+DEFAULT_FIRST_RATING_PROB = np.array([0.24, 0.094, 0.495, 0.171])
+DEFAULT_REVIEW_RATING_PROB = np.array([0.224, 0.631, 0.145])
+DEFAULT_FIRST_RATING_OFFSETS = np.array([-0.72, -0.15, -0.01, 0.0])
+DEFAULT_FIRST_SESSION_LENS = np.array([2.02, 1.28, 0.81, 0.0])
+DEFAULT_FORGET_RATING_OFFSET = -0.28
+DEFAULT_FORGET_SESSION_LEN = 1.05
+
+
 def simulate(
     w,
     request_retention=0.9,
@@ -45,14 +55,14 @@ def simulate(
     learn_limit_perday=math.inf,
     review_limit_perday=math.inf,
     max_ivl=36500,
-    review_costs=np.array([30, 14, 10, 6]),
-    learn_costs=np.array([40, 30, 15, 10]),
-    first_rating_prob=np.array([0.15, 0.2, 0.6, 0.05]),
-    review_rating_prob=np.array([0.3, 0.6, 0.1]),
-    first_rating_offset=np.array([0.25, 0.2, 0.1, 0]),
-    first_session_len=np.array([2.5, 2, 1, 0]),
-    forget_rating_offset=-0.1,
-    forget_session_len=1.5,
+    learn_costs=DEFAULT_LEARN_COSTS,
+    review_costs=DEFAULT_REVIEW_COSTS,
+    first_rating_prob=DEFAULT_FIRST_RATING_PROB,
+    review_rating_prob=DEFAULT_REVIEW_RATING_PROB,
+    first_rating_offset=DEFAULT_FIRST_RATING_OFFSETS,
+    first_session_len=DEFAULT_FIRST_SESSION_LENS,
+    forget_rating_offset=DEFAULT_FORGET_RATING_OFFSET,
+    forget_session_len=DEFAULT_FORGET_SESSION_LEN,
     seed=42,
 ):
     np.random.seed(seed)
@@ -230,20 +240,20 @@ def optimal_retention(**kwargs):
 def sample(
     r,
     w,
-    deck_size,
-    learn_span,
-    max_cost_perday,
-    learn_limit_perday,
-    review_limit_perday,
-    max_ivl,
-    review_costs,
-    learn_costs,
-    first_rating_prob,
-    review_rating_prob,
-    first_rating_offset,
-    first_session_len,
-    forget_rating_offset,
-    forget_session_len,
+    deck_size=10000,
+    learn_span=365,
+    max_cost_perday=1800,
+    learn_limit_perday=math.inf,
+    review_limit_perday=math.inf,
+    max_ivl=36500,
+    learn_costs=DEFAULT_LEARN_COSTS,
+    review_costs=DEFAULT_REVIEW_COSTS,
+    first_rating_prob=DEFAULT_FIRST_RATING_PROB,
+    review_rating_prob=DEFAULT_REVIEW_RATING_PROB,
+    first_rating_offset=DEFAULT_FIRST_RATING_OFFSETS,
+    first_session_len=DEFAULT_FIRST_SESSION_LENS,
+    forget_rating_offset=DEFAULT_FORGET_RATING_OFFSET,
+    forget_session_len=DEFAULT_FORGET_SESSION_LEN,
 ):
     memorization = []
     for i in range(SAMPLE_SIZE):
@@ -256,8 +266,8 @@ def sample(
             max_ivl,
             learn_limit_perday,
             review_limit_perday,
-            review_costs,
             learn_costs,
+            review_costs,
             first_rating_prob,
             review_rating_prob,
             first_rating_offset,
@@ -474,7 +484,7 @@ def brent(tol=0.01, maxiter=20, **kwargs):
 
 def workload_graph(default_params):
     R = [x / 100 for x in range(70, 100)]
-    cost_per_memorization = [sample(r, **default_params) for r in R]
+    cost_per_memorization = [sample(r=r, **default_params) for r in R]
 
     # this is for testing
     # cost_per_memorization = [min(x, 2.3 * min(cost_per_memorization)) for x in cost_per_memorization]
@@ -659,14 +669,6 @@ if __name__ == "__main__":
         "learn_limit_perday": math.inf,
         "review_limit_perday": math.inf,
         "max_ivl": 36500,
-        "review_costs": np.array([30, 14, 10, 6]),
-        "learn_costs": np.array([40, 30, 15, 10]),
-        "first_rating_prob": np.array([0.15, 0.2, 0.6, 0.05]),
-        "review_rating_prob": np.array([0.3, 0.6, 0.1]),
-        "first_rating_offset": np.array([0.25, 0.2, 0.1, 0]),
-        "first_session_len": np.array([2.5, 2, 1, 0]),
-        "forget_rating_offset": -0.1,
-        "forget_session_len": 1.5,
     }
     (_, review_cnt_per_day, learn_cnt_per_day, memorized_cnt_per_day, _) = simulate(
         w=default_params["w"],
