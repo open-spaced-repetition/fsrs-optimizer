@@ -649,17 +649,19 @@ class Optimizer:
 
         df2 = df1.groupby(by=["first_review_state", "first_review_rating"])[
             [1, 2, 3, 4]
-        ].mean()
-        df2["rating_offset"] = sum([df2[g] * (g - 3) for g in range(1, 5)])
-        df2["rating_count"] = sum([df2[g] for g in range(1, 5)])
-        short_term_dict = df2[["rating_offset", "rating_count"]].to_dict("index")
-        self.learn_short_term = [
-            short_term_dict.get((1, i), {"rating_offset": 0, "rating_count": 0})
+        ].mean().round(2)
+        rating_offset_dict = sum([df2[g] * (g - 3) for g in range(1, 5)]).to_dict()
+        session_len_dict = sum([df2[g] for g in range(1, 5)]).to_dict()
+        self.first_rating_offset = np.array([
+            rating_offset_dict.get((1, i), 0)
             for i in range(1, 5)
-        ]
-        self.review_short_term = short_term_dict.get(
-            (2, 1), {"rating_offset": 0, "rating_count": 0}
-        )
+        ])
+        self.first_session_len = np.array([
+            session_len_dict.get((1, i), 0)
+            for i in range(1, 5)
+        ])
+        self.forget_rating_offset = rating_offset_dict.get((2, 1), 0)
+        self.forget_session_len = session_len_dict.get((2, 1), 0)
 
         if verbose:
             print("Learn costs: ", self.learn_costs)
@@ -668,8 +670,10 @@ class Optimizer:
             print("Review buttons: ", self.review_buttons)
             print("First rating prob: ", self.first_rating_prob)
             print("Review rating prob: ", self.review_rating_prob)
-            print("Learn short term: ", self.learn_short_term)
-            print("Review short term: ", self.review_short_term)
+            print("First rating offset: ", self.first_rating_offset)
+            print("First session len: ", self.first_session_len)
+            print("Forget rating offset: ", self.forget_rating_offset)
+            print("Forget session len: ", self.forget_session_len)
 
     def create_time_series(
         self,
@@ -681,74 +685,6 @@ class Optimizer:
         """Step 2"""
         df = pd.read_csv("./revlog.csv")
         df.sort_values(by=["card_id", "review_time"], inplace=True, ignore_index=True)
-
-        if "review_state" in df.columns and "review_duration" in df.columns:
-            new_card_revlog = df[
-                (df["review_state"] == New) & (df["review_rating"].isin([1, 2, 3, 4]))
-            ]
-            self.first_rating_prob = np.zeros(4)
-            self.first_rating_prob[
-                new_card_revlog["review_rating"].value_counts().index - 1
-            ] = (
-                new_card_revlog["review_rating"].value_counts()
-                / new_card_revlog["review_rating"].count()
-            )
-            recall_card_revlog = df[
-                (df["review_state"] == Review) & (df["review_rating"].isin([2, 3, 4]))
-            ]
-            self.review_rating_prob = np.zeros(3)
-            self.review_rating_prob[
-                recall_card_revlog["review_rating"].value_counts().index - 2
-            ] = (
-                recall_card_revlog["review_rating"].value_counts()
-                / recall_card_revlog["review_rating"].count()
-            )
-
-            df["review_state"] = df["review_state"].map(
-                lambda x: x if x != New else Learning
-            )
-
-            recall_card_revlog = recall_card_revlog[
-                (recall_card_revlog["review_duration"] > 0)
-                & (df["review_duration"] < 1200000)
-            ]
-            self.recall_costs = np.zeros(3)
-            recall_costs = recall_card_revlog.groupby(by="review_rating")[
-                "review_duration"
-            ].median()
-            self.recall_costs[recall_costs.index - 2] = recall_costs / 1000
-
-            self.recall_button_cnts = np.zeros(3)
-            recall_button_cnts = recall_card_revlog.groupby(by="review_rating")[
-                "review_duration"
-            ].count()
-            self.recall_button_cnts[recall_button_cnts.index - 2] = recall_button_cnts
-
-            self.state_sequence = np.array(
-                df[(df["review_duration"] > 0) & (df["review_duration"] < 1200000)][
-                    "review_state"
-                ]
-            )
-            self.duration_sequence = np.array(
-                df[(df["review_duration"] > 0) & (df["review_duration"] < 1200000)][
-                    "review_duration"
-                ]
-            )
-
-            learn_card_revlog = df[
-                (df["review_state"] == Learning)
-                & (df["review_duration"] > 0)
-                & (df["review_duration"] < 1200000)
-            ]
-            self.learn_cost = round(
-                learn_card_revlog.groupby("card_id")
-                .agg({"review_duration": "sum"})["review_duration"]
-                .median()
-                / 1000,
-                1,
-            )
-            self.learn_cnt = learn_card_revlog["card_id"].nunique()
-
         df["review_date"] = pd.to_datetime(df["review_time"] // 1000, unit="s")
         df["review_date"] = (
             df["review_date"].dt.tz_localize("UTC").dt.tz_convert(timezone)
@@ -1372,66 +1308,32 @@ class Optimizer:
         verbose=True,
     ):
         """should not be called before predict_memory_states"""
-        state_durations = dict()
-        last_state = self.state_sequence[0]
-        state_durations[last_state] = [self.duration_sequence[0]]
-        for i, state in enumerate(self.state_sequence[1:], start=1):
-            if state not in state_durations:
-                state_durations[state] = []
-            if state == Review:
-                state_durations[state].append(self.duration_sequence[i])
-            else:
-                if state == last_state:
-                    state_durations[state][-1] += self.duration_sequence[i]
-                else:
-                    state_durations[state].append(self.duration_sequence[i])
-            last_state = state
 
-        recall_cost = round(np.median(state_durations[Review]) / 1000, 1)
-        forget_cost = round(
-            np.median(state_durations[Relearning]) / 1000 + recall_cost, 1
-        )
-        forget_cnt = len(state_durations[Relearning])
-        if verbose:
-            tqdm.write(f"average time for failed reviews: {forget_cost}s")
-            tqdm.write(f"average time for recalled reviews: {recall_cost}s")
-            tqdm.write(
-                "average time for `hard`, `good` and `easy` reviews: %.1fs, %.1fs, %.1fs"
-                % tuple(self.recall_costs)
-            )
-            tqdm.write(f"average time for learning a new card: {self.learn_cost}s")
-            tqdm.write(
-                "Ratio of `hard`, `good` and `easy` ratings for recalled reviews: %.2f, %.2f, %.2f"
-                % tuple(self.review_rating_prob)
-            )
-            tqdm.write(
-                "Ratio of `again`, `hard`, `good` and `easy` ratings for new cards: %.2f, %.2f, %.2f, %.2f"
-                % tuple(self.first_rating_prob)
-            )
+        # default_learn_cost = 22.8
+        # default_forget_cost = 18.0
+        # default_recall_costs = np.array([11.8, 7.3, 5.7])
+        # default_first_rating_prob = np.array([0.256, 0.084, 0.483, 0.177])
+        # default_review_rating_prob = np.array([0.224, 0.632, 0.144])
 
-        default_learn_cost = 22.8
-        default_forget_cost = 18.0
-        default_recall_costs = np.array([11.8, 7.3, 5.7])
-        default_first_rating_prob = np.array([0.256, 0.084, 0.483, 0.177])
-        default_review_rating_prob = np.array([0.224, 0.632, 0.144])
+        # weight = self.recall_button_cnts / (50 + self.recall_button_cnts)
+        # self.recall_costs = self.recall_costs * weight + default_recall_costs * (
+        #     1 - weight
+        # )
+        # weight = forget_cnt / (50 + forget_cnt)
+        # forget_cost = forget_cost * weight + default_forget_cost * (1 - weight)
+        # weight = self.learn_cnt / (50 + self.learn_cnt)
+        # self.learn_cost = self.learn_cost * weight + default_learn_cost * (1 - weight)
+        # weight = len(self.dataset) / (50 + len(self.dataset))
+        # self.first_rating_prob = (
+        #     self.first_rating_prob * weight + default_first_rating_prob * (1 - weight)
+        # )
+        # self.review_rating_prob = (
+        #     self.review_rating_prob * weight + default_review_rating_prob * (1 - weight)
+        # )
 
-        weight = self.recall_button_cnts / (50 + self.recall_button_cnts)
-        self.recall_costs = self.recall_costs * weight + default_recall_costs * (
-            1 - weight
-        )
-        weight = forget_cnt / (50 + forget_cnt)
-        forget_cost = forget_cost * weight + default_forget_cost * (1 - weight)
-        weight = self.learn_cnt / (50 + self.learn_cnt)
-        self.learn_cost = self.learn_cost * weight + default_learn_cost * (1 - weight)
-        weight = len(self.dataset) / (50 + len(self.dataset))
-        self.first_rating_prob = (
-            self.first_rating_prob * weight + default_first_rating_prob * (1 - weight)
-        )
-        self.review_rating_prob = (
-            self.review_rating_prob * weight + default_review_rating_prob * (1 - weight)
-        )
-
-        forget_cost *= loss_aversion
+        self.review_costs[0] *= loss_aversion
+        self.first_rating_offset[-1] = 0
+        self.first_session_len[-1] = 0
 
         simulate_config = {
             "w": self.w,
@@ -1441,11 +1343,14 @@ class Optimizer:
             "learn_limit_perday": 10,
             "review_limit_perday": math.inf,
             "max_ivl": max_ivl,
-            "recall_costs": self.recall_costs,
-            "forget_cost": forget_cost,
-            "learn_cost": self.learn_cost,
+            "review_costs": self.review_costs,
+            "learn_costs": self.learn_costs,
             "first_rating_prob": self.first_rating_prob,
             "review_rating_prob": self.review_rating_prob,
+            "first_rating_offset": self.first_rating_offset,
+            "first_session_len": self.first_session_len,
+            "forget_rating_offset": self.forget_rating_offset,
+            "forget_session_len": self.forget_session_len,
         }
 
         self.optimal_retention = optimal_retention(**simulate_config)
@@ -1509,6 +1414,8 @@ class Optimizer:
         ax.legend()
         ax.grid(True)
 
+        simulate_config["max_cost_perday"] = 1800
+        simulate_config["learn_limit_perday"] = math.inf
         fig6 = workload_graph(simulate_config)
 
         return (fig1, fig2, fig3, fig4, fig5, fig6)

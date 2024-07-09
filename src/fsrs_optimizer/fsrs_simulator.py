@@ -51,7 +51,7 @@ def simulate(
     review_rating_prob=np.array([0.3, 0.6, 0.1]),
     first_rating_offset=np.array([0.25, 0.2, 0.1, 0]),
     first_session_len=np.array([2.5, 2, 1, 0]),
-    forget_rating_offest=-0.1,
+    forget_rating_offset=-0.1,
     forget_session_len=1.5,
     seed=42,
 ):
@@ -101,10 +101,18 @@ def simulate(
             rating_offset = np.choose(init_rating - 1, first_rating_offset)
             session_len = np.choose(init_rating - 1, first_session_len)
         else:
-            rating_offset = forget_rating_offest
+            rating_offset = forget_rating_offset
             session_len = forget_session_len
         new_s = s * np.exp(w[17] * (rating_offset + session_len * w[18]))
         return new_s
+
+    def next_d(d, rating):
+        new_d = d - w[6] * (rating - 3)
+        new_d = mean_reversion(w[4], new_d)
+        return np.clip(new_d, 1, 10)
+
+    def mean_reversion(init, current):
+        return w[7] * init + (1 - w[7]) * current
 
     for today in trange(learn_span, position=1, leave=False):
         has_learned = card_table[col["stability"]] > 1e-10
@@ -152,15 +160,9 @@ def simulate(
             card_table[col["rating"]][true_review & ~forget],
         )
 
-        card_table[col["difficulty"]][true_review & forget] = np.clip(
-            card_table[col["difficulty"]][true_review & forget] + 2 * w[6], 1, 10
-        )
-
-        card_table[col["difficulty"]][true_review & ~forget] = np.clip(
-            card_table[col["difficulty"]][true_review & ~forget]
-            - w[6] * (card_table[col["rating"]][true_review & ~forget] - 3),
-            1,
-            10,
+        card_table[col["difficulty"]][true_review] = next_d(
+            card_table[col["difficulty"]][true_review],
+            card_table[col["rating"]][true_review],
         )
 
         need_learn = card_table[col["due"]] == learn_span
@@ -240,7 +242,7 @@ def sample(
     review_rating_prob,
     first_rating_offset,
     first_session_len,
-    forget_rating_offest,
+    forget_rating_offset,
     forget_session_len,
 ):
     memorization = []
@@ -260,7 +262,7 @@ def sample(
             review_rating_prob,
             first_rating_offset,
             first_session_len,
-            forget_rating_offest,
+            forget_rating_offset,
             forget_session_len,
             seed=42 + i,
         )
@@ -663,7 +665,7 @@ if __name__ == "__main__":
         "review_rating_prob": np.array([0.3, 0.6, 0.1]),
         "first_rating_offset": np.array([0.25, 0.2, 0.1, 0]),
         "first_session_len": np.array([2.5, 2, 1, 0]),
-        "forget_rating_offest": -0.1,
+        "forget_rating_offset": -0.1,
         "forget_session_len": 1.5,
     }
     (_, review_cnt_per_day, learn_cnt_per_day, memorized_cnt_per_day, _) = simulate(
