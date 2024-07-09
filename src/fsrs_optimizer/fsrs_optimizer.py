@@ -705,6 +705,9 @@ class Optimizer:
             raise ValueError("Training data is inadequate.")
 
         if "review_state" in df.columns and "review_duration" in df.columns:
+            df["review_state"] = df["review_state"].map(
+                lambda x: x if x != New else Learning
+            )
             self.extract_simulation_config(df)
             df.drop(columns=["review_duration", "review_state"], inplace=True)
 
