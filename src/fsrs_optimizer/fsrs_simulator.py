@@ -116,6 +116,12 @@ def simulate(
         new_s = s * np.exp(w[17] * (rating_offset + session_len * w[18]))
         return new_s
 
+    def init_d(rating):
+        new_d = w[4] - np.exp(w[5] * (rating - 1)) + 1
+        rating_offset = np.choose(rating - 1, first_rating_offset)
+        new_d -= w[6] * rating_offset
+        return np.clip(new_d, 1, 10)
+
     def next_d(d, rating):
         new_d = d - w[6] * (rating - 3)
         new_d = mean_reversion(w[4], new_d)
@@ -174,6 +180,9 @@ def simulate(
             card_table[col["difficulty"]][true_review],
             card_table[col["rating"]][true_review],
         )
+        card_table[col["difficulty"]][true_review & forget] -= (
+            w[6] * forget_rating_offset
+        )
 
         need_learn = card_table[col["due"]] == learn_span
         card_table[col["cost"]][need_learn] = min(learn_costs)
@@ -200,12 +209,8 @@ def simulate(
             card_table[col["stability"]][true_learn],
             init_rating=card_table[col["rating"]][true_learn].astype(int),
         )
-        card_table[col["difficulty"]][true_learn] = np.clip(
-            w[4]
-            - np.exp(w[5] * (card_table[col["rating"]][true_learn].astype(int) - 1))
-            + 1,
-            1,
-            10,
+        card_table[col["difficulty"]][true_learn] = init_d(
+            card_table[col["rating"]][true_learn].astype(int)
         )
 
         card_table[col["ivl"]][true_review | true_learn] = np.clip(

@@ -630,10 +630,10 @@ class Optimizer:
             [button_usage_dict.get((1, i), 0) for i in range(1, 5)]
         )
         self.review_buttons = np.array(
-            [button_usage_dict.get((2, i), 0) for i in range(2, 5)]
+            [button_usage_dict.get((2, i), 0) for i in range(1, 5)]
         )
         self.first_rating_prob = self.learn_buttons / self.learn_buttons.sum()
-        self.review_rating_prob = self.review_buttons / self.review_buttons.sum()
+        self.review_rating_prob = self.review_buttons[1:] / self.review_buttons[1:].sum()
 
         df2 = (
             df1.groupby(by=["first_review_state", "first_review_rating"])[[1, 2, 3, 4]]
@@ -1313,8 +1313,8 @@ class Optimizer:
         )
 
         weight = self.review_buttons / (50 + self.review_buttons)
-        self.review_costs = self.review_costs * weight[1:] + DEFAULT_REVIEW_COSTS * (
-            1 - weight[1:]
+        self.review_costs = self.review_costs * weight + DEFAULT_REVIEW_COSTS * (
+            1 - weight
         )
         self.forget_rating_offset = self.forget_rating_offset * weight[
             0
@@ -1328,7 +1328,7 @@ class Optimizer:
             self.first_rating_prob * weight + DEFAULT_FIRST_RATING_PROB * (1 - weight)
         )
 
-        weight = sum(self.review_buttons) / (50 + sum(self.review_buttons))
+        weight = sum(self.review_buttons[1:]) / (50 + sum(self.review_buttons[1:]))
         self.review_rating_prob = (
             self.review_rating_prob * weight + DEFAULT_REVIEW_RATING_PROB * (1 - weight)
         )
