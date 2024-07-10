@@ -119,11 +119,12 @@ def process(filepath, filter_out_flags: list[int]):
         for i, f in enumerate(figures):
             f.savefig(f"find_optimal_retention_{i}.png")
             plt.close(f)
-    except:
+    except Exception as e:
+        print(e)
         print("Failed to find optimal retention")
         optimizer.optimal_retention = 0.9
 
-    optimizer.preview(optimizer.optimal_retention)
+    print(optimizer.preview(optimizer.optimal_retention))
 
     profile = f"""{{
     // Generated, Optimized anki deck settings

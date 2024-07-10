@@ -24,21 +24,9 @@ from tqdm.auto import tqdm
 import warnings
 
 try:
-    from .fsrs_simulator import (
-        optimal_retention,
-        simulate,
-        next_interval,
-        power_forgetting_curve,
-        workload_graph,
-    )
+    from .fsrs_simulator import *
 except:
-    from fsrs_simulator import (
-        optimal_retention,
-        simulate,
-        next_interval,
-        power_forgetting_curve,
-        workload_graph,
-    )
+    from fsrs_simulator import *
 
 warnings.filterwarnings("ignore", category=UserWarning)
 
@@ -48,23 +36,25 @@ Review = 2
 Relearning = 3
 
 DEFAULT_PARAMETER = [
-    0.4872,
-    1.4003,
-    3.7145,
-    13.8206,
-    5.1618,
-    1.2298,
-    0.8975,
-    0.031,
-    1.6474,
-    0.1367,
-    1.0461,
-    2.1072,
-    0.0793,
-    0.3246,
-    1.587,
-    0.2272,
-    2.8755,
+    0.4197,
+    1.1869,
+    3.0412,
+    15.2441,
+    7.1434,
+    0.6477,
+    1.0007,
+    0.0674,
+    1.6597,
+    0.1712,
+    1.1178,
+    2.0225,
+    0.0904,
+    0.3025,
+    2.1214,
+    0.2498,
+    2.9466,
+    0.4891,
+    0.6468,
 ]
 
 S_MIN = 0.01
@@ -100,6 +90,15 @@ class FSRS(nn.Module):
         )
         return torch.minimum(new_s, state[:, 0])
 
+    def stability_short_term(self, state: Tensor, rating: Tensor) -> Tensor:
+        new_s = state[:, 0] * torch.exp(self.w[17] * (rating - 3 + self.w[18]))
+        return new_s
+
+    def next_d(self, state: Tensor, rating: Tensor) -> Tensor:
+        new_d = state[:, 1] - self.w[6] * (rating - 3)
+        new_d = self.mean_reversion(self.w[4], new_d)
+        return new_d
+
     def step(self, X: Tensor, state: Tensor) -> Tensor:
         """
         :param X: shape[batch_size, 2], X[:,0] is elapsed time, X[:,1] is rating
@@ -113,18 +112,22 @@ class FSRS(nn.Module):
             # first learn, init memory states
             new_s = torch.ones_like(state[:, 0])
             new_s[index[0]] = self.w[index[1]]
-            new_d = self.w[4] - self.w[5] * (X[:, 1] - 3)
+            new_d = self.w[4] - torch.exp(self.w[5] * (X[:, 1] - 1)) + 1
             new_d = new_d.clamp(1, 10)
         else:
             r = power_forgetting_curve(X[:, 0], state[:, 0])
-            condition = X[:, 1] > 1
+            short_term = X[:, 0] < 1
+            success = X[:, 1] > 1
             new_s = torch.where(
-                condition,
-                self.stability_after_success(state, r, X[:, 1]),
-                self.stability_after_failure(state, r),
+                short_term,
+                self.stability_short_term(state, X[:, 1]),
+                torch.where(
+                    success,
+                    self.stability_after_success(state, r, X[:, 1]),
+                    self.stability_after_failure(state, r),
+                ),
             )
-            new_d = state[:, 1] - self.w[6] * (X[:, 1] - 3)
-            new_d = self.mean_reversion(self.w[4], new_d)
+            new_d = self.next_d(state, X[:, 1])
             new_d = new_d.clamp(1, 10)
         new_s = new_s.clamp(S_MIN, 36500)
         return torch.stack([new_s, new_d], dim=1)
@@ -152,19 +155,25 @@ class ParameterClipper:
     def __call__(self, module):
         if hasattr(module, "w"):
             w = module.w.data
+            w[0] = w[0].clamp(S_MIN, 100)
+            w[1] = w[1].clamp(S_MIN, 100)
+            w[2] = w[2].clamp(S_MIN, 100)
+            w[3] = w[3].clamp(S_MIN, 100)
             w[4] = w[4].clamp(1, 10)
-            w[5] = w[5].clamp(0.1, 5)
-            w[6] = w[6].clamp(0.1, 5)
+            w[5] = w[5].clamp(0.01, 4)
+            w[6] = w[6].clamp(0.01, 4)
             w[7] = w[7].clamp(0, 0.75)
-            w[8] = w[8].clamp(0, 4)
+            w[8] = w[8].clamp(0, 4.5)
             w[9] = w[9].clamp(0, 0.8)
-            w[10] = w[10].clamp(0.01, 3)
-            w[11] = w[11].clamp(0.5, 5)
-            w[12] = w[12].clamp(0.01, 0.2)
+            w[10] = w[10].clamp(0.01, 3.5)
+            w[11] = w[11].clamp(0.1, 5)
+            w[12] = w[12].clamp(0.01, 0.25)
             w[13] = w[13].clamp(0.01, 0.9)
-            w[14] = w[14].clamp(0.01, 3)
+            w[14] = w[14].clamp(0.01, 4)
             w[15] = w[15].clamp(0, 1)
             w[16] = w[16].clamp(1, 6)
+            w[17] = w[17].clamp(0, 2)
+            w[18] = w[18].clamp(0, 2)
             module.w.data = w
 
 
@@ -180,12 +189,17 @@ def lineToTensor(line: str) -> Tensor:
 
 class BatchDataset(Dataset):
     def __init__(
-        self, dataframe: pd.DataFrame, batch_size: int = 0, sort_by_length: bool = True
+        self,
+        dataframe: pd.DataFrame,
+        batch_size: int = 0,
+        sort_by_length: bool = True,
+        max_seq_len: int = math.inf,
     ):
         if dataframe.empty:
             raise ValueError("Training data is inadequate.")
         if sort_by_length:
             dataframe = dataframe.sort_values(by=["i"])
+        dataframe = dataframe[dataframe["tensor"].map(len) <= max_seq_len]
         self.x_train = pad_sequence(
             dataframe["tensor"].to_list(), batch_first=True, padding_value=0
         )
@@ -204,8 +218,8 @@ class BatchDataset(Dataset):
                 end_index = min((i + 1) * batch_size, length)
                 sequences = self.x_train[start_index:end_index]
                 seq_lens = self.seq_len[start_index:end_index]
-                max_len = max(seq_lens)
-                sequences_truncated = sequences[:, :max_len]
+                max_seq_len = max(seq_lens)
+                sequences_truncated = sequences[:, :max_seq_len]
                 self.batches[i] = (
                     sequences_truncated.transpose(0, 1),
                     self.t_train[start_index:end_index],
@@ -252,14 +266,16 @@ class Trainer:
         n_epoch: int = 1,
         lr: float = 1e-2,
         batch_size: int = 256,
+        max_seq_len: int = 64,
     ) -> None:
         self.model = FSRS(init_w)
         self.optimizer = torch.optim.Adam(self.model.parameters(), lr=lr)
         self.clipper = ParameterClipper()
         self.batch_size = batch_size
+        self.max_seq_len = max_seq_len
         self.build_dataset(train_set, test_set)
         self.n_epoch = n_epoch
-        self.batch_nums = self.next_train_data_loader.batch_nums
+        self.batch_nums = self.train_data_loader.batch_nums
         self.scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
             self.optimizer, T_max=self.batch_nums * n_epoch
         )
@@ -268,27 +284,23 @@ class Trainer:
         self.loss_fn = nn.BCELoss(reduction="none")
 
     def build_dataset(self, train_set: pd.DataFrame, test_set: Optional[pd.DataFrame]):
-        pre_train_set = train_set[train_set["i"] == 2]
-        self.pre_train_set = BatchDataset(pre_train_set, batch_size=self.batch_size)
-        self.pre_train_data_loader = BatchLoader(self.pre_train_set)
-
-        next_train_set = train_set[train_set["i"] > 2]
-        self.next_train_set = BatchDataset(next_train_set, batch_size=self.batch_size)
-        self.next_train_data_loader = BatchLoader(self.next_train_set)
-
-        self.train_set = BatchDataset(train_set, batch_size=self.batch_size)
+        self.train_set = BatchDataset(
+            train_set, batch_size=self.batch_size, max_seq_len=self.max_seq_len
+        )
         self.train_data_loader = BatchLoader(self.train_set)
 
         self.test_set = (
             []
             if test_set is None
-            else BatchDataset(test_set, batch_size=self.batch_size)
+            else BatchDataset(
+                test_set, batch_size=self.batch_size, max_seq_len=self.max_seq_len
+            )
         )
 
     def train(self, verbose: bool = True):
         self.verbose = verbose
         best_loss = np.inf
-        epoch_len = len(self.next_train_set.y_train)
+        epoch_len = len(self.train_set.y_train)
         if verbose:
             pbar = tqdm(desc="train", colour="red", total=epoch_len * self.n_epoch)
         print_len = max(self.batch_nums * self.n_epoch // 10, 1)
@@ -298,7 +310,7 @@ class Trainer:
                 best_loss = weighted_loss
                 best_w = w
 
-            for i, batch in enumerate(self.next_train_data_loader):
+            for i, batch in enumerate(self.train_data_loader):
                 self.model.train()
                 self.optimizer.zero_grad()
                 sequences, delta_ts, labels, seq_lens = batch
@@ -308,8 +320,6 @@ class Trainer:
                 retentions = power_forgetting_curve(delta_ts, stabilities)
                 loss = self.loss_fn(retentions, labels).sum()
                 loss.backward()
-                for param in self.model.parameters():
-                    param.grad[:4] = torch.zeros(4)
                 self.optimizer.step()
                 self.scheduler.step()
                 self.model.apply(self.clipper)
@@ -412,7 +422,7 @@ def remove_outliers(group: pd.DataFrame) -> pd.DataFrame:
     # threshold = Q3 + 1.5 * IQR
     # group = group[group['delta_t'] <= threshold]
     grouped_group = (
-        group.groupby(by=["r_history", "delta_t"], group_keys=False)
+        group.groupby(by=["first_rating", "delta_t"], group_keys=False)
         .agg({"y": ["mean", "count"]})
         .reset_index()
     )
@@ -559,6 +569,90 @@ class Optimizer:
         df.to_csv("revlog.csv", index=False)
         tqdm.write("revlog.csv saved.")
 
+    def extract_simulation_config(self, df):
+        def rating_counts(x):
+            tmp = x.value_counts().to_dict()
+            first = x.iloc[0]
+            tmp[first] -= 1
+            for i in range(1, 5):
+                if i not in tmp:
+                    tmp[i] = 0
+            return tmp
+
+        df1 = (
+            df[(df["review_duration"] > 0) & (df["review_duration"] < 1200000)]
+            .groupby(by=["card_id", "real_days"])
+            .agg(
+                {
+                    "review_state": "first",
+                    "review_rating": ["first", rating_counts],
+                    "review_duration": "sum",
+                    "i": "size",
+                }
+            )
+            .reset_index()
+        )
+        df1.columns = [
+            "card_id",
+            "real_days",
+            "first_review_state",
+            "first_review_rating",
+            "review_rating_counts",
+            "sum_review_duration",
+            "review_count",
+        ]
+        rating_counts_df = (
+            df1["review_rating_counts"].apply(pd.Series).fillna(0).astype(int)
+        )
+        df1 = pd.concat(
+            [df1.drop("review_rating_counts", axis=1), rating_counts_df], axis=1
+        )
+
+        cost_dict = (
+            df1.groupby(by=["first_review_state", "first_review_rating"])[
+                "sum_review_duration"
+            ]
+            .median()
+            .to_dict()
+        )
+        self.learn_costs = np.array(
+            [cost_dict.get((1, i), 0) / 1000 for i in range(1, 5)]
+        )
+        self.review_costs = np.array(
+            [cost_dict.get((2, i), 0) / 1000 for i in range(1, 5)]
+        )
+        button_usage_dict = (
+            df1.groupby(by=["first_review_state", "first_review_rating"])["card_id"]
+            .count()
+            .to_dict()
+        )
+        self.learn_buttons = np.array(
+            [button_usage_dict.get((1, i), 0) for i in range(1, 5)]
+        )
+        self.review_buttons = np.array(
+            [button_usage_dict.get((2, i), 0) for i in range(1, 5)]
+        )
+        self.first_rating_prob = self.learn_buttons / self.learn_buttons.sum()
+        self.review_rating_prob = (
+            self.review_buttons[1:] / self.review_buttons[1:].sum()
+        )
+
+        df2 = (
+            df1.groupby(by=["first_review_state", "first_review_rating"])[[1, 2, 3, 4]]
+            .mean()
+            .round(2)
+        )
+        rating_offset_dict = sum([df2[g] * (g - 3) for g in range(1, 5)]).to_dict()
+        session_len_dict = sum([df2[g] for g in range(1, 5)]).to_dict()
+        self.first_rating_offset = np.array(
+            [rating_offset_dict.get((1, i), 0) for i in range(1, 5)]
+        )
+        self.first_session_len = np.array(
+            [session_len_dict.get((1, i), 0) for i in range(1, 5)]
+        )
+        self.forget_rating_offset = rating_offset_dict.get((2, 1), 0)
+        self.forget_session_len = session_len_dict.get((2, 1), 0)
+
     def create_time_series(
         self,
         timezone: str,
@@ -569,76 +663,6 @@ class Optimizer:
         """Step 2"""
         df = pd.read_csv("./revlog.csv")
         df.sort_values(by=["card_id", "review_time"], inplace=True, ignore_index=True)
-
-        if "review_state" in df.columns and "review_duration" in df.columns:
-            new_card_revlog = df[
-                (df["review_state"] == New) & (df["review_rating"].isin([1, 2, 3, 4]))
-            ]
-            self.first_rating_prob = np.zeros(4)
-            self.first_rating_prob[
-                new_card_revlog["review_rating"].value_counts().index - 1
-            ] = (
-                new_card_revlog["review_rating"].value_counts()
-                / new_card_revlog["review_rating"].count()
-            )
-            recall_card_revlog = df[
-                (df["review_state"] == Review) & (df["review_rating"].isin([2, 3, 4]))
-            ]
-            self.review_rating_prob = np.zeros(3)
-            self.review_rating_prob[
-                recall_card_revlog["review_rating"].value_counts().index - 2
-            ] = (
-                recall_card_revlog["review_rating"].value_counts()
-                / recall_card_revlog["review_rating"].count()
-            )
-
-            df["review_state"] = df["review_state"].map(
-                lambda x: x if x != New else Learning
-            )
-
-            recall_card_revlog = recall_card_revlog[
-                (recall_card_revlog["review_duration"] > 0)
-                & (df["review_duration"] < 1200000)
-            ]
-            self.recall_costs = np.zeros(3)
-            recall_costs = recall_card_revlog.groupby(by="review_rating")[
-                "review_duration"
-            ].median()
-            self.recall_costs[recall_costs.index - 2] = recall_costs / 1000
-
-            self.recall_button_cnts = np.zeros(3)
-            recall_button_cnts = recall_card_revlog.groupby(by="review_rating")[
-                "review_duration"
-            ].count()
-            self.recall_button_cnts[recall_button_cnts.index - 2] = recall_button_cnts
-
-            self.state_sequence = np.array(
-                df[(df["review_duration"] > 0) & (df["review_duration"] < 1200000)][
-                    "review_state"
-                ]
-            )
-            self.duration_sequence = np.array(
-                df[(df["review_duration"] > 0) & (df["review_duration"] < 1200000)][
-                    "review_duration"
-                ]
-            )
-
-            learn_card_revlog = df[
-                (df["review_state"] == Learning)
-                & (df["review_duration"] > 0)
-                & (df["review_duration"] < 1200000)
-            ]
-            self.learn_cost = round(
-                learn_card_revlog.groupby("card_id")
-                .agg({"review_duration": "sum"})["review_duration"]
-                .median()
-                / 1000,
-                1,
-            )
-            self.learn_cnt = learn_card_revlog["card_id"].nunique()
-
-            df.drop(columns=["review_duration", "review_state"], inplace=True)
-
         df["review_date"] = pd.to_datetime(df["review_time"] // 1000, unit="s")
         df["review_date"] = (
             df["review_date"].dt.tz_localize("UTC").dt.tz_convert(timezone)
@@ -650,42 +674,70 @@ class Optimizer:
                 "D", ambiguous="infer", nonexistent="shift_forward"
             )
         ).to_julian_date()
-        df.drop_duplicates(["card_id", "real_days"], keep="first", inplace=True)
+        # df.drop_duplicates(["card_id", "real_days"], keep="first", inplace=True)
         df["delta_t"] = df.real_days.diff()
         df.fillna({"delta_t": 0}, inplace=True)
         df["i"] = df.groupby("card_id").cumcount() + 1
-        df.loc[df["i"] == 1, "delta_t"] = 0
+        df.loc[df["i"] == 1, "delta_t"] = -1
         if df.empty:
             raise ValueError("Training data is inadequate.")
+
+        if "review_state" in df.columns and "review_duration" in df.columns:
+            df["review_state"] = df["review_state"].map(
+                lambda x: x if x != New else Learning
+            )
+            self.extract_simulation_config(df)
+            df.drop(columns=["review_duration", "review_state"], inplace=True)
 
         def cum_concat(x):
             return list(accumulate(x))
 
-        t_history = df.groupby("card_id", group_keys=False)["delta_t"].apply(
+        t_history_list = df.groupby("card_id", group_keys=False)["delta_t"].apply(
             lambda x: cum_concat([[int(i)] for i in x])
         )
         df["t_history"] = [
-            ",".join(map(str, item[:-1])) for sublist in t_history for item in sublist
+            ",".join(map(str, item[:-1]))
+            for sublist in t_history_list
+            for item in sublist
         ]
-        r_history = df.groupby("card_id", group_keys=False)["review_rating"].apply(
+        r_history_list = df.groupby("card_id", group_keys=False)["review_rating"].apply(
             lambda x: cum_concat([[i] for i in x])
         )
         df["r_history"] = [
-            ",".join(map(str, item[:-1])) for sublist in r_history for item in sublist
+            ",".join(map(str, item[:-1]))
+            for sublist in r_history_list
+            for item in sublist
         ]
+        last_rating = []
+        for t_sublist, r_sublist in zip(t_history_list, r_history_list):
+            for t_history, r_history in zip(t_sublist, r_sublist):
+                flag = True
+                for t, r in zip(reversed(t_history[:-1]), reversed(r_history[:-1])):
+                    if t > 0:
+                        last_rating.append(r)
+                        flag = False
+                        break
+                if flag:
+                    last_rating.append(r_history[0])
+        df["last_rating"] = last_rating
+
         df = df.groupby("card_id").filter(
             lambda group: group["review_time"].min()
             > time.mktime(datetime.strptime(revlog_start_date, "%Y-%m-%d").timetuple())
             * 1000
         )
         df = df[
-            (df["review_rating"] != 0) & (df["r_history"].str.contains("0") == 0)
+            (df["review_rating"] != 0)
+            & (df["r_history"].str.contains("0") == 0)
+            & (df["delta_t"] != 0)
         ].copy()
+        df["i"] = df.groupby("card_id").cumcount() + 1
+        df["first_rating"] = df["r_history"].map(lambda x: x[0] if len(x) > 0 else "")
         df["y"] = df["review_rating"].map(lambda x: {1: 0, 2: 1, 3: 1, 4: 1}[x])
 
         df[df["i"] == 2] = (
             df[df["i"] == 2]
-            .groupby(by=["r_history", "t_history"], as_index=False, group_keys=False)
+            .groupby(by=["first_rating"], as_index=False, group_keys=False)
             .apply(remove_outliers)
         )
         df.dropna(inplace=True)
@@ -700,21 +752,28 @@ class Optimizer:
         df["i"] = df["i"].astype(int)
         df["t_history"] = df["t_history"].astype(str)
         df["r_history"] = df["r_history"].astype(str)
+        df["last_rating"] = df["last_rating"].astype(int)
         df["y"] = df["y"].astype(int)
 
         df.to_csv("revlog_history.tsv", sep="\t", index=False)
         tqdm.write("Trainset saved.")
 
-        S0_dataset = df[df["i"] == 2]
         self.S0_dataset_group = (
-            S0_dataset.groupby(by=["r_history", "delta_t"], group_keys=False)
+            df[df["i"] == 2]
+            .groupby(by=["first_rating", "delta_t"], group_keys=False)
             .agg({"y": ["mean", "count"]})
             .reset_index()
         )
         self.S0_dataset_group.to_csv("stability_for_pretrain.tsv", sep="\t", index=None)
+        del df["first_rating"]
 
         if not analysis:
             return
+
+        df["r_history"] = df.apply(
+            lambda row: wrap_short_term_ratings(row["r_history"], row["t_history"]),
+            axis=1,
+        )
 
         df["retention"] = df.groupby(by=["r_history", "delta_t"], group_keys=False)[
             "y"
@@ -732,6 +791,7 @@ class Optimizer:
                 "real_days",
                 "review_rating",
                 "t_history",
+                "last_rating",
                 "y",
             ],
             inplace=True,
@@ -790,7 +850,7 @@ class Optimizer:
             df = df[(df["i"] >= 2) & (df["group_cnt"] >= 100)].copy()
             df["last_recall"] = df["r_history"].map(lambda x: x[-1])
             df = df[
-                df.groupby(["i", "r_history"], group_keys=False)["group_cnt"].transform(
+                df.groupby(["r_history"], group_keys=False)["group_cnt"].transform(
                     "max"
                 )
                 == df["group_cnt"]
@@ -798,16 +858,23 @@ class Optimizer:
             df.to_csv("./stability_for_analysis.tsv", sep="\t", index=None)
             tqdm.write("Analysis saved!")
             caption = "1:again, 2:hard, 3:good, 4:easy\n"
-            analysis = df[df["r_history"].str.contains(r"^[1-4][^124]*$", regex=True)][
-                [
-                    "r_history",
-                    "avg_interval",
-                    "avg_retention",
-                    "stability",
-                    "factor",
-                    "group_cnt",
+            df["first_rating"] = df["r_history"].map(lambda x: x[1])
+            analysis = (
+                df[df["r_history"].str.contains(r"^\([1-4][^124]*$", regex=True)][
+                    [
+                        "first_rating",
+                        "i",
+                        "r_history",
+                        "avg_interval",
+                        "avg_retention",
+                        "stability",
+                        "factor",
+                        "group_cnt",
+                    ]
                 ]
-            ].to_string(index=False)
+                .sort_values(by=["first_rating", "i"])
+                .to_string(index=False)
+            )
             return caption + analysis
 
     def define_model(self):
@@ -829,9 +896,7 @@ class Optimizer:
         else:
             self.dataset = dataset
         self.dataset = self.dataset[
-            (self.dataset["i"] > 1)
-            & (self.dataset["delta_t"] > 0)
-            & (self.dataset["t_history"].str.count(",0") == 0)
+            (self.dataset["i"] > 1) & (self.dataset["delta_t"] > 0)
         ]
         if self.dataset.empty:
             raise ValueError("Training data is inadequate.")
@@ -843,7 +908,7 @@ class Optimizer:
 
         for first_rating in ("1", "2", "3", "4"):
             group = self.S0_dataset_group[
-                self.S0_dataset_group["r_history"] == first_rating
+                self.S0_dataset_group["first_rating"] == first_rating
             ]
             if group.empty:
                 if verbose:
@@ -1074,25 +1139,37 @@ class Optimizer:
     def preview(self, requestRetention: float, verbose=False):
         my_collection = Collection(self.w)
         preview_text = "1:again, 2:hard, 3:good, 4:easy\n"
+        n_learning_steps = 3
         for first_rating in (1, 2, 3, 4):
             preview_text += f"\nfirst rating: {first_rating}\n"
             t_history = "0"
             d_history = "0"
+            s_history = "0"
             r_history = f"{first_rating}"  # the first rating of the new card
+            if first_rating in (1, 2):
+                left = n_learning_steps
+            elif first_rating == 3:
+                left = n_learning_steps - 1
+            else:
+                left = 1
             # print("stability, difficulty, lapses")
             for i in range(10):
                 states = my_collection.predict(t_history, r_history)
+                stability = round(float(states[0]), 1)
+                difficulty = round(float(states[1]), 1)
                 if verbose:
                     print(
                         "{0:9.2f} {1:11.2f} {2:7.0f}".format(
                             *list(map(lambda x: round(float(x), 4), states))
                         )
                     )
-                next_t = next_interval(states[0], requestRetention)
-                difficulty = round(float(states[1]), 1)
+                left -= 1
+                next_t = next_interval(states[0], requestRetention) if left <= 0 else 0
                 t_history += f",{int(next_t)}"
                 d_history += f",{difficulty}"
+                s_history += f",{stability}"
                 r_history += f",3"
+            r_history = wrap_short_term_ratings(r_history, t_history)
             preview_text += f"rating history: {r_history}\n"
             preview_text += (
                 "interval history: "
@@ -1129,6 +1206,7 @@ class Optimizer:
                 + "\n"
             )
             preview_text += f"difficulty history: {d_history}\n"
+            preview_text += f"stability history: {s_history}\n"
         return preview_text
 
     def preview_sequence(self, test_rating_sequence: str, requestRetention: float):
@@ -1211,66 +1289,54 @@ class Optimizer:
         verbose=True,
     ):
         """should not be called before predict_memory_states"""
-        state_durations = dict()
-        last_state = self.state_sequence[0]
-        state_durations[last_state] = [self.duration_sequence[0]]
-        for i, state in enumerate(self.state_sequence[1:], start=1):
-            if state not in state_durations:
-                state_durations[state] = []
-            if state == Review:
-                state_durations[state].append(self.duration_sequence[i])
-            else:
-                if state == last_state:
-                    state_durations[state][-1] += self.duration_sequence[i]
-                else:
-                    state_durations[state].append(self.duration_sequence[i])
-            last_state = state
-
-        recall_cost = round(np.median(state_durations[Review]) / 1000, 1)
-        forget_cost = round(
-            np.median(state_durations[Relearning]) / 1000 + recall_cost, 1
-        )
-        forget_cnt = len(state_durations[Relearning])
         if verbose:
-            tqdm.write(f"average time for failed reviews: {forget_cost}s")
-            tqdm.write(f"average time for recalled reviews: {recall_cost}s")
-            tqdm.write(
-                "average time for `hard`, `good` and `easy` reviews: %.1fs, %.1fs, %.1fs"
-                % tuple(self.recall_costs)
-            )
-            tqdm.write(f"average time for learning a new card: {self.learn_cost}s")
-            tqdm.write(
-                "Ratio of `hard`, `good` and `easy` ratings for recalled reviews: %.2f, %.2f, %.2f"
-                % tuple(self.review_rating_prob)
-            )
-            tqdm.write(
-                "Ratio of `again`, `hard`, `good` and `easy` ratings for new cards: %.2f, %.2f, %.2f, %.2f"
-                % tuple(self.first_rating_prob)
-            )
+            print("Learn costs: ", self.learn_costs)
+            print("Review costs: ", self.review_costs)
+            print("Learn buttons: ", self.learn_buttons)
+            print("Review buttons: ", self.review_buttons)
+            print("First rating prob: ", self.first_rating_prob)
+            print("Review rating prob: ", self.review_rating_prob)
+            print("First rating offset: ", self.first_rating_offset)
+            print("First session len: ", self.first_session_len)
+            print("Forget rating offset: ", self.forget_rating_offset)
+            print("Forget session len: ", self.forget_session_len)
 
-        default_learn_cost = 22.8
-        default_forget_cost = 18.0
-        default_recall_costs = np.array([11.8, 7.3, 5.7])
-        default_first_rating_prob = np.array([0.256, 0.084, 0.483, 0.177])
-        default_review_rating_prob = np.array([0.224, 0.632, 0.144])
-
-        weight = self.recall_button_cnts / (50 + self.recall_button_cnts)
-        self.recall_costs = self.recall_costs * weight + default_recall_costs * (
+        weight = self.learn_buttons / (50 + self.learn_buttons)
+        self.learn_costs = self.learn_costs * weight + DEFAULT_LEARN_COSTS * (
             1 - weight
         )
-        weight = forget_cnt / (50 + forget_cnt)
-        forget_cost = forget_cost * weight + default_forget_cost * (1 - weight)
-        weight = self.learn_cnt / (50 + self.learn_cnt)
-        self.learn_cost = self.learn_cost * weight + default_learn_cost * (1 - weight)
-        weight = len(self.dataset) / (50 + len(self.dataset))
-        self.first_rating_prob = (
-            self.first_rating_prob * weight + default_first_rating_prob * (1 - weight)
+        self.first_rating_offset = (
+            self.first_rating_offset * weight
+            + DEFAULT_FIRST_RATING_OFFSETS * (1 - weight)
         )
-        self.review_rating_prob = (
-            self.review_rating_prob * weight + default_review_rating_prob * (1 - weight)
+        self.first_session_len = (
+            self.first_session_len * weight + DEFAULT_FIRST_SESSION_LENS * (1 - weight)
         )
 
-        forget_cost *= loss_aversion
+        weight = self.review_buttons / (50 + self.review_buttons)
+        self.review_costs = self.review_costs * weight + DEFAULT_REVIEW_COSTS * (
+            1 - weight
+        )
+        self.forget_rating_offset = self.forget_rating_offset * weight[
+            0
+        ] + DEFAULT_FORGET_RATING_OFFSET * (1 - weight[0])
+        self.forget_session_len = self.forget_session_len * weight[
+            0
+        ] + DEFAULT_FORGET_SESSION_LEN * (1 - weight[0])
+
+        weight = sum(self.learn_buttons) / (50 + sum(self.learn_buttons))
+        self.first_rating_prob = (
+            self.first_rating_prob * weight + DEFAULT_FIRST_RATING_PROB * (1 - weight)
+        )
+
+        weight = sum(self.review_buttons[1:]) / (50 + sum(self.review_buttons[1:]))
+        self.review_rating_prob = (
+            self.review_rating_prob * weight + DEFAULT_REVIEW_RATING_PROB * (1 - weight)
+        )
+
+        self.review_costs[0] *= loss_aversion
+        self.first_rating_offset[-1] = 0
+        self.first_session_len[-1] = 0
 
         simulate_config = {
             "w": self.w,
@@ -1280,13 +1346,15 @@ class Optimizer:
             "learn_limit_perday": 10,
             "review_limit_perday": math.inf,
             "max_ivl": max_ivl,
-            "recall_costs": self.recall_costs,
-            "forget_cost": forget_cost,
-            "learn_cost": self.learn_cost,
+            "learn_costs": self.learn_costs,
+            "review_costs": self.review_costs,
             "first_rating_prob": self.first_rating_prob,
             "review_rating_prob": self.review_rating_prob,
+            "first_rating_offset": self.first_rating_offset,
+            "first_session_len": self.first_session_len,
+            "forget_rating_offset": self.forget_rating_offset,
+            "forget_session_len": self.forget_session_len,
         }
-
         self.optimal_retention = optimal_retention(**simulate_config)
 
         tqdm.write(
@@ -1348,6 +1416,9 @@ class Optimizer:
         ax.legend()
         ax.grid(True)
 
+        simulate_config["deck_size"] = 20000
+        simulate_config["max_cost_perday"] = 1200
+        simulate_config["learn_limit_perday"] = math.inf
         fig6 = workload_graph(simulate_config)
 
         return (fig1, fig2, fig3, fig4, fig5, fig6)
@@ -1415,8 +1486,8 @@ class Optimizer:
         )
         metrics["rmse"] = rmse
         fig2 = plt.figure(figsize=(16, 12))
-        for last_rating in ("1", "2", "3", "4"):
-            calibration_data = dataset[dataset["r_history"].str.endswith(last_rating)]
+        for last_rating in (1, 2, 3, 4):
+            calibration_data = dataset[dataset["last_rating"] == last_rating]
             if calibration_data.empty:
                 continue
             rmse = rmse_matrix(calibration_data)
@@ -1515,9 +1586,9 @@ class Optimizer:
         )
         figs = []
         for group_key in ("last_s_bin", "last_d_bin", "last_r_bin"):
-            for last_rating in ("1", "3"):
+            for last_rating in (1, 3):
                 analysis_group = (
-                    analysis_df[analysis_df["r_history"].str.endswith(last_rating)]
+                    analysis_df[analysis_df["last_rating"] == last_rating]
                     .groupby(
                         by=["last_s_bin", "last_d_bin", "last_r_bin", "delta_t"],
                         group_keys=True,
@@ -1861,7 +1932,17 @@ def cross_comparison(dataset, algoA, algoB):
 
 def rmse_matrix(df):
     tmp = df.copy()
-    tmp["lapse"] = tmp["r_history"].map(lambda x: x.count("1"))
+
+    def count_lapse(r_history, t_history):
+        lapse = 0
+        for r, t in zip(r_history.split(","), t_history.split(",")):
+            if t != "0" and r == "1":
+                lapse += 1
+        return lapse
+
+    tmp["lapse"] = tmp.apply(
+        lambda x: count_lapse(x["r_history"], x["t_history"]), axis=1
+    )
     tmp["delta_t"] = tmp["delta_t"].map(
         lambda x: round(2.48 * np.power(3.62, np.floor(np.log(x) / np.log(3.62))), 2)
     )
@@ -1881,6 +1962,31 @@ def rmse_matrix(df):
         .reset_index()
     )
     return root_mean_squared_error(tmp["y"], tmp["p"], sample_weight=tmp["card_id"])
+
+
+def wrap_short_term_ratings(r_history, t_history):
+    result = []
+    in_zero_sequence = False
+
+    for t, r in zip(t_history.split(","), r_history.split(",")):
+        if t in ("-1", "0"):
+            if not in_zero_sequence:
+                result.append("(")
+                in_zero_sequence = True
+            result.append(r)
+            result.append(",")
+        else:
+            if in_zero_sequence:
+                result[-1] = "),"
+                in_zero_sequence = False
+            result.append(r)
+            result.append(",")
+
+    if in_zero_sequence:
+        result[-1] = ")"
+    else:
+        result.pop()
+    return "".join(result)
 
 
 if __name__ == "__main__":
