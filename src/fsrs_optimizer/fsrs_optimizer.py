@@ -569,7 +569,7 @@ class Optimizer:
         df.to_csv("revlog.csv", index=False)
         tqdm.write("revlog.csv saved.")
 
-    def extract_simulation_config(self, df, verbose: bool = True):
+    def extract_simulation_config(self, df):
         def rating_counts(x):
             tmp = x.value_counts().to_dict()
             first = x.iloc[0]
@@ -633,7 +633,9 @@ class Optimizer:
             [button_usage_dict.get((2, i), 0) for i in range(1, 5)]
         )
         self.first_rating_prob = self.learn_buttons / self.learn_buttons.sum()
-        self.review_rating_prob = self.review_buttons[1:] / self.review_buttons[1:].sum()
+        self.review_rating_prob = (
+            self.review_buttons[1:] / self.review_buttons[1:].sum()
+        )
 
         df2 = (
             df1.groupby(by=["first_review_state", "first_review_rating"])[[1, 2, 3, 4]]
@@ -650,18 +652,6 @@ class Optimizer:
         )
         self.forget_rating_offset = rating_offset_dict.get((2, 1), 0)
         self.forget_session_len = session_len_dict.get((2, 1), 0)
-
-        if verbose:
-            print("Learn costs: ", self.learn_costs)
-            print("Review costs: ", self.review_costs)
-            print("Learn buttons: ", self.learn_buttons)
-            print("Review buttons: ", self.review_buttons)
-            print("First rating prob: ", self.first_rating_prob)
-            print("Review rating prob: ", self.review_rating_prob)
-            print("First rating offset: ", self.first_rating_offset)
-            print("First session len: ", self.first_session_len)
-            print("Forget rating offset: ", self.forget_rating_offset)
-            print("Forget session len: ", self.forget_session_len)
 
     def create_time_series(
         self,
@@ -1299,6 +1289,17 @@ class Optimizer:
         verbose=True,
     ):
         """should not be called before predict_memory_states"""
+        if verbose:
+            print("Learn costs: ", self.learn_costs)
+            print("Review costs: ", self.review_costs)
+            print("Learn buttons: ", self.learn_buttons)
+            print("Review buttons: ", self.review_buttons)
+            print("First rating prob: ", self.first_rating_prob)
+            print("Review rating prob: ", self.review_rating_prob)
+            print("First rating offset: ", self.first_rating_offset)
+            print("First session len: ", self.first_session_len)
+            print("Forget rating offset: ", self.forget_rating_offset)
+            print("Forget session len: ", self.forget_session_len)
 
         weight = self.learn_buttons / (50 + self.learn_buttons)
         self.learn_costs = self.learn_costs * weight + DEFAULT_LEARN_COSTS * (
@@ -1415,7 +1416,8 @@ class Optimizer:
         ax.legend()
         ax.grid(True)
 
-        simulate_config["max_cost_perday"] = 1800
+        simulate_config["deck_size"] = 20000
+        simulate_config["max_cost_perday"] = 1200
         simulate_config["learn_limit_perday"] = math.inf
         fig6 = workload_graph(simulate_config)
 

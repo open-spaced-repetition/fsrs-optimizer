@@ -70,6 +70,9 @@ def simulate(
     card_table[col["due"]] = learn_span
     card_table[col["difficulty"]] = 1e-10
     card_table[col["stability"]] = 1e-10
+    card_table[col["rating"]] = np.random.choice(
+        [1, 2, 3, 4], deck_size, p=first_rating_prob
+    )
     card_table[col["rating"]] = card_table[col["rating"]].astype(int)
 
     review_cnt_per_day = np.zeros(learn_span)
@@ -185,21 +188,14 @@ def simulate(
         )
 
         need_learn = card_table[col["due"]] == learn_span
-        card_table[col["cost"]][need_learn] = min(learn_costs)
-        plan_learn = (
+        card_table[col["cost"]][need_learn] = np.choose(
+            card_table[col["rating"]][need_learn].astype(int) - 1,
+            learn_costs,
+        )
+        true_learn = (
             need_learn
             & (np.cumsum(card_table[col["cost"]]) <= max_cost_perday)
             & (np.cumsum(need_learn) <= learn_limit_perday)
-        )
-        card_table[col["rating"]][plan_learn] = np.random.choice(
-            [1, 2, 3, 4], np.sum(plan_learn), p=first_rating_prob
-        )
-        card_table[col["cost"]][plan_learn] = np.choose(
-            card_table[col["rating"]][plan_learn].astype(int) - 1,
-            learn_costs,
-        )
-        true_learn = plan_learn & (
-            np.cumsum(card_table[col["cost"]]) <= max_cost_perday
         )
         card_table[col["last_date"]][true_learn] = today
         card_table[col["stability"]][true_learn] = np.choose(
@@ -668,7 +664,7 @@ if __name__ == "__main__":
             0.4891,
             0.6468,
         ],
-        "deck_size": 10000,
+        "deck_size": 20000,
         "learn_span": 365,
         "max_cost_perday": 1800,
         "learn_limit_perday": math.inf,
