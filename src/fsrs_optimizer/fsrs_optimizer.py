@@ -7,6 +7,7 @@ import os
 import math
 from typing import List, Optional
 from datetime import timedelta, datetime
+from collections import defaultdict
 import statsmodels.api as sm
 from statsmodels.nonparametric.smoothers_lowess import lowess
 import matplotlib.pyplot as plt
@@ -571,12 +572,9 @@ class Optimizer:
 
     def extract_simulation_config(self, df):
         def rating_counts(x):
-            tmp = x.value_counts().to_dict()
+            tmp = defaultdict(int, x.value_counts().to_dict())
             first = x.iloc[0]
             tmp[first] -= 1
-            for i in range(1, 5):
-                if i not in tmp:
-                    tmp[i] = 0
             return tmp
 
         df1 = (
@@ -587,19 +585,17 @@ class Optimizer:
                     "review_state": "first",
                     "review_rating": ["first", rating_counts],
                     "review_duration": "sum",
-                    "i": "size",
                 }
             )
             .reset_index()
         )
+        del df1["real_days"]
         df1.columns = [
             "card_id",
-            "real_days",
             "first_review_state",
             "first_review_rating",
             "review_rating_counts",
             "sum_review_duration",
-            "review_count",
         ]
         rating_counts_df = (
             df1["review_rating_counts"].apply(pd.Series).fillna(0).astype(int)
@@ -608,30 +604,28 @@ class Optimizer:
             [df1.drop("review_rating_counts", axis=1), rating_counts_df], axis=1
         )
 
-        cost_dict = (
-            df1.groupby(by=["first_review_state", "first_review_rating"])[
-                "sum_review_duration"
-            ]
-            .median()
-            .to_dict()
+        cost_dict = defaultdict(
+            int,
+            (
+                df1.groupby(by=["first_review_state", "first_review_rating"])[
+                    "sum_review_duration"
+                ]
+                .median()
+                .to_dict()
+            ),
         )
-        self.learn_costs = np.array(
-            [cost_dict.get((1, i), 0) / 1000 for i in range(1, 5)]
+        self.learn_costs = np.array([cost_dict[(1, i)] / 1000 for i in range(1, 5)])
+        self.review_costs = np.array([cost_dict[(2, i)] / 1000 for i in range(1, 5)])
+        button_usage_dict = defaultdict(
+            int,
+            (
+                df1.groupby(by=["first_review_state", "first_review_rating"])["card_id"]
+                .count()
+                .to_dict()
+            ),
         )
-        self.review_costs = np.array(
-            [cost_dict.get((2, i), 0) / 1000 for i in range(1, 5)]
-        )
-        button_usage_dict = (
-            df1.groupby(by=["first_review_state", "first_review_rating"])["card_id"]
-            .count()
-            .to_dict()
-        )
-        self.learn_buttons = np.array(
-            [button_usage_dict.get((1, i), 0) for i in range(1, 5)]
-        )
-        self.review_buttons = np.array(
-            [button_usage_dict.get((2, i), 0) for i in range(1, 5)]
-        )
+        self.learn_buttons = np.array([button_usage_dict[(1, i)] for i in range(1, 5)])
+        self.review_buttons = np.array([button_usage_dict[(2, i)] for i in range(1, 5)])
         self.first_rating_prob = self.learn_buttons / self.learn_buttons.sum()
         self.review_rating_prob = (
             self.review_buttons[1:] / self.review_buttons[1:].sum()
@@ -642,16 +636,20 @@ class Optimizer:
             .mean()
             .round(2)
         )
-        rating_offset_dict = sum([df2[g] * (g - 3) for g in range(1, 5)]).to_dict()
-        session_len_dict = sum([df2[g] for g in range(1, 5)]).to_dict()
+        rating_offset_dict = defaultdict(
+            float, sum([df2[g] * (g - 3) for g in range(1, 5)]).to_dict()
+        )
+        session_len_dict = defaultdict(
+            float, sum([df2[g] for g in range(1, 5)]).to_dict()
+        )
         self.first_rating_offset = np.array(
-            [rating_offset_dict.get((1, i), 0) for i in range(1, 5)]
+            [rating_offset_dict[(1, i)] for i in range(1, 5)]
         )
         self.first_session_len = np.array(
-            [session_len_dict.get((1, i), 0) for i in range(1, 5)]
+            [session_len_dict[(1, i)] for i in range(1, 5)]
         )
-        self.forget_rating_offset = rating_offset_dict.get((2, 1), 0)
-        self.forget_session_len = session_len_dict.get((2, 1), 0)
+        self.forget_rating_offset = rating_offset_dict[(2, 1)]
+        self.forget_session_len = session_len_dict[(2, 1)]
 
     def create_time_series(
         self,
