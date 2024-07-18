@@ -691,7 +691,7 @@ class Optimizer:
             return list(accumulate(x))
 
         t_history_list = df.groupby("card_id", group_keys=False)["delta_t"].apply(
-            lambda x: cum_concat([[int(i)] for i in x])
+            lambda x: cum_concat([[int(max(0, i))] for i in x])
         )
         df["t_history"] = [
             ",".join(map(str, item[:-1]))
@@ -1227,7 +1227,9 @@ class Optimizer:
                     (
                         f"{ivl}d"
                         if ivl < 30
-                        else f"{ivl / 30:.1f}m" if ivl < 365 else f"{ivl / 365:.1f}y"
+                        else f"{ivl / 30:.1f}m"
+                        if ivl < 365
+                        else f"{ivl / 365:.1f}y"
                     )
                     for ivl in map(int, t_history.split(","))
                 ]
