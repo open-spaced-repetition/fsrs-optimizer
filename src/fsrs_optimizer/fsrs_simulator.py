@@ -257,6 +257,8 @@ def sample(
     forget_session_len=DEFAULT_FORGET_SESSION_LEN,
 ):
     memorization = []
+    if learn_span <365:
+        SAMPLE_SIZE = 10
     for i in range(SAMPLE_SIZE):
         _, _, _, memorized_cnt_per_day, cost_per_day = simulate(
             w,
