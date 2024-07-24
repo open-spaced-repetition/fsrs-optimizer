@@ -33,9 +33,6 @@ columns = [
 ]
 col = {key: i for i, key in enumerate(columns)}
 
-SAMPLE_SIZE = 4
-
-
 DEFAULT_LEARN_COSTS = np.array([33.79, 24.3, 13.68, 6.5])
 DEFAULT_REVIEW_COSTS = np.array([23.0, 11.68, 7.33, 5.6])
 DEFAULT_FIRST_RATING_PROB = np.array([0.24, 0.094, 0.495, 0.171])
@@ -257,10 +254,13 @@ def sample(
     forget_session_len=DEFAULT_FORGET_SESSION_LEN,
 ):
     memorization = []
-    if learn_span <100:
+    if learn_span < 100:
         SAMPLE_SIZE = 16
-    if learn_span <365:
+    elif learn_span < 365:
         SAMPLE_SIZE = 8
+    else:
+        SAMPLE_SIZE = 4
+
     for i in range(SAMPLE_SIZE):
         _, _, _, memorized_cnt_per_day, cost_per_day = simulate(
             w,
