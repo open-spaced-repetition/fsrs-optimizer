@@ -37,25 +37,25 @@ Review = 2
 Relearning = 3
 
 DEFAULT_PARAMETER = [
-    0.4197,
-    1.1869,
-    3.0412,
-    15.2441,
-    7.1434,
-    0.6477,
-    1.0007,
-    0.0674,
-    1.6597,
-    0.1712,
-    1.1178,
-    2.0225,
-    0.0904,
-    0.3025,
-    2.1214,
-    0.2498,
+    0.4072,
+    1.1829,
+    3.1262,
+    15.4722,
+    7.2102,
+    0.5316,
+    1.0651,
+    0.0234,
+    1.616,
+    0.1544,
+    1.0824,
+    1.9813,
+    0.0953,
+    0.2975,
+    2.2042,
+    0.2407,
     2.9466,
-    0.4891,
-    0.6468,
+    0.5034,
+    0.6567,
 ]
 
 S_MIN = 0.01
@@ -97,7 +97,7 @@ class FSRS(nn.Module):
 
     def next_d(self, state: Tensor, rating: Tensor) -> Tensor:
         new_d = state[:, 1] - self.w[6] * (rating - 3)
-        new_d = self.mean_reversion(self.w[4], new_d)
+        new_d = self.mean_reversion(self.w[4] - torch.exp(self.w[5] * 3) + 1, new_d)
         return new_d
 
     def step(self, X: Tensor, state: Tensor) -> Tensor:
