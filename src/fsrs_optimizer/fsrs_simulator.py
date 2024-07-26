@@ -117,9 +117,11 @@ def simulate(
         return new_s
 
     def init_d(rating):
-        new_d = w[4] - np.exp(w[5] * (rating - 1)) + 1
+        return w[4] - np.exp(w[5] * (rating - 1)) + 1
+
+    def init_d_with_short_term(rating):
         rating_offset = np.choose(rating - 1, first_rating_offset)
-        new_d -= w[6] * rating_offset
+        new_d = init_d(rating) - w[6] * rating_offset
         return np.clip(new_d, 1, 10)
 
     def next_d(d, rating):
@@ -202,7 +204,7 @@ def simulate(
             card_table[col["stability"]][true_learn],
             init_rating=card_table[col["rating"]][true_learn].astype(int),
         )
-        card_table[col["difficulty"]][true_learn] = init_d(
+        card_table[col["difficulty"]][true_learn] = init_d_with_short_term(
             card_table[col["rating"]][true_learn].astype(int)
         )
 
