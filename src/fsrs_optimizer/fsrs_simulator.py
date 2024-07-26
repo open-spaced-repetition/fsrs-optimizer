@@ -124,7 +124,7 @@ def simulate(
 
     def next_d(d, rating):
         new_d = d - w[6] * (rating - 3)
-        new_d = mean_reversion(w[4], new_d)
+        new_d = mean_reversion(init_d(4), new_d)
         return np.clip(new_d, 1, 10)
 
     def mean_reversion(init, current):
