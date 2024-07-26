@@ -96,7 +96,7 @@ class FSRS(nn.Module):
         return new_s
 
     def init_d(self, rating: Tensor) -> Tensor:
-        new_d = self.w[4] - torch.exp(self.w[5] * (X[:, 1] - 1)) + 1
+        new_d = self.w[4] - torch.exp(self.w[5] * (rating - 1)) + 1
         return new_d
 
     def next_d(self, state: Tensor, rating: Tensor) -> Tensor:
