@@ -629,8 +629,12 @@ class Optimizer:
                 .to_dict()
             ),
         )
-        self.learn_buttons = np.array([button_usage_dict[(1, i)] + 1 for i in range(1, 5)])
-        self.review_buttons = np.array([button_usage_dict[(2, i)] + 1 for i in range(1, 5)])
+        self.learn_buttons = (
+            np.array([button_usage_dict[(1, i)] for i in range(1, 5)]) + 1
+        )
+        self.review_buttons = (
+            np.array([button_usage_dict[(2, i)] for i in range(1, 5)]) + 1
+        )
         self.first_rating_prob = self.learn_buttons / self.learn_buttons.sum()
         self.review_rating_prob = (
             self.review_buttons[1:] / self.review_buttons[1:].sum()
