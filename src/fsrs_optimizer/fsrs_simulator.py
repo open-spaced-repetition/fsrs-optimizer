@@ -1,6 +1,5 @@
 import math
 import numpy as np
-import pandas as pd
 from matplotlib import pyplot as plt
 from tqdm import trange
 
@@ -230,7 +229,6 @@ def simulate(
         learn_cnt_per_day[today] = np.sum(true_learn)
         memorized_cnt_per_day[today] = card_table[col["retrievability"]].sum()
         cost_per_day[today] = card_table[col["cost"]][true_review | true_learn].sum()
-    card_table = pd.DataFrame(card_table.T, columns=columns)
     return (
         card_table,
         review_cnt_per_day,
@@ -278,9 +276,9 @@ def sample(
             deck_size,
             learn_span,
             max_cost_perday,
-            max_ivl,
             learn_limit_perday,
             review_limit_perday,
+            max_ivl,
             learn_costs,
             review_costs,
             first_rating_prob,
@@ -296,106 +294,21 @@ def sample(
     return np.mean(memorization)
 
 
-def bracket(xa=0.75, xb=0.95, maxiter=20, **kwargs):
-    u_lim = 0.95
-    l_lim = 0.75
-
-    grow_limit = 100.0
-    gold = 1.6180339
-    verysmall_num = 1e-21
-
-    fa = sample(xa, **kwargs)
-    fb = sample(xb, **kwargs)
-    funccalls = 2
-
-    if fa < fb:  # Switch so fa > fb
-        xa, xb = xb, xa
-        fa, fb = fb, fa
-    xc = max(min(xb + gold * (xb - xa), u_lim), l_lim)
-    fc = sample(xc, **kwargs)
-    funccalls += 1
-
-    iter = 0
-    while fc < fb:
-        tmp1 = (xb - xa) * (fb - fc)
-        tmp2 = (xb - xc) * (fb - fa)
-        val = tmp2 - tmp1
-        if np.abs(val) < verysmall_num:
-            denom = 2.0 * verysmall_num
-        else:
-            denom = 2.0 * val
-        w = max(min((xb - ((xb - xc) * tmp2 - (xb - xa) * tmp1) / denom), u_lim), l_lim)
-        wlim = max(min(xb + grow_limit * (xc - xb), u_lim), l_lim)
-
-        if iter > maxiter:
-            print("Failed to converge")
-            break
-
-        iter += 1
-        if (w - xc) * (xb - w) > 0.0:
-            fw = sample(w, **kwargs)
-            funccalls += 1
-            if fw < fc:
-                xa = max(min(xb, u_lim), l_lim)
-                xb = max(min(w, u_lim), l_lim)
-                fa = fb
-                fb = fw
-                break
-            elif fw > fb:
-                xc = max(min(w, u_lim), l_lim)
-                fc = fw
-                break
-            w = max(min(xc + gold * (xc - xb), u_lim), l_lim)
-            fw = sample(w, **kwargs)
-            funccalls += 1
-        elif (w - wlim) * (wlim - xc) >= 0.0:
-            w = wlim
-            fw = sample(w, **kwargs)
-            funccalls += 1
-        elif (w - wlim) * (xc - w) > 0.0:
-            fw = sample(w, **kwargs)
-            funccalls += 1
-            if fw < fc:
-                xb = max(min(xc, u_lim), l_lim)
-                xc = max(min(w, u_lim), l_lim)
-                w = max(min(xc + gold * (xc - xb), u_lim), l_lim)
-                fb = fc
-                fc = fw
-                fw = sample(w, **kwargs)
-                funccalls += 1
-        else:
-            w = max(min(xc + gold * (xc - xb), u_lim), l_lim)
-            fw = sample(w, **kwargs)
-            funccalls += 1
-        xa = max(min(xb, u_lim), l_lim)
-        xb = max(min(xc, u_lim), l_lim)
-        xc = max(min(w, u_lim), l_lim)
-        fa = fb
-        fb = fc
-        fc = fw
-
-    return xa, xb, xc, fa, fb, fc, funccalls
-
-
 def brent(tol=0.01, maxiter=20, **kwargs):
     mintol = 1.0e-11
     cg = 0.3819660
 
-    xa, xb, xc, fa, fb, fc, funccalls = bracket(
-        xa=0.75, xb=0.95, maxiter=maxiter, **kwargs
-    )
+    funccalls = 0
+    xb = 0.75
+    fb = sample(xb, **kwargs)
 
     #################################
     # BEGIN
     #################################
     x = w = v = xb
     fw = fv = fx = fb
-    if xa < xc:
-        a = xa
-        b = xc
-    else:
-        a = xc
-        b = xa
+    a = 0.75
+    b = 0.95
     deltax = 0.0
     iter = 0
 
