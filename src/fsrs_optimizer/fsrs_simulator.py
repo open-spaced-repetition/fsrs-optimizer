@@ -1,5 +1,6 @@
 import math
 import numpy as np
+import pandas as pd
 from matplotlib import pyplot as plt
 from tqdm import trange
 
@@ -60,6 +61,7 @@ def simulate(
     first_session_len=DEFAULT_FIRST_SESSION_LENS,
     forget_rating_offset=DEFAULT_FORGET_RATING_OFFSET,
     forget_session_len=DEFAULT_FORGET_SESSION_LEN,
+    loss_aversion=2.5,
     seed=42,
 ):
     np.random.seed(seed)
@@ -153,6 +155,7 @@ def simulate(
             card_table[col["rating"]][need_review].astype(int) - 1,
             review_costs,
         )
+        card_table[col["cost"]][need_review & forget] *= loss_aversion
         true_review = (
             need_review
             & (np.cumsum(card_table[col["cost"]]) <= max_cost_perday)
@@ -182,8 +185,11 @@ def simulate(
             card_table[col["difficulty"]][true_review],
             card_table[col["rating"]][true_review],
         )
-        card_table[col["difficulty"]][true_review & forget] -= (
-            w[6] * forget_rating_offset
+        card_table[col["difficulty"]][true_review & forget] = np.clip(
+            card_table[col["difficulty"]][true_review & forget]
+            - (w[6] * forget_rating_offset),
+            1,
+            10,
         )
 
         need_learn = card_table[col["due"]] == learn_span
@@ -224,6 +230,7 @@ def simulate(
         learn_cnt_per_day[today] = np.sum(true_learn)
         memorized_cnt_per_day[today] = card_table[col["retrievability"]].sum()
         cost_per_day[today] = card_table[col["cost"]][true_review | true_learn].sum()
+    card_table = pd.DataFrame(card_table.T, columns=columns)
     return (
         card_table,
         review_cnt_per_day,
@@ -254,6 +261,7 @@ def sample(
     first_session_len=DEFAULT_FIRST_SESSION_LENS,
     forget_rating_offset=DEFAULT_FORGET_RATING_OFFSET,
     forget_session_len=DEFAULT_FORGET_SESSION_LEN,
+    loss_aversion=2.5,
 ):
     memorization = []
     if learn_span < 100:
@@ -281,6 +289,7 @@ def sample(
             first_session_len,
             forget_rating_offset,
             forget_session_len,
+            loss_aversion,
             seed=42 + i,
         )
         memorization.append(cost_per_day.sum() / memorized_cnt_per_day[-1])
