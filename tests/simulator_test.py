@@ -9,13 +9,8 @@ class Test_Simulator:
             learn_cnt_per_day,
             memorized_cnt_per_day,
             cost_per_day,
-        ) = simulate(w=DEFAULT_PARAMETER)
-        card_table.to_csv("card_table.csv", index=False)
-        print(review_cnt_per_day)
-        print(learn_cnt_per_day)
-        print(memorized_cnt_per_day)
-        print(cost_per_day)
-        # assert memorized_cnt_per_day[-1] == 3145.3779679589484
+        ) = simulate(w=DEFAULT_PARAMETER, request_retention=0.9)
+        assert memorized_cnt_per_day[-1] == 5918.574208243532
 
     def test_optimal_retention(self):
         default_params = {
@@ -29,4 +24,4 @@ class Test_Simulator:
             "loss_aversion": 2.5,
         }
         r = optimal_retention(**default_params)
-        assert r == 0.7791796050312
+        assert r == 0.8346739534878145

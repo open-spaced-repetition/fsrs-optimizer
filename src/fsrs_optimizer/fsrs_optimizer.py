@@ -1330,7 +1330,7 @@ class Optimizer:
         self,
         learn_span=365,
         max_ivl=36500,
-        loss_aversion=1,
+        loss_aversion=2.5,
         verbose=True,
     ):
         """should not be called before predict_memory_states"""
@@ -1425,9 +1425,7 @@ class Optimizer:
         ax.legend()
         ax.grid(True)
 
-        simulate_config["deck_size"] = 20000
-        simulate_config["max_cost_perday"] = 1200
-        simulate_config["learn_limit_perday"] = math.inf
+        simulate_config["loss_aversion"] = 1
         fig6 = workload_graph(simulate_config)
 
         return (fig1, fig2, fig3, fig4, fig5, fig6)
