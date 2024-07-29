@@ -660,6 +660,42 @@ class Optimizer:
         self.forget_rating_offset = rating_offset_dict[(2, 1)]
         self.forget_session_len = session_len_dict[(2, 1)]
 
+        weight = self.learn_buttons / (50 + self.learn_buttons)
+        self.learn_costs = self.learn_costs * weight + DEFAULT_LEARN_COSTS * (
+            1 - weight
+        )
+        self.first_rating_offset = (
+            self.first_rating_offset * weight
+            + DEFAULT_FIRST_RATING_OFFSETS * (1 - weight)
+        )
+        self.first_session_len = (
+            self.first_session_len * weight + DEFAULT_FIRST_SESSION_LENS * (1 - weight)
+        )
+
+        weight = self.review_buttons / (50 + self.review_buttons)
+        self.review_costs = self.review_costs * weight + DEFAULT_REVIEW_COSTS * (
+            1 - weight
+        )
+        self.forget_rating_offset = self.forget_rating_offset * weight[
+            0
+        ] + DEFAULT_FORGET_RATING_OFFSET * (1 - weight[0])
+        self.forget_session_len = self.forget_session_len * weight[
+            0
+        ] + DEFAULT_FORGET_SESSION_LEN * (1 - weight[0])
+
+        weight = sum(self.learn_buttons) / (50 + sum(self.learn_buttons))
+        self.first_rating_prob = (
+            self.first_rating_prob * weight + DEFAULT_FIRST_RATING_PROB * (1 - weight)
+        )
+
+        weight = sum(self.review_buttons[1:]) / (50 + sum(self.review_buttons[1:]))
+        self.review_rating_prob = (
+            self.review_rating_prob * weight + DEFAULT_REVIEW_RATING_PROB * (1 - weight)
+        )
+
+        self.first_rating_offset[-1] = 0
+        self.first_session_len[-1] = 0
+
     def create_time_series(
         self,
         timezone: str,
@@ -1310,43 +1346,6 @@ class Optimizer:
             print("Forget rating offset: ", self.forget_rating_offset)
             print("Forget session len: ", self.forget_session_len)
 
-        weight = self.learn_buttons / (50 + self.learn_buttons)
-        self.learn_costs = self.learn_costs * weight + DEFAULT_LEARN_COSTS * (
-            1 - weight
-        )
-        self.first_rating_offset = (
-            self.first_rating_offset * weight
-            + DEFAULT_FIRST_RATING_OFFSETS * (1 - weight)
-        )
-        self.first_session_len = (
-            self.first_session_len * weight + DEFAULT_FIRST_SESSION_LENS * (1 - weight)
-        )
-
-        weight = self.review_buttons / (50 + self.review_buttons)
-        self.review_costs = self.review_costs * weight + DEFAULT_REVIEW_COSTS * (
-            1 - weight
-        )
-        self.forget_rating_offset = self.forget_rating_offset * weight[
-            0
-        ] + DEFAULT_FORGET_RATING_OFFSET * (1 - weight[0])
-        self.forget_session_len = self.forget_session_len * weight[
-            0
-        ] + DEFAULT_FORGET_SESSION_LEN * (1 - weight[0])
-
-        weight = sum(self.learn_buttons) / (50 + sum(self.learn_buttons))
-        self.first_rating_prob = (
-            self.first_rating_prob * weight + DEFAULT_FIRST_RATING_PROB * (1 - weight)
-        )
-
-        weight = sum(self.review_buttons[1:]) / (50 + sum(self.review_buttons[1:]))
-        self.review_rating_prob = (
-            self.review_rating_prob * weight + DEFAULT_REVIEW_RATING_PROB * (1 - weight)
-        )
-
-        self.review_costs[0] *= loss_aversion
-        self.first_rating_offset[-1] = 0
-        self.first_session_len[-1] = 0
-
         simulate_config = {
             "w": self.w,
             "deck_size": learn_span * 10,
@@ -1363,6 +1362,7 @@ class Optimizer:
             "first_session_len": self.first_session_len,
             "forget_rating_offset": self.forget_rating_offset,
             "forget_session_len": self.forget_session_len,
+            "loss_aversion": loss_aversion,
         }
         self.optimal_retention = optimal_retention(**simulate_config)
 
