@@ -1272,9 +1272,7 @@ class Optimizer:
                     (
                         f"{ivl}d"
                         if ivl < 30
-                        else f"{ivl / 30:.1f}m"
-                        if ivl < 365
-                        else f"{ivl / 365:.1f}y"
+                        else f"{ivl / 30:.1f}m" if ivl < 365 else f"{ivl / 365:.1f}y"
                     )
                     for ivl in map(int, t_history.split(","))
                 ]
