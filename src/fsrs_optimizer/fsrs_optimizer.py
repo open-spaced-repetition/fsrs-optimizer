@@ -18,7 +18,12 @@ from torch import Tensor
 from torch.utils.data import Dataset
 from torch.nn.utils.rnn import pad_sequence
 from sklearn.model_selection import TimeSeriesSplit
-from sklearn.metrics import root_mean_squared_error, mean_absolute_error, r2_score
+from sklearn.metrics import (
+    root_mean_squared_error,
+    mean_absolute_error,
+    mean_absolute_percentage_error,
+    r2_score,
+)
 from scipy.optimize import minimize
 from itertools import accumulate
 from tqdm.auto import tqdm
@@ -1272,7 +1277,9 @@ class Optimizer:
                     (
                         f"{ivl}d"
                         if ivl < 30
-                        else f"{ivl / 30:.1f}m" if ivl < 365 else f"{ivl / 365:.1f}y"
+                        else f"{ivl / 30:.1f}m"
+                        if ivl < 365
+                        else f"{ivl / 365:.1f}y"
                     )
                     for ivl in map(int, t_history.split(","))
                 ]
@@ -1632,14 +1639,14 @@ class Optimizer:
                 analysis_group.dropna(inplace=True)
                 analysis_group.drop_duplicates(subset=[group_key], inplace=True)
                 analysis_group.sort_values(by=[group_key], inplace=True)
-                rmse = root_mean_squared_error(
+                mape = mean_absolute_percentage_error(
                     analysis_group["true_s"],
                     analysis_group["predicted_s"],
                     sample_weight=analysis_group["total_count"],
                 )
                 fig = plt.figure()
                 ax1 = fig.add_subplot(111)
-                ax1.set_title(f"RMSE={rmse:.2f}, last rating={last_rating}")
+                ax1.set_title(f"MAPE={mape:.2f}, last rating={last_rating}")
                 ax1.scatter(
                     analysis_group[group_key],
                     analysis_group["true_s"],
