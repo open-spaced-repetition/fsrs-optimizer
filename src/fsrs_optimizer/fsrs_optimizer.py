@@ -166,9 +166,9 @@ class ParameterClipper:
         if hasattr(module, "w"):
             w = module.w.data
             w[0] = w[0].clamp(S_MIN, 100)
-            w[1] = w[1].clamp(S_MIN, 100)
-            w[2] = w[2].clamp(S_MIN, 100)
-            w[3] = w[3].clamp(S_MIN, 100)
+            w[1] = w[1].clamp(w[0] * 1.05, 100)
+            w[2] = w[2].clamp(w[1] * 1.05, 100)
+            w[3] = w[3].clamp(w[2] * 1.05, 100)
             w[4] = w[4].clamp(1, 10)
             w[5] = w[5].clamp(0.01, 4)
             w[6] = w[6].clamp(0.01, 4)
@@ -1024,14 +1024,15 @@ class Optimizer:
             (2, 4),
             (1, 4),
         ):
-            if small_rating in rating_stability and big_rating in rating_stability:
-                # if rating_count[small_rating] > 300 and rating_count[big_rating] > 300:
-                #     continue
-                if rating_stability[small_rating] > rating_stability[big_rating]:
-                    if rating_count[small_rating] > rating_count[big_rating]:
-                        rating_stability[big_rating] = rating_stability[small_rating]
-                    else:
-                        rating_stability[small_rating] = rating_stability[big_rating]
+            # if small_rating in rating_stability and big_rating in rating_stability:
+            #     # if rating_count[small_rating] > 300 and rating_count[big_rating] > 300:
+            #     #     continue
+            #     if rating_stability[small_rating] > rating_stability[big_rating]:
+            #         if rating_count[small_rating] > rating_count[big_rating]:
+            #             rating_stability[big_rating] = rating_stability[small_rating]
+            #         else:
+            #             rating_stability[small_rating] = rating_stability[big_rating]
+            rating_stability.sort()
 
         w1 = 3 / 5
         w2 = 3 / 5
