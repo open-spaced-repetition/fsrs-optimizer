@@ -260,8 +260,9 @@ def sample(
     forget_rating_offset=DEFAULT_FORGET_RATING_OFFSET,
     forget_session_len=DEFAULT_FORGET_SESSION_LEN,
     loss_aversion=2.5,
+    workload_only=False,
 ):
-    memorization = []
+    results = []
     if learn_span < 100:
         SAMPLE_SIZE = 16
     elif learn_span < 365:
@@ -290,8 +291,11 @@ def sample(
             loss_aversion,
             seed=42 + i,
         )
-        memorization.append(cost_per_day.sum() / memorized_cnt_per_day[-1])
-    return np.mean(memorization)
+        if workload_only:
+            results.append(cost_per_day.sum())
+        else:
+            results.append(cost_per_day.sum() / memorized_cnt_per_day[-1])
+    return np.mean(results)
 
 
 def brent(tol=0.01, maxiter=20, **kwargs):
@@ -413,7 +417,14 @@ def brent(tol=0.01, maxiter=20, **kwargs):
 
 def workload_graph(default_params):
     R = [x / 100 for x in range(70, 100)]
-    cost_per_memorization = [sample(r=r, **default_params) for r in R]
+    default_params["max_cost_perday"] = math.inf
+    default_params["learn_limit_perday"] = int(
+        default_params["deck_size"] / default_params["learn_span"]
+    )
+    default_params["review_limit_perday"] = math.inf
+    cost_per_memorization = [
+        sample(r=r, workload_only=True, **default_params) for r in R
+    ]
 
     # this is for testing
     # cost_per_memorization = [min(x, 2.3 * min(cost_per_memorization)) for x in cost_per_memorization]
@@ -521,7 +532,7 @@ def workload_graph(default_params):
 
     ax.set_ylim(0, lim)
     ax.set_ylabel("Workload (minutes of study per day)", fontsize=20)
-    ax.set_xlabel("Retention", fontsize=20)
+    ax.set_xlabel("Desired Retention", fontsize=20)
     ax.axhline(y=min_w, color="black", alpha=0.75, ls="--")
     ax.text(
         0.701,
@@ -565,7 +576,7 @@ def workload_graph(default_params):
             color="black",
             fontsize=12,
         )
-
+    fig.tight_layout(h_pad=0, w_pad=0)
     return fig
 
 
