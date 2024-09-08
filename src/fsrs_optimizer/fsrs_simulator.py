@@ -262,12 +262,18 @@ def sample(
     loss_aversion=2.5,
 ):
     memorization = []
-    if learn_span < 100:
-        SAMPLE_SIZE = 16
-    elif learn_span < 365:
-        SAMPLE_SIZE = 8
-    else:
-        SAMPLE_SIZE = 4
+
+    def best_sample_size(days_to_simulate):
+        if days_to_simulate <= 30:
+            return 36
+        elif days_to_simulate >= 365:
+            return 4
+        else:
+            factor = 0.00000358 * np.power(days_to_simulate, 2) + 0.00113 * days_to_simulate +0.0733
+            default_sample_size = 4
+            return int(default_sample_size/factor)
+    
+    SAMPLE_SIZE = best_sample_size(learn_span)
 
     for i in range(SAMPLE_SIZE):
         _, _, _, memorized_cnt_per_day, cost_per_day = simulate(
