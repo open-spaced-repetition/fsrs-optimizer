@@ -264,13 +264,14 @@ def sample(
 ):
     results = []
 
-    def best_sample_size(days_to_simulate):
+    def _sample_size(days_to_simulate):
         if days_to_simulate <= 30:
             return 36
         elif days_to_simulate >= 365:
             return 4
         else:
-            factor = 8.54864e-07 * np.power(days_to_simulate, 2) + 2.57563e-03 * days_to_simulate + 1.38928e-02
+            a1, a2, a3 = 8.20e-07, 2.41e-03, 1.30e-02
+            factor = a1 * np.power(days_to_simulate, 2) + a2 * days_to_simulate + a3
             default_sample_size = 4
             return int(default_sample_size/factor)
     
