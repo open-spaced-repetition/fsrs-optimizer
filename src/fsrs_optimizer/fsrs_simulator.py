@@ -416,59 +416,49 @@ def brent(tol=0.01, maxiter=20, **kwargs):
 
 
 def workload_graph(default_params):
-    R = [x / 100 for x in range(70, 100)]
+    R = np.linspace(0.7, 0.999, 300).tolist()
     default_params["max_cost_perday"] = math.inf
     default_params["learn_limit_perday"] = int(
         default_params["deck_size"] / default_params["learn_span"]
     )
     default_params["review_limit_perday"] = math.inf
-    cost_per_memorization = [
-        sample(r=r, workload_only=True, **default_params) for r in R
-    ]
+    workload = [sample(r=r, workload_only=True, **default_params) for r in R]
 
     # this is for testing
-    # cost_per_memorization = [min(x, 2.3 * min(cost_per_memorization)) for x in cost_per_memorization]
-    min_w = min(cost_per_memorization)  # minimum workload
-    max_w = max(cost_per_memorization)  # maximum workload
-    min1_index = R.index(R[cost_per_memorization.index(min_w)])
+    # workload = [min(x, 2.3 * min(workload)) for x in workload]
+    min_w = min(workload)  # minimum workload
+    max_w = max(workload)  # maximum workload
+    min1_index = R.index(R[workload.index(min_w)])
 
     min_w2 = 0
     min_w3 = 0
     target2 = 2 * min_w
     target3 = 3 * min_w
 
-    for i in range(len(cost_per_memorization) - 1):
-        if (cost_per_memorization[i] <= target2) and (
-            cost_per_memorization[i + 1] >= target2
-        ):
-            if abs(cost_per_memorization[i] - target2) < abs(
-                cost_per_memorization[i + 1] - target2
-            ):
-                min_w2 = cost_per_memorization[i]
+    for i in range(len(workload) - 1):
+        if (workload[i] <= target2) and (workload[i + 1] >= target2):
+            if abs(workload[i] - target2) < abs(workload[i + 1] - target2):
+                min_w2 = workload[i]
             else:
-                min_w2 = cost_per_memorization[i + 1]
+                min_w2 = workload[i + 1]
 
-    for i in range(len(cost_per_memorization) - 1):
-        if (cost_per_memorization[i] <= target3) and (
-            cost_per_memorization[i + 1] >= target3
-        ):
-            if abs(cost_per_memorization[i] - target3) < abs(
-                cost_per_memorization[i + 1] - target3
-            ):
-                min_w3 = cost_per_memorization[i]
+    for i in range(len(workload) - 1):
+        if (workload[i] <= target3) and (workload[i + 1] >= target3):
+            if abs(workload[i] - target3) < abs(workload[i + 1] - target3):
+                min_w3 = workload[i]
             else:
-                min_w3 = cost_per_memorization[i + 1]
+                min_w3 = workload[i + 1]
 
     if min_w2 == 0:
         min2_index = len(R)
     else:
-        min2_index = R.index(R[cost_per_memorization.index(min_w2)])
+        min2_index = R.index(R[workload.index(min_w2)])
 
     min1_5_index = int(math.ceil((min2_index + 3 * min1_index) / 4))
     if min_w3 == 0:
         min3_index = len(R)
     else:
-        min3_index = R.index(R[cost_per_memorization.index(min_w3)])
+        min3_index = R.index(R[workload.index(min_w3)])
 
     fig = plt.figure(figsize=(16, 8))
     ax = fig.gca()
@@ -476,14 +466,14 @@ def workload_graph(default_params):
         ax.fill_between(
             x=R[: min1_index + 1],
             y1=0,
-            y2=cost_per_memorization[: min1_index + 1],
+            y2=workload[: min1_index + 1],
             color="red",
             alpha=1,
         )
         ax.fill_between(
             x=R[min1_index : min1_5_index + 1],
             y1=0,
-            y2=cost_per_memorization[min1_index : min1_5_index + 1],
+            y2=workload[min1_index : min1_5_index + 1],
             color="gold",
             alpha=1,
         )
@@ -492,7 +482,7 @@ def workload_graph(default_params):
         ax.fill_between(
             x=R[: min1_5_index + 1],
             y1=0,
-            y2=cost_per_memorization[: min1_5_index + 1],
+            y2=workload[: min1_5_index + 1],
             color="gold",
             alpha=1,
         )
@@ -500,21 +490,21 @@ def workload_graph(default_params):
     ax.fill_between(
         x=R[min1_5_index : min2_index + 1],
         y1=0,
-        y2=cost_per_memorization[min1_5_index : min2_index + 1],
+        y2=workload[min1_5_index : min2_index + 1],
         color="limegreen",
         alpha=1,
     )
     ax.fill_between(
         x=R[min2_index : min3_index + 1],
         y1=0,
-        y2=cost_per_memorization[min2_index : min3_index + 1],
+        y2=workload[min2_index : min3_index + 1],
         color="gold",
         alpha=1,
     )
     ax.fill_between(
         x=R[min3_index:],
         y1=0,
-        y2=cost_per_memorization[min3_index:],
+        y2=workload[min3_index:],
         color="red",
         alpha=1,
     )
