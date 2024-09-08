@@ -270,7 +270,7 @@ def sample(
         elif days_to_simulate >= 365:
             return 4
         else:
-            factor = 0.00000358 * np.power(days_to_simulate, 2) + 0.00113 * days_to_simulate + 0.0733
+            factor = 8.54864e-07 * np.power(days_to_simulate, 2) + 2.57563e-03 * days_to_simulate + 1.38928e-02
             default_sample_size = 4
             return int(default_sample_size/factor)
     
