@@ -263,13 +263,13 @@ def sample(
 ):
     memorization = []
 
-    def best_sample_size(days_to_simulate):
+    def _sample_size(days_to_simulate):
         if days_to_simulate <= 30:
             return 36
         elif days_to_simulate >= 365:
             return 4
         else:
-            factor = 0.00000358 * np.power(days_to_simulate, 2) + 0.00113 * days_to_simulate +0.0733
+            factor = 0.00000358 * np.power(days_to_simulate, 2) + 0.00113 * days_to_simulate + 0.0733
             default_sample_size = 4
             return int(default_sample_size/factor)
     
