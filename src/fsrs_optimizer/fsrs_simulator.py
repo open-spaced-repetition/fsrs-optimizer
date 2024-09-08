@@ -264,7 +264,7 @@ def sample(
 ):
     results = []
 
-    def _sample_size(days_to_simulate):
+    def best_sample_size(days_to_simulate):
         if days_to_simulate <= 30:
             return 36
         elif days_to_simulate >= 365:
