@@ -415,8 +415,8 @@ def brent(tol=0.01, maxiter=20, **kwargs):
         raise Exception("The algorithm terminated without finding a valid value.")
 
 
-def workload_graph(default_params):
-    R = np.linspace(0.7, 0.999, 300).tolist()
+def workload_graph(default_params, sampling_size=30):
+    R = np.linspace(0.7, 0.999, sampling_size).tolist()
     default_params["max_cost_perday"] = math.inf
     default_params["learn_limit_perday"] = int(
         default_params["deck_size"] / default_params["learn_span"]
@@ -636,4 +636,4 @@ if __name__ == "__main__":
     ax.set_title("Memorized Count per Day")
     ax.grid(True)
     plt.show()
-    workload_graph(default_params).savefig("workload.png")
+    workload_graph(default_params, sampling_size=300).savefig("workload.png")
