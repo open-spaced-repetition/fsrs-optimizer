@@ -539,7 +539,7 @@ def workload_graph(default_params, sampling_size=30):
     ax.text(
         0.701,
         min_w,
-        "min. workload",
+        "minimum workload",
         ha="left",
         va="bottom",
         color="black",
