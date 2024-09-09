@@ -545,7 +545,7 @@ def workload_graph(default_params, sampling_size=30):
         color="black",
         fontsize=12,
     )
-    if max_w >= 1.8 * min_w:
+    if lim >= 1.8 * min_w:
         ax.axhline(y=1.5 * min_w, color="black", alpha=0.75, ls="--")
         ax.text(
             0.701,
@@ -556,7 +556,7 @@ def workload_graph(default_params, sampling_size=30):
             color="black",
             fontsize=12,
         )
-    if max_w >= 2.3 * min_w:
+    if lim >= 2.3 * min_w:
         ax.axhline(y=2 * min_w, color="black", alpha=0.75, ls="--")
         ax.text(
             0.701,
@@ -567,7 +567,7 @@ def workload_graph(default_params, sampling_size=30):
             color="black",
             fontsize=12,
         )
-    if max_w >= 2.8 * min_w:
+    if lim >= 2.8 * min_w:
         ax.axhline(y=2.5 * min_w, color="black", alpha=0.75, ls="--")
         ax.text(
             0.701,
@@ -578,7 +578,7 @@ def workload_graph(default_params, sampling_size=30):
             color="black",
             fontsize=12,
         )
-    if max_w >= 3.3 * min_w:
+    if lim >= 3.3 * min_w:
         ax.axhline(y=3 * min_w, color="black", alpha=0.75, ls="--")
         ax.text(
             0.701,
