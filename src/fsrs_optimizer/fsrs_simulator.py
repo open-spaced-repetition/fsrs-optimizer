@@ -523,10 +523,14 @@ def workload_graph(default_params, sampling_size=30):
 
     if max_w >= 4.5 * min_w:
         lim = 4.5 * min_w
+    elif max_w >= 4 * min_w:
+        lim = 4 * min_w
     elif max_w >= 3.5 * min_w:
         lim = 3.5 * min_w
+    elif max_w >= 3 * min_w:
+        lim = 3 * min_w
     else:
-        lim = 1.1 * max_w
+        lim = max(max_w, 2.7 * min_w)
 
     ax.set_ylim(0, lim)
     ax.set_ylabel("Workload (minutes of study per day)", fontsize=20)
