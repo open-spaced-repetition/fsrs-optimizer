@@ -440,8 +440,8 @@ def workload_graph(default_params, sampling_size=30):
 
     min_w2 = 0
     min_w3 = 0
-    target2 = 2 * min_w
-    target3 = 3 * min_w
+    target2 = 1.5 * min_w
+    target3 = 2 * min_w
 
     for i in range(len(workload) - 1):
         if (workload[i] <= target2) and (workload[i + 1] >= target2):
@@ -526,7 +526,7 @@ def workload_graph(default_params, sampling_size=30):
     elif max_w >= 3.5 * min_w:
         lim = 3.5 * min_w
     else:
-        lim = max_w
+        lim = 1.1 * max_w
 
     ax.set_ylim(0, lim)
     ax.set_ylabel("Workload (minutes of study per day)", fontsize=20)
@@ -541,12 +541,34 @@ def workload_graph(default_params, sampling_size=30):
         color="black",
         fontsize=12,
     )
+    if max_w >= 1.8 * min_w:
+        ax.axhline(y=1.5 * min_w, color="black", alpha=0.75, ls="--")
+        ax.text(
+            0.701,
+            1.5 * min_w,
+            "minimum workload x1.5",
+            ha="left",
+            va="bottom",
+            color="black",
+            fontsize=12,
+        )
     if max_w >= 2.3 * min_w:
         ax.axhline(y=2 * min_w, color="black", alpha=0.75, ls="--")
         ax.text(
             0.701,
             2 * min_w,
-            "min. workload x2",
+            "minimum workload x2",
+            ha="left",
+            va="bottom",
+            color="black",
+            fontsize=12,
+        )
+    if max_w >= 2.8 * min_w:
+        ax.axhline(y=2.5 * min_w, color="black", alpha=0.75, ls="--")
+        ax.text(
+            0.701,
+            2.5 * min_w,
+            "minimum workload x2.5",
             ha="left",
             va="bottom",
             color="black",
@@ -557,18 +579,7 @@ def workload_graph(default_params, sampling_size=30):
         ax.text(
             0.701,
             3 * min_w,
-            "min. workload x3",
-            ha="left",
-            va="bottom",
-            color="black",
-            fontsize=12,
-        )
-    if max_w >= 4.3 * min_w:
-        ax.axhline(y=4 * min_w, color="black", alpha=0.75, ls="--")
-        ax.text(
-            0.701,
-            4 * min_w,
-            "min. workload x4",
+            "minimum workload x3",
             ha="left",
             va="bottom",
             color="black",
