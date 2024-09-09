@@ -521,14 +521,14 @@ def workload_graph(default_params, sampling_size=30):
     ax.xaxis.set_tick_params(labelsize=14)
     ax.set_xlim(0.7, 0.99)
 
-    if max_w >= 4.5 * min_w:
-        lim = 4.5 * min_w
-    elif max_w >= 4 * min_w:
-        lim = 4 * min_w
-    elif max_w >= 3.5 * min_w:
+    if max_w >= 3.5 * min_w:
         lim = 3.5 * min_w
     elif max_w >= 3 * min_w:
         lim = 3 * min_w
+    elif max_w >= 2.5 * min_w:
+        lim = 2.5 * min_w
+    elif max_w >= 2 * min_w:
+        lim = 2 * min_w
     else:
         lim = 1.1 * max_w
 
