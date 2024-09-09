@@ -429,6 +429,7 @@ def workload_graph(default_params, sampling_size=30):
         default_params["deck_size"] / default_params["learn_span"]
     )
     default_params["review_limit_perday"] = math.inf
+    default_params["loss_aversion"] = 1
     workload = [sample(r=r, workload_only=True, **default_params) for r in R]
 
     # this is for testing
