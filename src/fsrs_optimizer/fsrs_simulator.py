@@ -1,7 +1,7 @@
 import math
 import numpy as np
 from matplotlib import pyplot as plt
-from tqdm import trange
+from tqdm import trange  # type: ignore
 
 
 DECAY = -0.5
@@ -273,8 +273,8 @@ def sample(
             a1, a2, a3 = 8.20e-07, 2.41e-03, 1.30e-02
             factor = a1 * np.power(days_to_simulate, 2) + a2 * days_to_simulate + a3
             default_sample_size = 4
-            return int(default_sample_size/factor)
-    
+            return int(default_sample_size / factor)
+
     SAMPLE_SIZE = best_sample_size(learn_span)
 
     for i in range(SAMPLE_SIZE):
