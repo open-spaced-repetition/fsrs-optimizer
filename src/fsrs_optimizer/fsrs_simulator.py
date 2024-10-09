@@ -12,9 +12,11 @@ def power_forgetting_curve(t, s):
     return (1 + FACTOR * t / s) ** DECAY
 
 
-def next_interval(s, r):
+def next_interval(s, r, float_ivl: bool = False):
     ivl = s / FACTOR * (r ** (1 / DECAY) - 1)
-    return np.maximum(1, np.round(ivl))
+    return (
+        np.maximum(1, np.round(ivl).astype(int)) if not float_ivl else np.round(ivl, 6)
+    )
 
 
 columns = [
