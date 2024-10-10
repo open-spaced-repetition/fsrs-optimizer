@@ -1521,9 +1521,9 @@ class Optimizer:
         loss_after = self.dataset["log_loss"].mean()
         if save_to_file:
             tmp = self.dataset.copy()
-            tmp["stability"] = tmp["stability"].map(lambda x: round(x, 2))
+            tmp["stability"] = tmp["stability"].map(lambda x: round(x, 6))
             tmp["difficulty"] = tmp["difficulty"].map(lambda x: round(x, 2))
-            tmp["p"] = tmp["p"].map(lambda x: round(x, 2))
+            tmp["p"] = tmp["p"].map(lambda x: round(x, 6))
             tmp["log_loss"] = tmp["log_loss"].map(lambda x: round(x, 2))
             tmp.rename(columns={"p": "retrievability"}, inplace=True)
             tmp[
@@ -1539,6 +1539,7 @@ class Optimizer:
                     "difficulty",
                     "retrievability",
                     "log_loss",
+                    "last_rating",
                 ]
             ].to_csv("./evaluation.tsv", sep="\t", index=False)
             del tmp
