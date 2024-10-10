@@ -62,6 +62,7 @@ DEFAULT_PARAMETER = [
     0.5034,
     0.6567,
     5,
+    3,
 ]
 
 S_MIN = 0.01
@@ -89,9 +90,9 @@ class FSRS(nn.Module):
         )
         return new_s
 
-    def stability_after_failure(self, state: Tensor, r: Tensor) -> Tensor:
+    def stability_after_failure(self, state: Tensor, r: Tensor, delta_t: Tensor) -> Tensor:
         new_s = (
-            self.w[11]
+            torch.where(delta_t >= 0.66, self.w[11], self.w[20])
             * torch.pow(state[:, 1], -self.w[12])
             * (torch.pow(state[:, 0] + 1, self.w[13]) - 1)
             * torch.exp((1 - r) * self.w[14])
@@ -144,7 +145,7 @@ class FSRS(nn.Module):
                 else torch.where(
                     success,
                     self.stability_after_success(state, r, X[:, 1], X[:, 0]),
-                    self.stability_after_failure(state, r),
+                    self.stability_after_failure(state, r, X[:, 0]),
                 )
             )
             new_d = self.next_d(state, X[:, 1])
@@ -195,6 +196,7 @@ class ParameterClipper:
             w[17] = w[17].clamp(0, 2)
             w[18] = w[18].clamp(0, 2)
             w[19] = w[19].clamp(0, 10)
+            w[20] = w[20].clamp(0.1, 5)
             module.w.data = w
 
 
