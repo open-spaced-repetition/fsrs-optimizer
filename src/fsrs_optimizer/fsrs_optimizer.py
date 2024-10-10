@@ -85,9 +85,8 @@ class FSRS(nn.Module):
             * (11 - state[:, 1])
             * torch.pow(state[:, 0], -self.w[9])
             * (torch.exp((1 - r) * self.w[10]) - 1)
-            * hard_penalty
             * easy_bonus
-        )
+        ) * hard_penalty
         return new_s
 
     def stability_after_failure(self, state: Tensor, r: Tensor, delta_t: Tensor) -> Tensor:
