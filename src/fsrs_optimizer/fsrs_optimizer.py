@@ -66,7 +66,7 @@ DEFAULT_PARAMETER = [
 ]
 
 S_MIN = 0.01
-
+SHORT_TERM_FACTOR = 0.33
 
 class FSRS(nn.Module):
     def __init__(self, w: List[float], float_delta_t: bool = False):
@@ -81,7 +81,7 @@ class FSRS(nn.Module):
         easy_bonus = torch.where(rating == 4, self.w[16], 1)
         new_s = state[:, 0] * (
             1
-            + torch.exp(torch.where(delta_t >= 0.66, self.w[8], self.w[19]))
+            + torch.exp(torch.where(delta_t >= SHORT_TERM_FACTOR, self.w[8], self.w[19]))
             * (11 - state[:, 1])
             * torch.pow(state[:, 0], -self.w[9])
             * (torch.exp((1 - r) * self.w[10]) - 1)
@@ -91,7 +91,7 @@ class FSRS(nn.Module):
 
     def stability_after_failure(self, state: Tensor, r: Tensor, delta_t: Tensor) -> Tensor:
         new_s = (
-            torch.where(delta_t >= 0.66, self.w[11], self.w[20])
+            torch.where(delta_t >= SHORT_TERM_FACTOR, self.w[11], self.w[20])
             * torch.pow(state[:, 1], -self.w[12])
             * (torch.pow(state[:, 0] + 1, self.w[13]) - 1)
             * torch.exp((1 - r) * self.w[14])
