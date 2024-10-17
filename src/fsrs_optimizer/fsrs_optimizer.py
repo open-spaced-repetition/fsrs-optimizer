@@ -752,7 +752,7 @@ class Optimizer:
         if df.empty:
             raise ValueError("Training data is inadequate.")
 
-        if "review_state" in df.columns and "review_duration" in df.columns:
+        if "review_state" in df.columns and "review_duration" in df.columns and not (df["review_duration"] == 0).all():
             df["review_state"] = df["review_state"].map(
                 lambda x: x if x != New else Learning
             )
