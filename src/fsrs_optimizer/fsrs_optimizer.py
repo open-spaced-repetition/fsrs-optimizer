@@ -5,7 +5,7 @@ import pandas as pd
 import numpy as np
 import os
 import math
-from typing import List, Optional
+from typing import List, Optional, Tuple
 from datetime import timedelta, datetime
 from collections import defaultdict
 import statsmodels.api as sm  # type: ignore
@@ -155,7 +155,9 @@ class FSRS(nn.Module):
         new_s = new_s.clamp(S_MIN, 36500)
         return torch.stack([new_s, new_d], dim=1)
 
-    def forward(self, inputs: Tensor, state: Optional[Tensor] = None) -> Tensor:
+    def forward(
+        self, inputs: Tensor, state: Optional[Tensor] = None
+    ) -> Tuple[Tensor, Tensor]:
         """
         :param inputs: shape[seq_len, batch_size, 2]
         """
@@ -2079,22 +2081,3 @@ def wrap_short_term_ratings(r_history, t_history):
     else:
         result.pop()
     return "".join(result)
-
-
-if __name__ == "__main__":
-    model = FSRS(DEFAULT_PARAMETER)
-    stability = torch.tensor([5.0] * 4)
-    difficulty = torch.tensor([1.0, 2.0, 3.0, 4.0])
-    retention = torch.tensor([0.9, 0.8, 0.7, 0.6])
-    rating = torch.tensor([1, 2, 3, 4])
-    state = torch.stack([stability, difficulty]).unsqueeze(0)
-    s_recall = model.stability_after_success(state, retention, rating)
-    print(s_recall)
-    s_forget = model.stability_after_failure(state, retention)
-    print(s_forget)
-
-    retentions = torch.tensor([0.1, 0.2, 0.3, 0.4])
-    labels = torch.tensor([0.0, 1.0, 0.0, 1.0])
-    loss_fn = nn.BCELoss()
-    loss = loss_fn(retentions, labels)
-    print(loss)
