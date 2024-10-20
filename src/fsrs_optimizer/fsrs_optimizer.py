@@ -105,8 +105,12 @@ class FSRS(nn.Module):
         new_d = self.w[4] - torch.exp(self.w[5] * (rating - 1)) + 1
         return new_d
 
+    def linear_damping(self, delta_d: Tensor, old_d: Tensor) -> Tensor:
+        return delta_d * (10 - old_d) / 9
+
     def next_d(self, state: Tensor, rating: Tensor) -> Tensor:
-        new_d = state[:, 1] - self.w[6] * (rating - 3)
+        delta_d = -self.w[6] * (rating - 3)
+        new_d = state[:, 1] + self.linear_damping(delta_d, state[:, 1])
         new_d = self.mean_reversion(self.init_d(4), new_d)
         return new_d
 
