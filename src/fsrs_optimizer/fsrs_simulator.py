@@ -127,8 +127,12 @@ def simulate(
         new_d = init_d(rating) - w[6] * rating_offset
         return np.clip(new_d, 1, 10)
 
+    def linear_damping(delta_d, old_d):
+        return delta_d * (10 - old_d) / 9
+
     def next_d(d, rating):
-        new_d = d - w[6] * (rating - 3)
+        delta_d = -w[6] * (rating - 3)
+        new_d = d + linear_damping(delta_d, d)
         new_d = mean_reversion(init_d(4), new_d)
         return np.clip(new_d, 1, 10)
 
