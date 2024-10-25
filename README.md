@@ -64,3 +64,9 @@ python -m fsrs_optimizer "revlog.csv"
 ![image](https://github.com/open-spaced-repetition/fsrs-optimizer/assets/32575846/fad7154a-9667-4eea-b868-d94c94a50912)
 
 ![image](https://github.com/open-spaced-repetition/fsrs-optimizer/assets/32575846/f868aac4-2e9e-4101-b8ad-eccc1d9b1bd5)
+
+---
+
+## Alternative
+
+Are you getting tired of installing torch? Try [fsrs-rs-python](https://github.com/open-spaced-repetition/fsrs-rs-python)!
