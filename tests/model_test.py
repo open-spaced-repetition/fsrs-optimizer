@@ -193,7 +193,7 @@ class Test_Model:
         stabilities = outputs[seq_lens - 1, torch.arange(real_batch_size), 0]
         retentions = power_forgetting_curve(delta_ts, stabilities)
         loss = loss_fn(retentions, labels).sum()
-        assert round(loss.item(), 4) == 4.176347
+        assert round(loss.item(), 6) == 4.176347
         loss.backward()
         assert torch.allclose(
             model.w.grad,
