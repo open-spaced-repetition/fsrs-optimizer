@@ -164,3 +164,89 @@ class Test_Model:
             ),
             atol=1e-4,
         )
+
+        optimizer.zero_grad()
+        t_histories = torch.tensor(
+            [
+                [0.0, 0.0, 0.0, 0.0],
+                [0.0, 0.0, 0.0, 0.0],
+                [0.0, 0.0, 0.0, 1.0],
+                [0.0, 1.0, 1.0, 3.0],
+                [1.0, 3.0, 3.0, 5.0],
+                [3.0, 6.0, 6.0, 12.0],
+            ]
+        )
+        r_histories = torch.tensor(
+            [
+                [1.0, 2.0, 3.0, 4.0],
+                [3.0, 4.0, 2.0, 4.0],
+                [1.0, 4.0, 4.0, 3.0],
+                [4.0, 3.0, 3.0, 3.0],
+                [3.0, 1.0, 3.0, 3.0],
+                [2.0, 3.0, 3.0, 4.0],
+            ]
+        )
+        delta_ts = torch.tensor([4.0, 11.0, 12.0, 23.0])
+        labels = torch.tensor([1, 1, 1, 0], dtype=torch.float32, requires_grad=False)
+        inputs = torch.stack([t_histories, r_histories], dim=2)
+        outputs, _ = model.forward(inputs)
+        stabilities = outputs[seq_lens - 1, torch.arange(real_batch_size), 0]
+        retentions = power_forgetting_curve(delta_ts, stabilities)
+        loss = loss_fn(retentions, labels).sum()
+        assert round(loss.item(), 4) == 4.176347
+        loss.backward()
+        assert torch.allclose(
+            model.w.grad,
+            torch.tensor(
+                [
+                    -0.0401341,
+                    -0.0061790533,
+                    -0.00288913,
+                    0.01216853,
+                    -0.05624995,
+                    1.147413,
+                    0.068084724,
+                    -0.6906936,
+                    0.48760873,
+                    -2.5428302,
+                    0.49044546,
+                    -0.011574259,
+                    0.037729632,
+                    -0.09633919,
+                    -0.0009513022,
+                    -0.12789416,
+                    0.19088513,
+                    0.2574597,
+                    0.049311582,
+                ]
+            ),
+            atol=1e-4,
+        )
+        optimizer.step()
+        assert torch.allclose(
+            model.w,
+            torch.tensor(
+                [
+                    0.48150504,
+                    1.2636971,
+                    3.2530522,
+                    15.611003,
+                    7.2749534,
+                    0.45482785,
+                    1.3808222,
+                    0.083782874,
+                    1.4658877,
+                    0.19898315,
+                    0.9393105,
+                    2.0193,
+                    0.030164223,
+                    0.37562984,
+                    2.3498251,
+                    0.3112984,
+                    2.909878,
+                    0.43652722,
+                    0.5825156,
+                ]
+            ),
+            atol=1e-4,
+        )
