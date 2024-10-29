@@ -222,9 +222,11 @@ class BatchDataset(Dataset):
     ):
         if dataframe.empty:
             raise ValueError("Training data is inadequate.")
+        dataframe["seq_len"] = dataframe["tensor"].map(len)
+        dataframe = dataframe[dataframe["seq_len"] <= max_seq_len]
         if sort_by_length:
-            dataframe = dataframe.sort_values(by=["i"])
-        dataframe = dataframe[dataframe["tensor"].map(len) <= max_seq_len]
+            dataframe = dataframe.sort_values(by="seq_len")
+        del dataframe["seq_len"]
         self.x_train = pad_sequence(
             dataframe["tensor"].to_list(), batch_first=True, padding_value=0
         )
