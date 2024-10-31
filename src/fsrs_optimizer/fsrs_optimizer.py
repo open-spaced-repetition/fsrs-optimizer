@@ -219,6 +219,7 @@ class BatchDataset(Dataset):
         batch_size: int = 0,
         sort_by_length: bool = True,
         max_seq_len: int = math.inf,
+        device: str = "cpu",
     ):
         if dataframe.empty:
             raise ValueError("Training data is inadequate.")
@@ -248,10 +249,10 @@ class BatchDataset(Dataset):
                 max_seq_len = max(seq_lens)
                 sequences_truncated = sequences[:, :max_seq_len]
                 self.batches[i] = (
-                    sequences_truncated.transpose(0, 1),
-                    self.t_train[start_index:end_index],
-                    self.y_train[start_index:end_index],
-                    seq_lens,
+                    sequences_truncated.transpose(0, 1).to(device),
+                    self.t_train[start_index:end_index].to(device),
+                    self.y_train[start_index:end_index].to(device),
+                    seq_lens.to(device),
                 )
 
     def __getitem__(self, idx):
