@@ -24,7 +24,7 @@ def prompt(msg: str, fallback):
     return response
 
 
-def process(filepath, filter_out_flags: list[str]):
+def process(filepath, filter_out_flags: list[int]):
     suffix = filepath.split("/")[-1].replace(".", "_").replace("@", "_")
     proj_dir = Path(f"{suffix}")
     proj_dir.mkdir(parents=True, exist_ok=True)
@@ -60,7 +60,8 @@ def process(filepath, filter_out_flags: list[str]):
 
         remembered_fallback_prompt("next_day", "used next day start hour")
         remembered_fallback_prompt(
-            "revlog_start_date", "the date at which before reviews will be ignored"
+            "revlog_start_date",
+            "the date at which before reviews will be ignored | YYYY-MM-DD",
         )
         remembered_fallback_prompt(
             "filter_out_suspended_cards", "filter out suspended cards? (y/n)"
@@ -72,6 +73,8 @@ def process(filepath, filter_out_flags: list[str]):
 
     if graphs_input.lower() != "y":
         remembered_fallbacks["preview"] = "n"
+    else:
+        remembered_fallbacks["preview"] = "y"
 
     with open(
         config_save, "w+"
@@ -94,6 +97,7 @@ def process(filepath, filter_out_flags: list[str]):
         remembered_fallbacks["timezone"],
         remembered_fallbacks["revlog_start_date"],
         remembered_fallbacks["next_day"],
+        save_graphs,
     )
     print(analysis)
 
@@ -110,13 +114,17 @@ def process(filepath, filter_out_flags: list[str]):
         plt.close(f)
 
     optimizer.predict_memory_states()
-    figures = optimizer.find_optimal_retention()
-    if save_graphs:
+    try:
+        figures = optimizer.find_optimal_retention(verbose=save_graphs)
         for i, f in enumerate(figures):
             f.savefig(f"find_optimal_retention_{i}.png")
             plt.close(f)
+    except Exception as e:
+        print(e)
+        print("Failed to find optimal retention")
+        optimizer.optimal_retention = 0.9
 
-    optimizer.preview(optimizer.optimal_retention)
+    print(optimizer.preview(optimizer.optimal_retention))
 
     profile = f"""{{
     // Generated, Optimized anki deck settings

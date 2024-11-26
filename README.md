@@ -1,5 +1,7 @@
 # FSRS Optimizer
 
+[![PyPi](https://img.shields.io/pypi/v/FSRS-Optimizer)](https://pypi.org/project/FSRS-Optimizer/) [![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
+
 The FSRS Optimizer is a Python library capable of utilizing personal spaced repetition review logs to refine the FSRS algorithm. Designed with the intent of delivering a standardized, universal optimizer to various FSRS implementations across numerous programming languages, this tool is set to establish a ubiquitous standard for spaced repetition review logs. By facilitating the uniformity of learning data among different spaced repetition softwares, it guarantees learners consistent review schedules across a multitude of platforms.
 
 Delve into the underlying principles of the FSRS Optimizer's training process at: https://github.com/open-spaced-repetition/fsrs4anki/wiki/The-mechanism-of-optimization
@@ -62,3 +64,9 @@ python -m fsrs_optimizer "revlog.csv"
 ![image](https://github.com/open-spaced-repetition/fsrs-optimizer/assets/32575846/fad7154a-9667-4eea-b868-d94c94a50912)
 
 ![image](https://github.com/open-spaced-repetition/fsrs-optimizer/assets/32575846/f868aac4-2e9e-4101-b8ad-eccc1d9b1bd5)
+
+---
+
+## Alternative
+
+Are you getting tired of installing torch? Try [fsrs-rs-python](https://github.com/open-spaced-repetition/fsrs-rs-python)!

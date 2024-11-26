@@ -5,27 +5,34 @@ import pandas as pd
 import numpy as np
 import os
 import math
-from typing import List, Optional
+from typing import List, Optional, Tuple
 from datetime import timedelta, datetime
-import statsmodels.api as sm
+from collections import defaultdict
+import statsmodels.api as sm  # type: ignore
+from statsmodels.nonparametric.smoothers_lowess import lowess  # type: ignore
 import matplotlib.pyplot as plt
 import matplotlib.ticker as ticker
 import torch
 from torch import nn
 from torch import Tensor
-from torch.utils.data import Dataset, DataLoader, Sampler
-from torch.nn.utils.rnn import pad_sequence, pack_padded_sequence, pad_packed_sequence
-from sklearn.model_selection import StratifiedGroupKFold, TimeSeriesSplit
-from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
-from scipy.optimize import minimize
+from torch.utils.data import Dataset
+from torch.nn.utils.rnn import pad_sequence
+from sklearn.model_selection import TimeSeriesSplit  # type: ignore
+from sklearn.metrics import (  # type: ignore
+    root_mean_squared_error,
+    mean_absolute_error,
+    mean_absolute_percentage_error,
+    r2_score,
+)
+from scipy.optimize import minimize  # type: ignore
 from itertools import accumulate
-from tqdm.auto import tqdm
+from tqdm.auto import tqdm  # type: ignore
 import warnings
 
 try:
-    from .fsrs_simulator import optimal_retention, simulate
+    from .fsrs_simulator import *
 except ImportError:
-    from fsrs_simulator import optimal_retention, simulate
+    from fsrs_simulator import *  # type: ignore
 
 warnings.filterwarnings("ignore", category=UserWarning)
 
@@ -34,29 +41,46 @@ Learning = 1
 Review = 2
 Relearning = 3
 
+DEFAULT_PARAMETER = [
+    0.40255,
+    1.18385,
+    3.173,
+    15.69105,
+    7.1949,
+    0.5345,
+    1.4604,
+    0.0046,
+    1.54575,
+    0.1192,
+    1.01925,
+    1.9395,
+    0.11,
+    0.29605,
+    2.2698,
+    0.2315,
+    2.9898,
+    0.51655,
+    0.6621,
+]
 
-def power_forgetting_curve(t, s):
-    return (1 + t / (9 * s)) ** -1
-
-
-def next_interval(s, r):
-    return np.maximum(1, np.round(9 * s * (1 / r - 1)))
+S_MIN = 0.01
 
 
 class FSRS(nn.Module):
-    def __init__(self, w: List[float]):
+    def __init__(self, w: List[float], float_delta_t: bool = False):
         super(FSRS, self).__init__()
         self.w = nn.Parameter(torch.tensor(w, dtype=torch.float32))
+        self.float_delta_t = float_delta_t
 
     def stability_after_success(
-        self, state: Tensor, new_d: Tensor, r: Tensor, rating: Tensor
+        self, state: Tensor, r: Tensor, rating: Tensor
     ) -> Tensor:
         hard_penalty = torch.where(rating == 2, self.w[15], 1)
         easy_bonus = torch.where(rating == 4, self.w[16], 1)
         new_s = state[:, 0] * (
             1
             + torch.exp(self.w[8])
-            * (11 - new_d)
+            * (11 - state[:, 1])
             * torch.pow(state[:, 0], -self.w[9])
             * (torch.exp((1 - r) * self.w[10]) - 1)
             * hard_penalty
@@ -64,16 +88,31 @@ class FSRS(nn.Module):
         )
         return new_s
 
-    def stability_after_failure(
-        self, state: Tensor, new_d: Tensor, r: Tensor
-    ) -> Tensor:
+    def stability_after_failure(self, state: Tensor, r: Tensor) -> Tensor:
         new_s = (
             self.w[11]
-            * torch.pow(new_d, -self.w[12])
+            * torch.pow(state[:, 1], -self.w[12])
             * (torch.pow(state[:, 0] + 1, self.w[13]) - 1)
             * torch.exp((1 - r) * self.w[14])
         )
+        return torch.minimum(new_s, state[:, 0])
+
+    def stability_short_term(self, state: Tensor, rating: Tensor) -> Tensor:
+        new_s = state[:, 0] * torch.exp(self.w[17] * (rating - 3 + self.w[18]))
         return new_s
+
+    def init_d(self, rating: Tensor) -> Tensor:
+        new_d = self.w[4] - torch.exp(self.w[5] * (rating - 1)) + 1
+        return new_d
+
+    def linear_damping(self, delta_d: Tensor, old_d: Tensor) -> Tensor:
+        return delta_d * (10 - old_d) / 9
+
+    def next_d(self, state: Tensor, rating: Tensor) -> Tensor:
+        delta_d = -self.w[6] * (rating - 3)
+        new_d = state[:, 1] + self.linear_damping(delta_d, state[:, 1])
+        new_d = self.mean_reversion(self.init_d(4), new_d)
+        return new_d
 
     def step(self, X: Tensor, state: Tensor) -> Tensor:
         """
@@ -88,23 +127,37 @@ class FSRS(nn.Module):
             # first learn, init memory states
             new_s = torch.ones_like(state[:, 0])
             new_s[index[0]] = self.w[index[1]]
-            new_d = self.w[4] - self.w[5] * (X[:, 1] - 3)
+            new_d = self.init_d(X[:, 1])
             new_d = new_d.clamp(1, 10)
         else:
             r = power_forgetting_curve(X[:, 0], state[:, 0])
-            new_d = state[:, 1] - self.w[6] * (X[:, 1] - 3)
-            new_d = self.mean_reversion(self.w[4], new_d)
-            new_d = new_d.clamp(1, 10)
-            condition = X[:, 1] > 1
-            new_s = torch.where(
-                condition,
-                self.stability_after_success(state, new_d, r, X[:, 1]),
-                self.stability_after_failure(state, new_d, r),
+            short_term = X[:, 0] < 1
+            success = X[:, 1] > 1
+            new_s = (
+                torch.where(
+                    short_term,
+                    self.stability_short_term(state, X[:, 1]),
+                    torch.where(
+                        success,
+                        self.stability_after_success(state, r, X[:, 1]),
+                        self.stability_after_failure(state, r),
+                    ),
+                )
+                if not self.float_delta_t
+                else torch.where(
+                    success,
+                    self.stability_after_success(state, r, X[:, 1]),
+                    self.stability_after_failure(state, r),
+                )
             )
-        new_s = new_s.clamp(0.1, 36500)
+            new_d = self.next_d(state, X[:, 1])
+            new_d = new_d.clamp(1, 10)
+        new_s = new_s.clamp(S_MIN, 36500)
         return torch.stack([new_s, new_d], dim=1)
 
-    def forward(self, inputs: Tensor, state: Optional[Tensor] = None) -> Tensor:
+    def forward(
+        self, inputs: Tensor, state: Optional[Tensor] = None
+    ) -> Tuple[Tensor, Tensor]:
         """
         :param inputs: shape[seq_len, batch_size, 2]
         """
@@ -120,26 +173,32 @@ class FSRS(nn.Module):
         return self.w[7] * init + (1 - self.w[7]) * current
 
 
-class WeightClipper:
+class ParameterClipper:
     def __init__(self, frequency: int = 1):
         self.frequency = frequency
 
     def __call__(self, module):
         if hasattr(module, "w"):
             w = module.w.data
+            w[0] = w[0].clamp(S_MIN, 100)
+            w[1] = w[1].clamp(S_MIN, 100)
+            w[2] = w[2].clamp(S_MIN, 100)
+            w[3] = w[3].clamp(S_MIN, 100)
             w[4] = w[4].clamp(1, 10)
-            w[5] = w[5].clamp(0.1, 5)
-            w[6] = w[6].clamp(0.1, 5)
-            w[7] = w[7].clamp(0, 0.5)
-            w[8] = w[8].clamp(0, 3)
-            w[9] = w[9].clamp(0.1, 0.8)
-            w[10] = w[10].clamp(0.01, 2.5)
-            w[11] = w[11].clamp(0.5, 5)
-            w[12] = w[12].clamp(0.01, 0.2)
-            w[13] = w[13].clamp(0.01, 0.9)
-            w[14] = w[14].clamp(0.01, 2)
+            w[5] = w[5].clamp(0.001, 4)
+            w[6] = w[6].clamp(0.001, 4)
+            w[7] = w[7].clamp(0.001, 0.75)
+            w[8] = w[8].clamp(0, 4.5)
+            w[9] = w[9].clamp(0, 0.8)
+            w[10] = w[10].clamp(0.001, 3.5)
+            w[11] = w[11].clamp(0.001, 5)
+            w[12] = w[12].clamp(0.001, 0.25)
+            w[13] = w[13].clamp(0.001, 0.9)
+            w[14] = w[14].clamp(0, 4)
             w[15] = w[15].clamp(0, 1)
-            w[16] = w[16].clamp(1, 10)
+            w[16] = w[16].clamp(1, 6)
+            w[17] = w[17].clamp(0, 2)
+            w[18] = w[18].clamp(0, 2)
             module.w.data = w
 
 
@@ -148,143 +207,132 @@ def lineToTensor(line: str) -> Tensor:
     response = line[1].split(",")
     tensor = torch.zeros(len(response), 2)
     for li, response in enumerate(response):
-        tensor[li][0] = int(ivl[li])
+        tensor[li][0] = float(ivl[li])
         tensor[li][1] = int(response)
     return tensor
 
 
-class RevlogDataset(Dataset):
-    def __init__(self, dataframe: pd.DataFrame):
+class BatchDataset(Dataset):
+    def __init__(
+        self,
+        dataframe: pd.DataFrame,
+        batch_size: int = 0,
+        sort_by_length: bool = True,
+        max_seq_len: int = math.inf,
+        device: str = "cpu",
+    ):
         if dataframe.empty:
             raise ValueError("Training data is inadequate.")
-        padded = pad_sequence(
+        dataframe["seq_len"] = dataframe["tensor"].map(len)
+        dataframe = dataframe[dataframe["seq_len"] <= max_seq_len]
+        if sort_by_length:
+            dataframe = dataframe.sort_values(by="seq_len")
+        del dataframe["seq_len"]
+        self.x_train = pad_sequence(
             dataframe["tensor"].to_list(), batch_first=True, padding_value=0
         )
-        self.x_train = padded.int()
-        self.t_train = torch.tensor(dataframe["delta_t"].values, dtype=torch.int)
+        self.t_train = torch.tensor(dataframe["delta_t"].values, dtype=torch.float)
         self.y_train = torch.tensor(dataframe["y"].values, dtype=torch.float)
         self.seq_len = torch.tensor(
             dataframe["tensor"].map(len).values, dtype=torch.long
         )
+        length = len(dataframe)
+        batch_num, remainder = divmod(length, max(1, batch_size))
+        self.batch_num = batch_num + 1 if remainder > 0 else batch_num
+        self.batches = [None] * self.batch_num
+        if batch_size > 0:
+            for i in range(self.batch_num):
+                start_index = i * batch_size
+                end_index = min((i + 1) * batch_size, length)
+                sequences = self.x_train[start_index:end_index]
+                seq_lens = self.seq_len[start_index:end_index]
+                max_seq_len = max(seq_lens)
+                sequences_truncated = sequences[:, :max_seq_len]
+                self.batches[i] = (
+                    sequences_truncated.transpose(0, 1).to(device),
+                    self.t_train[start_index:end_index].to(device),
+                    self.y_train[start_index:end_index].to(device),
+                    seq_lens.to(device),
+                )
 
     def __getitem__(self, idx):
-        return (
-            self.x_train[idx],
-            self.t_train[idx],
-            self.y_train[idx],
-            self.seq_len[idx],
-        )
+        return self.batches[idx]
 
     def __len__(self):
-        return len(self.y_train)
+        return self.batch_num
 
 
-class RevlogSampler(Sampler[List[int]]):
-    def __init__(self, data_source: RevlogDataset, batch_size: int):
-        self.data_source = data_source
-        self.batch_size = batch_size
-        lengths = np.array(data_source.seq_len)
-        indices = np.argsort(lengths)
-        full_batches, remainder = divmod(indices.size, self.batch_size)
-        if full_batches > 0:
-            if remainder == 0:
-                self.batch_indices = np.split(indices, full_batches)
-            else:
-                self.batch_indices = np.split(indices[:-remainder], full_batches)
-        else:
-            self.batch_indices = []
-        if remainder > 0:
-            self.batch_indices.append(indices[-remainder:])
-        self.batch_nums = len(self.batch_indices)
-        # seed = int(torch.empty((), dtype=torch.int64).random_().item())
-        seed = 2023
+class BatchLoader:
+    def __init__(self, dataset: BatchDataset, shuffle: bool = True, seed: int = 2023):
+        self.dataset = dataset
+        self.batch_nums = len(dataset.batches)
+        self.shuffle = shuffle
         self.generator = torch.Generator()
         self.generator.manual_seed(seed)
 
     def __iter__(self):
-        yield from (
-            self.batch_indices[idx]
-            for idx in torch.randperm(
-                self.batch_nums, generator=self.generator
-            ).tolist()
-        )
+        if self.shuffle:
+            yield from (
+                self.dataset[idx]
+                for idx in torch.randperm(
+                    self.batch_nums, generator=self.generator
+                ).tolist()
+            )
+        else:
+            yield from (self.dataset[idx] for idx in range(self.batch_nums))
 
     def __len__(self):
-        return len(self.data_source)
-
-
-def collate_fn(batch):
-    sequences, delta_ts, labels, seq_lens = zip(*batch)
-    sequences_packed = pack_padded_sequence(
-        torch.stack(sequences, dim=1),
-        lengths=torch.stack(seq_lens),
-        batch_first=False,
-        enforce_sorted=False,
-    )
-    sequences_padded, length = pad_packed_sequence(sequences_packed, batch_first=False)
-    sequences_padded = torch.as_tensor(sequences_padded)
-    seq_lens = torch.as_tensor(length)
-    delta_ts = torch.as_tensor(delta_ts)
-    labels = torch.as_tensor(labels)
-    return sequences_padded, delta_ts, labels, seq_lens
+        return self.batch_nums
 
 
 class Trainer:
     def __init__(
         self,
         train_set: pd.DataFrame,
-        test_set: pd.DataFrame,
+        test_set: Optional[pd.DataFrame],
         init_w: List[float],
         n_epoch: int = 1,
         lr: float = 1e-2,
         batch_size: int = 256,
+        max_seq_len: int = 64,
+        float_delta_t: bool = False,
     ) -> None:
-        self.model = FSRS(init_w)
+        self.model = FSRS(init_w, float_delta_t)
         self.optimizer = torch.optim.Adam(self.model.parameters(), lr=lr)
-        self.clipper = WeightClipper()
+        self.clipper = ParameterClipper()
         self.batch_size = batch_size
+        self.max_seq_len = max_seq_len
         self.build_dataset(train_set, test_set)
         self.n_epoch = n_epoch
-        self.batch_nums = self.next_train_data_loader.batch_sampler.batch_nums
+        self.batch_nums = self.train_data_loader.batch_nums
         self.scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
             self.optimizer, T_max=self.batch_nums * n_epoch
         )
         self.avg_train_losses = []
         self.avg_eval_losses = []
         self.loss_fn = nn.BCELoss(reduction="none")
+        self.float_delta_t = float_delta_t
 
-    def build_dataset(self, train_set: pd.DataFrame, test_set: pd.DataFrame):
-        pre_train_set = train_set[train_set["i"] == 2]
-        self.pre_train_set = RevlogDataset(pre_train_set)
-        sampler = RevlogSampler(self.pre_train_set, batch_size=self.batch_size)
-        self.pre_train_data_loader = DataLoader(
-            self.pre_train_set, batch_sampler=sampler, collate_fn=collate_fn
+    def build_dataset(self, train_set: pd.DataFrame, test_set: Optional[pd.DataFrame]):
+        self.train_set = BatchDataset(
+            train_set, batch_size=self.batch_size, max_seq_len=self.max_seq_len
         )
+        self.train_data_loader = BatchLoader(self.train_set)
 
-        next_train_set = train_set[train_set["i"] > 2]
-        self.next_train_set = RevlogDataset(next_train_set)
-        sampler = RevlogSampler(self.next_train_set, batch_size=self.batch_size)
-        self.next_train_data_loader = DataLoader(
-            self.next_train_set, batch_sampler=sampler, collate_fn=collate_fn
+        self.test_set = (
+            []
+            if test_set is None
+            else BatchDataset(
+                test_set, batch_size=self.batch_size, max_seq_len=self.max_seq_len
+            )
         )
-
-        self.train_set = RevlogDataset(train_set)
-        sampler = RevlogSampler(self.train_set, batch_size=self.batch_size)
-        self.train_data_loader = DataLoader(
-            self.train_set, batch_sampler=sampler, collate_fn=collate_fn
-        )
-
-        self.test_set = RevlogDataset(test_set)
-        sampler = RevlogSampler(self.test_set, batch_size=self.batch_size)
-        self.test_data_loader = DataLoader(
-            self.test_set, batch_sampler=sampler, collate_fn=collate_fn
-        )
-        tqdm.write("dataset built")
 
     def train(self, verbose: bool = True):
+        self.verbose = verbose
         best_loss = np.inf
-        epoch_len = len(self.next_train_data_loader)
-        pbar = tqdm(desc="train", colour="red", total=epoch_len * self.n_epoch)
+        epoch_len = len(self.train_set.y_train)
+        if verbose:
+            pbar = tqdm(desc="train", colour="red", total=epoch_len * self.n_epoch)
         print_len = max(self.batch_nums * self.n_epoch // 10, 1)
         for k in range(self.n_epoch):
             weighted_loss, w = self.eval()
@@ -292,7 +340,7 @@ class Trainer:
                 best_loss = weighted_loss
                 best_w = w
 
-            for i, batch in enumerate(self.next_train_data_loader):
+            for i, batch in enumerate(self.train_data_loader):
                 self.model.train()
                 self.optimizer.zero_grad()
                 sequences, delta_ts, labels, seq_lens = batch
@@ -305,13 +353,14 @@ class Trainer:
                 penalty[pls_flag] *= 10
                 loss = (self.loss_fn(retentions, labels) * penalty).sum()
                 loss.backward()
-                for param in self.model.parameters():
-                    param.grad[:4] = torch.zeros(4)
+                if self.float_delta_t:
+                    for param in self.model.parameters():
+                        param.grad[:4] = torch.zeros(4)
                 self.optimizer.step()
                 self.scheduler.step()
                 self.model.apply(self.clipper)
-                pbar.update(real_batch_size)
-
+                if verbose:
+                    pbar.update(real_batch_size)
                 if verbose and (k * self.batch_nums + i + 1) % print_len == 0:
                     tqdm.write(
                         f"iteration: {k * epoch_len + (i + 1) * self.batch_size}"
@@ -320,7 +369,8 @@ class Trainer:
                         tqdm.write(
                             f"{name}: {list(map(lambda x: round(float(x), 4),param))}"
                         )
-        pbar.close()
+        if verbose:
+            pbar.close()
 
         weighted_loss, w = self.eval()
         if weighted_loss < best_loss:
@@ -332,39 +382,28 @@ class Trainer:
     def eval(self):
         self.model.eval()
         with torch.no_grad():
-            sequences, delta_ts, labels, seq_lens = (
-                self.train_set.x_train,
-                self.train_set.t_train,
-                self.train_set.y_train,
-                self.train_set.seq_len,
-            )
-            sequences = sequences.transpose(0, 1)
-            real_batch_size = seq_lens.shape[0]
-            outputs, _ = self.model(sequences)
-            stabilities = outputs[seq_lens - 1, torch.arange(real_batch_size), 0]
-            retentions = power_forgetting_curve(delta_ts, stabilities)
-            penalty = torch.ones_like(retentions, requires_grad=False)
-            pls_flag = sequences[seq_lens-1, torch.arange(real_batch_size), 1] == 1
-            penalty[pls_flag] *= 10
-            tran_loss = (self.loss_fn(retentions, labels) * penalty).mean()
-            self.avg_train_losses.append(tran_loss)
-
-            sequences, delta_ts, labels, seq_lens = (
-                self.test_set.x_train,
-                self.test_set.t_train,
-                self.test_set.y_train,
-                self.test_set.seq_len,
-            )
-            sequences = sequences.transpose(0, 1)
-            real_batch_size = seq_lens.shape[0]
-            outputs, _ = self.model(sequences)
-            stabilities = outputs[seq_lens - 1, torch.arange(real_batch_size), 0]
-            retentions = power_forgetting_curve(delta_ts, stabilities)
-            penalty = torch.ones_like(retentions, requires_grad=False)
-            pls_flag = sequences[seq_lens-1, torch.arange(real_batch_size), 1] == 1
-            penalty[pls_flag] *= 10
-            test_loss = (self.loss_fn(retentions, labels) * penalty).mean()
-            self.avg_eval_losses.append(test_loss)
+            losses = []
+            for dataset in (self.train_set, self.test_set):
+                if len(dataset) == 0:
+                    losses.append(0)
+                    continue
+                sequences, delta_ts, labels, seq_lens = (
+                    dataset.x_train,
+                    dataset.t_train,
+                    dataset.y_train,
+                    dataset.seq_len,
+                )
+                real_batch_size = seq_lens.shape[0]
+                outputs, _ = self.model(sequences.transpose(0, 1))
+                stabilities = outputs[seq_lens - 1, torch.arange(real_batch_size), 0]
+                retentions = power_forgetting_curve(delta_ts, stabilities)
+                penalty = torch.ones_like(retentions, requires_grad=False)
+                pls_flag = sequences[seq_lens-1, torch.arange(real_batch_size), 1] == 1
+                penalty[pls_flag] *= 2
+                loss = (self.loss_fn(retentions, labels) * penalty).mean()
+                losses.append(loss)
+            self.avg_train_losses.append(losses[0])
+            self.avg_eval_losses.append(losses[1])
 
             w = list(
                 map(
@@ -374,7 +413,7 @@ class Trainer:
             )
 
             weighted_loss = (
-                tran_loss * len(self.train_set) + test_loss * len(self.test_set)
+                losses[0] * len(self.train_set) + losses[1] * len(self.test_set)
             ) / (len(self.train_set) + len(self.test_set))
 
             return weighted_loss, w
@@ -391,8 +430,8 @@ class Trainer:
 
 
 class Collection:
-    def __init__(self, w: List[float]) -> None:
-        self.model = FSRS(w)
+    def __init__(self, w: List[float], float_delta_t: bool = False) -> None:
+        self.model = FSRS(w, float_delta_t)
         self.model.eval()
 
     def predict(self, t_history: str, r_history: str):
@@ -404,7 +443,7 @@ class Collection:
             return output_t[-1][0]
 
     def batch_predict(self, dataset):
-        fast_dataset = RevlogDataset(dataset)
+        fast_dataset = BatchDataset(dataset, sort_by_length=False)
         with torch.no_grad():
             outputs, _ = self.model(fast_dataset.x_train.transpose(0, 1))
             stabilities, difficulties = outputs[
@@ -413,12 +452,67 @@ class Collection:
             return stabilities.tolist(), difficulties.tolist()
 
 
-"""Used to store all the results from FSRS related functions"""
+def remove_outliers(group: pd.DataFrame) -> pd.DataFrame:
+    # threshold = np.mean(group['delta_t']) * 1.5
+    # threshold = group['delta_t'].quantile(0.95)
+    # Q1 = group['delta_t'].quantile(0.25)
+    # Q3 = group['delta_t'].quantile(0.75)
+    # IQR = Q3 - Q1
+    # threshold = Q3 + 1.5 * IQR
+    # group = group[group['delta_t'] <= threshold]
+    grouped_group = (
+        group.groupby(by=["first_rating", "delta_t"], group_keys=False)
+        .agg({"y": ["mean", "count"]})
+        .reset_index()
+    )
+    sort_index = grouped_group.sort_values(
+        by=[("y", "count"), "delta_t"], ascending=[True, False]
+    ).index
+
+    total = sum(grouped_group[("y", "count")])
+    has_been_removed = 0
+    for i in sort_index:
+        count = grouped_group.loc[i, ("y", "count")]
+        delta_t = grouped_group.loc[i, "delta_t"].values[0]
+        if has_been_removed + count >= max(total * 0.05, 20):
+            if count < 6 or delta_t > (100 if group.name[0] != "4" else 365):
+                group.drop(group[group["delta_t"] == delta_t].index, inplace=True)
+                has_been_removed += count
+        else:
+            group.drop(group[group["delta_t"] == delta_t].index, inplace=True)
+            has_been_removed += count
+    return group
+
+
+def remove_non_continuous_rows(group):
+    discontinuity = group["i"].diff().fillna(1).ne(1)
+    if not discontinuity.any():
+        return group
+    else:
+        first_non_continuous_index = discontinuity.idxmax()
+        return group.loc[: first_non_continuous_index - 1]
+
+
+def fit_stability(delta_t, retention, size):
+    def loss(stability):
+        y_pred = power_forgetting_curve(delta_t, stability)
+        loss = sum(
+            -(retention * np.log(y_pred) + (1 - retention) * np.log(1 - y_pred)) * size
+        )
+        return loss
+
+    res = minimize(loss, x0=1, bounds=[(S_MIN, 36500)])
+    return res.x[0]
 
 
 class Optimizer:
-    def __init__(self) -> None:
+    float_delta_t: bool = False
+
+    def __init__(self, float_delta_t: bool = False) -> None:
         tqdm.pandas()
+        self.float_delta_t = float_delta_t
+        global S_MIN
+        S_MIN = 1e-6 if float_delta_t else 0.01
 
     def anki_extract(
         self,
@@ -456,9 +550,17 @@ class Optimizer:
             SELECT id
             FROM cards
             WHERE queue != 0
+            AND id <= {time.time() * 1000}
             {"AND queue != -1" if filter_out_suspended_cards else ""}
             {"AND flags NOT IN %s" % flags2str(filter_out_flags) if len(filter_out_flags) > 0 else ""}
         )
+        AND ease BETWEEN 1 AND 4
+        AND (
+            type != 3
+            OR factor != 0
+        )
+        AND id <= {time.time() * 1000}
+        ORDER BY cid, id
         """
         )
         revlog = res.fetchall()
@@ -476,16 +578,9 @@ class Optimizer:
             "review_duration",
             "review_state",
         ]
-        df = df[
-            (df["card_id"] <= time.time() * 1000)
-            & (df["review_time"] <= time.time() * 1000)
-        ].copy()
-        df_set_due_date = df[(df["review_state"] == 4) & (df["ivl"] > 0)]
-        df.drop(df_set_due_date.index, inplace=True)
-        df.sort_values(by=["card_id", "review_time"], inplace=True, ignore_index=True)
-
+        df["i"] = df.groupby("card_id").cumcount() + 1
         df["is_learn_start"] = (df["review_state"] == 0) & (
-            df["review_state"].shift() != 0
+            (df["review_state"].shift() != 0) | (df["i"] == 1)
         )
         df["sequence_group"] = df["is_learn_start"].cumsum()
         last_learn_start = (
@@ -496,12 +591,14 @@ class Optimizer:
         )
         df["mask"] = df["last_learn_start"] <= df["sequence_group"]
         df = df[df["mask"] == True].copy()
-        df = df[(df["review_state"] != 4)].copy()
-        df = df[(df["review_state"] != 3) | (df["factor"] != 0)].copy()
         df["review_state"] = df["review_state"] + 1
         df.loc[df["is_learn_start"], "review_state"] = New
+        df = df.groupby("card_id").filter(
+            lambda group: group["review_state"].iloc[0] == New
+        )
         df.drop(
             columns=[
+                "i",
                 "is_learn_start",
                 "sequence_group",
                 "last_learn_start",
@@ -516,6 +613,128 @@ class Optimizer:
         df.to_csv("revlog.csv", index=False)
         tqdm.write("revlog.csv saved.")
 
+    def extract_simulation_config(self, df):
+        def rating_counts(x):
+            tmp = {1: 0, 2: 0, 3: 0, 4: 0}
+            tmp.update(x.value_counts().to_dict())
+            first = x.iloc[0]
+            tmp[first] -= 1
+            return tmp
+
+        df1 = (
+            df[(df["review_duration"] > 0) & (df["review_duration"] < 1200000)]
+            .groupby(by=["card_id", "real_days"])
+            .agg(
+                {
+                    "review_state": "first",
+                    "review_rating": ["first", rating_counts],
+                    "review_duration": "sum",
+                }
+            )
+            .reset_index()
+        )
+        del df1["real_days"]
+        df1.columns = [
+            "card_id",
+            "first_review_state",
+            "first_review_rating",
+            "review_rating_counts",
+            "sum_review_duration",
+        ]
+        rating_counts_df = (
+            df1["review_rating_counts"].apply(pd.Series).fillna(0).astype(int)
+        )
+        df1 = pd.concat(
+            [df1.drop("review_rating_counts", axis=1), rating_counts_df], axis=1
+        )
+
+        cost_dict = defaultdict(
+            int,
+            (
+                df1.groupby(by=["first_review_state", "first_review_rating"])[
+                    "sum_review_duration"
+                ]
+                .median()
+                .to_dict()
+            ),
+        )
+        self.learn_costs = np.array([cost_dict[(1, i)] / 1000 for i in range(1, 5)])
+        self.review_costs = np.array([cost_dict[(2, i)] / 1000 for i in range(1, 5)])
+        button_usage_dict = defaultdict(
+            int,
+            (
+                df1.groupby(by=["first_review_state", "first_review_rating"])["card_id"]
+                .count()
+                .to_dict()
+            ),
+        )
+        self.learn_buttons = (
+            np.array([button_usage_dict[(1, i)] for i in range(1, 5)]) + 1
+        )
+        self.review_buttons = (
+            np.array([button_usage_dict[(2, i)] for i in range(1, 5)]) + 1
+        )
+        self.first_rating_prob = self.learn_buttons / self.learn_buttons.sum()
+        self.review_rating_prob = (
+            self.review_buttons[1:] / self.review_buttons[1:].sum()
+        )
+
+        df2 = (
+            df1.groupby(by=["first_review_state", "first_review_rating"])[[1, 2, 3, 4]]
+            .mean()
+            .round(2)
+        )
+        rating_offset_dict = defaultdict(
+            float, sum([df2[g] * (g - 3) for g in range(1, 5)]).to_dict()
+        )
+        session_len_dict = defaultdict(
+            float, sum([df2[g] for g in range(1, 5)]).to_dict()
+        )
+        self.first_rating_offset = np.array(
+            [rating_offset_dict[(1, i)] for i in range(1, 5)]
+        )
+        self.first_session_len = np.array(
+            [session_len_dict[(1, i)] for i in range(1, 5)]
+        )
+        self.forget_rating_offset = rating_offset_dict[(2, 1)]
+        self.forget_session_len = session_len_dict[(2, 1)]
+
+        weight = self.learn_buttons / (50 + self.learn_buttons)
+        self.learn_costs = self.learn_costs * weight + DEFAULT_LEARN_COSTS * (
+            1 - weight
+        )
+        self.first_rating_offset = (
+            self.first_rating_offset * weight
+            + DEFAULT_FIRST_RATING_OFFSETS * (1 - weight)
+        )
+        self.first_session_len = (
+            self.first_session_len * weight + DEFAULT_FIRST_SESSION_LENS * (1 - weight)
+        )
+
+        weight = self.review_buttons / (50 + self.review_buttons)
+        self.review_costs = self.review_costs * weight + DEFAULT_REVIEW_COSTS * (
+            1 - weight
+        )
+        self.forget_rating_offset = self.forget_rating_offset * weight[
+            0
+        ] + DEFAULT_FORGET_RATING_OFFSET * (1 - weight[0])
+        self.forget_session_len = self.forget_session_len * weight[
+            0
+        ] + DEFAULT_FORGET_SESSION_LEN * (1 - weight[0])
+
+        weight = sum(self.learn_buttons) / (50 + sum(self.learn_buttons))
+        self.first_rating_prob = (
+            self.first_rating_prob * weight + DEFAULT_FIRST_RATING_PROB * (1 - weight)
+        )
+
+        weight = sum(self.review_buttons[1:]) / (50 + sum(self.review_buttons[1:]))
+        self.review_rating_prob = (
+            self.review_rating_prob * weight + DEFAULT_REVIEW_RATING_PROB * (1 - weight)
+        )
+
+        self.first_rating_offset[-1] = 0
+        self.first_session_len[-1] = 0
+
     def create_time_series(
         self,
         timezone: str,
@@ -526,47 +745,6 @@ class Optimizer:
         """Step 2"""
         df = pd.read_csv("./revlog.csv")
         df.sort_values(by=["card_id", "review_time"], inplace=True, ignore_index=True)
-
-        new_card_revlog = df[
-            (df["review_state"] == New) & (df["review_rating"].isin([1, 2, 3, 4]))
-        ]
-        self.first_rating_prob = np.zeros(4)
-        self.first_rating_prob[
-            new_card_revlog["review_rating"].value_counts().index - 1
-        ] = (
-            new_card_revlog["review_rating"].value_counts()
-            / new_card_revlog["review_rating"].count()
-        )
-        recall_card_revlog = df[
-            (df["review_state"] == Review) & (df["review_rating"].isin([2, 3, 4]))
-        ]
-        self.review_rating_prob = np.zeros(3)
-        self.review_rating_prob[
-            recall_card_revlog["review_rating"].value_counts().index - 2
-        ] = (
-            recall_card_revlog["review_rating"].value_counts()
-            / recall_card_revlog["review_rating"].count()
-        )
-
-        df["review_state"] = df["review_state"].map(
-            lambda x: x if x != New else Learning
-        )
-
-        self.recall_costs = np.zeros(3)
-        recall_costs = recall_card_revlog.groupby(by="review_rating")[
-            "review_duration"
-        ].mean()
-        self.recall_costs[recall_costs.index - 2] = recall_costs / 1000
-
-        self.state_sequence = np.array(df["review_state"])
-        self.duration_sequence = np.array(df["review_duration"])
-        self.learn_cost = round(
-            df[df["review_state"] == Learning]["review_duration"].sum()
-            / len(df["card_id"].unique())
-            / 1000,
-            1,
-        )
-
         df["review_date"] = pd.to_datetime(df["review_time"] // 1000, unit="s")
         df["review_date"] = (
             df["review_date"].dt.tz_localize("UTC").dt.tz_convert(timezone)
@@ -578,131 +756,116 @@ class Optimizer:
                 "D", ambiguous="infer", nonexistent="shift_forward"
             )
         ).to_julian_date()
-        df.drop_duplicates(["card_id", "real_days"], keep="first", inplace=True)
-        df["delta_t"] = df.real_days.diff()
-        df["delta_t"].fillna(0, inplace=True)
-        df.dropna(inplace=True)
+        # df.drop_duplicates(["card_id", "real_days"], keep="first", inplace=True)
+        if self.float_delta_t:
+            df["delta_t"] = df["review_time"].diff().fillna(0) / 1000 / 86400
+        else:
+            df["delta_t"] = df.real_days.diff()
+        df.fillna({"delta_t": 0}, inplace=True)
         df["i"] = df.groupby("card_id").cumcount() + 1
-        df.loc[df["i"] == 1, "delta_t"] = 0
-        df = df.groupby("card_id").filter(
-            lambda group: group["review_state"].iloc[0] == Learning
-        )
+        df.loc[df["i"] == 1, "delta_t"] = -1
         if df.empty:
             raise ValueError("Training data is inadequate.")
-        df["prev_review_state"] = (
-            df.groupby("card_id")["review_state"].shift(1).fillna(Learning).astype(int)
-        )
-        df["helper"] = (
-            (df["review_state"] == Learning)
-            & (
-                (df["prev_review_state"] == Review)
-                | (df["prev_review_state"] == Relearning)
+
+        if (
+            "review_state" in df.columns
+            and "review_duration" in df.columns
+            and not (df["review_duration"] == 0).all()
+        ):
+            df["review_state"] = df["review_state"].map(
+                lambda x: x if x != New else Learning
             )
-            & (df["i"] > 1)
-        ).astype(int)
-        df["helper"] = df.groupby("card_id")["helper"].cumsum()
-        df = df[df["helper"] == 0]
-        del df["prev_review_state"]
-        del df["helper"]
+            self.extract_simulation_config(df)
+            df.drop(columns=["review_duration", "review_state"], inplace=True)
 
         def cum_concat(x):
             return list(accumulate(x))
 
-        t_history = df.groupby("card_id", group_keys=False)["delta_t"].apply(
-            lambda x: cum_concat([[int(i)] for i in x])
+        t_history_list = df.groupby("card_id", group_keys=False)["delta_t"].apply(
+            lambda x: cum_concat(
+                [[max(0, round(i, 6) if self.float_delta_t else int(i))] for i in x]
+            )
         )
         df["t_history"] = [
-            ",".join(map(str, item[:-1])) for sublist in t_history for item in sublist
+            ",".join(map(str, item[:-1]))
+            for sublist in t_history_list
+            for item in sublist
         ]
-        r_history = df.groupby("card_id", group_keys=False)["review_rating"].apply(
+        r_history_list = df.groupby("card_id", group_keys=False)["review_rating"].apply(
             lambda x: cum_concat([[i] for i in x])
         )
         df["r_history"] = [
-            ",".join(map(str, item[:-1])) for sublist in r_history for item in sublist
+            ",".join(map(str, item[:-1]))
+            for sublist in r_history_list
+            for item in sublist
         ]
+        last_rating = []
+        for t_sublist, r_sublist in zip(t_history_list, r_history_list):
+            for t_history, r_history in zip(t_sublist, r_sublist):
+                flag = True
+                for t, r in zip(reversed(t_history[:-1]), reversed(r_history[:-1])):
+                    if t > 0:
+                        last_rating.append(r)
+                        flag = False
+                        break
+                if flag:
+                    last_rating.append(r_history[0])
+        df["last_rating"] = last_rating
+
         df = df.groupby("card_id").filter(
             lambda group: group["review_time"].min()
             > time.mktime(datetime.strptime(revlog_start_date, "%Y-%m-%d").timetuple())
             * 1000
         )
         df = df[
-            (df["review_rating"] != 0) & (df["r_history"].str.contains("0") == 0)
+            (df["review_rating"] != 0)
+            & (df["r_history"].str.contains("0") == 0)
+            & (df["delta_t"] != 0)
         ].copy()
+        df["i"] = df.groupby("card_id").cumcount() + 1
+        df["first_rating"] = df["r_history"].map(lambda x: x[0] if len(x) > 0 else "")
         df["y"] = df["review_rating"].map(lambda x: {1: 0, 2: 1, 3: 1, 4: 1}[x])
 
-        def remove_outliers(group: pd.DataFrame) -> pd.DataFrame:
-            # threshold = np.mean(group['delta_t']) * 1.5
-            # threshold = group['delta_t'].quantile(0.95)
-            # Q1 = group['delta_t'].quantile(0.25)
-            # Q3 = group['delta_t'].quantile(0.75)
-            # IQR = Q3 - Q1
-            # threshold = Q3 + 1.5 * IQR
-            # group = group[group['delta_t'] <= threshold]
-            grouped_group = (
-                group.groupby(by=["r_history", "delta_t"], group_keys=False)
-                .agg({"y": ["mean", "count"]})
-                .reset_index()
+        if not self.float_delta_t:
+            df[df["i"] == 2] = (
+                df[df["i"] == 2]
+                .groupby(by=["first_rating"], as_index=False, group_keys=False)
+                .apply(remove_outliers)
             )
-            sort_index = grouped_group.sort_values(
-                by=[("y", "count"), "delta_t"], ascending=[True, False]
-            ).index
+            df.dropna(inplace=True)
 
-            total = sum(grouped_group[("y", "count")])
-            has_been_removed = 0
-            for i in sort_index:
-                count = grouped_group.loc[i, ("y", "count")]
-                if has_been_removed + count >= total * 0.05:
-                    break
-                has_been_removed += count
-            group = group[
-                group["delta_t"].isin(
-                    grouped_group[grouped_group[("y", "count")] >= count]["delta_t"]
-                )
-            ]
-            return group
-
-        df[df["i"] == 2] = (
-            df[df["i"] == 2]
-            .groupby(by=["r_history", "t_history"], as_index=False, group_keys=False)
-            .apply(remove_outliers)
-        )
-        df.dropna(inplace=True)
-
-        def remove_non_continuous_rows(group):
-            discontinuity = group["i"].diff().fillna(1).ne(1)
-            if not discontinuity.any():
-                return group
-            else:
-                first_non_continuous_index = discontinuity.idxmax()
-                return group.loc[: first_non_continuous_index - 1]
-
-        df = df.groupby("card_id", as_index=False, group_keys=False).progress_apply(
-            remove_non_continuous_rows
-        )
+            df = df.groupby("card_id", as_index=False, group_keys=False).progress_apply(
+                remove_non_continuous_rows
+            )
 
         df["review_time"] = df["review_time"].astype(int)
         df["review_rating"] = df["review_rating"].astype(int)
-        df["review_duration"] = df["review_duration"].astype(int)
-        df["review_state"] = df["review_state"].astype(int)
-        df["delta_t"] = df["delta_t"].astype(int)
+        df["delta_t"] = df["delta_t"].astype(float if self.float_delta_t else int)
         df["i"] = df["i"].astype(int)
         df["t_history"] = df["t_history"].astype(str)
         df["r_history"] = df["r_history"].astype(str)
+        df["last_rating"] = df["last_rating"].astype(int)
         df["y"] = df["y"].astype(int)
 
         df.to_csv("revlog_history.tsv", sep="\t", index=False)
         tqdm.write("Trainset saved.")
 
-        S0_dataset = df[df["i"] == 2]
         self.S0_dataset_group = (
-            S0_dataset.groupby(by=["r_history", "delta_t"], group_keys=False)
+            df[df["i"] == 2]
+            .groupby(by=["first_rating", "delta_t"], group_keys=False)
             .agg({"y": ["mean", "count"]})
             .reset_index()
         )
         self.S0_dataset_group.to_csv("stability_for_pretrain.tsv", sep="\t", index=None)
+        del df["first_rating"]
 
         if not analysis:
             return
+
+        df["r_history"] = df.apply(
+            lambda row: wrap_short_term_ratings(row["r_history"], row["t_history"]),
+            axis=1,
+        )
 
         df["retention"] = df.groupby(by=["r_history", "delta_t"], group_keys=False)[
             "y"
@@ -716,12 +879,11 @@ class Optimizer:
             columns=[
                 "review_time",
                 "card_id",
-                "review_duration",
-                "review_state",
                 "review_date",
                 "real_days",
                 "review_rating",
                 "t_history",
+                "last_rating",
                 "y",
             ],
             inplace=True,
@@ -735,15 +897,12 @@ class Optimizer:
                 return pd.DataFrame()
             group["group_cnt"] = group_cnt
             if group["i"].values[0] > 1:
-                r_ivl_cnt = sum(
-                    group["delta_t"]
-                    * group["retention"].map(np.log)
-                    * pow(group["total_cnt"], 2)
+                group["stability"] = round(
+                    fit_stability(
+                        group["delta_t"], group["retention"], group["total_cnt"]
+                    ),
+                    1,
                 )
-                ivl_ivl_cnt = sum(
-                    group["delta_t"].map(lambda x: x**2) * pow(group["total_cnt"], 2)
-                )
-                group["stability"] = round(np.log(0.9) / (r_ivl_cnt / ivl_ivl_cnt), 1)
             else:
                 group["stability"] = 0.0
             group["avg_retention"] = round(
@@ -783,47 +942,36 @@ class Optimizer:
             df = df[(df["i"] >= 2) & (df["group_cnt"] >= 100)].copy()
             df["last_recall"] = df["r_history"].map(lambda x: x[-1])
             df = df[
-                df.groupby(["i", "r_history"], group_keys=False)["group_cnt"].transform(
-                    max
+                df.groupby(["r_history"], group_keys=False)["group_cnt"].transform(
+                    "max"
                 )
                 == df["group_cnt"]
             ]
             df.to_csv("./stability_for_analysis.tsv", sep="\t", index=None)
             tqdm.write("Analysis saved!")
             caption = "1:again, 2:hard, 3:good, 4:easy\n"
-            analysis = df[df["r_history"].str.contains(r"^[1-4][^124]*$", regex=True)][
-                [
-                    "r_history",
-                    "avg_interval",
-                    "avg_retention",
-                    "stability",
-                    "factor",
-                    "group_cnt",
+            df["first_rating"] = df["r_history"].map(lambda x: x[1])
+            analysis = (
+                df[df["r_history"].str.contains(r"^\([1-4][^124]*$", regex=True)][
+                    [
+                        "first_rating",
+                        "i",
+                        "r_history",
+                        "avg_interval",
+                        "avg_retention",
+                        "stability",
+                        "factor",
+                        "group_cnt",
+                    ]
                 ]
-            ].to_string(index=False)
+                .sort_values(by=["first_rating", "i"])
+                .to_string(index=False)
+            )
             return caption + analysis
 
     def define_model(self):
         """Step 3"""
-        self.init_w = [
-            0.4,
-            0.9,
-            2.3,
-            10.9,
-            4.93,
-            0.94,
-            0.86,
-            0.01,
-            1.49,
-            0.14,
-            0.94,
-            2.18,
-            0.05,
-            0.34,
-            1.26,
-            0.29,
-            2.61,
-        ]
+        self.init_w = DEFAULT_PARAMETER.copy()
         """
         For details about the parameters, please see: 
         https://github.com/open-spaced-repetition/fsrs4anki/wiki/The-Algorithm
@@ -840,9 +988,7 @@ class Optimizer:
         else:
             self.dataset = dataset
         self.dataset = self.dataset[
-            (self.dataset["i"] > 1)
-            & (self.dataset["delta_t"] > 0)
-            & (self.dataset["t_history"].str.count(",0") == 0)
+            (self.dataset["i"] > 1) & (self.dataset["delta_t"] > 0)
         ]
         if self.dataset.empty:
             raise ValueError("Training data is inadequate.")
@@ -850,23 +996,26 @@ class Optimizer:
         rating_count = {}
         average_recall = self.dataset["y"].mean()
         plots = []
-        r_s0_default = {"1": 0.4, "2": 0.9, "3": 2.3, "4": 10.9}
+        r_s0_default = {str(i): DEFAULT_PARAMETER[i - 1] for i in range(1, 5)}
 
         for first_rating in ("1", "2", "3", "4"):
             group = self.S0_dataset_group[
-                self.S0_dataset_group["r_history"] == first_rating
+                self.S0_dataset_group["first_rating"] == first_rating
             ]
             if group.empty:
-                tqdm.write(
-                    f"Not enough data for first rating {first_rating}. Expected at least 1, got 0."
-                )
+                if verbose:
+                    tqdm.write(
+                        f"Not enough data for first rating {first_rating}. Expected at least 1, got 0."
+                    )
                 continue
             delta_t = group["delta_t"]
-            recall = (group["y"]["mean"] * group["y"]["count"] + average_recall * 1) / (
-                group["y"]["count"] + 1
+            recall = (
+                (group["y"]["mean"] * group["y"]["count"] + average_recall * 1)
+                / (group["y"]["count"] + 1)
+                if not self.float_delta_t
+                else group["y"]["mean"]
             )
             count = group["y"]["count"]
-            total_count = sum(count)
 
             init_s0 = r_s0_default[first_rating]
 
@@ -875,25 +1024,22 @@ class Optimizer:
                 logloss = sum(
                     -(recall * np.log(y_pred) + (1 - recall) * np.log(1 - y_pred))
                     * count
-                    / total_count
                 )
-                l1 = np.abs(stability - init_s0) / total_count / 16
+                l1 = np.abs(stability - init_s0) / 16 if not self.float_delta_t else 0
                 return logloss + l1
 
             res = minimize(
                 loss,
                 x0=init_s0,
-                bounds=((0.1, 365),),
-                options={"maxiter": int(np.sqrt(total_count))},
+                bounds=((S_MIN, 100),),
+                options={"maxiter": int(sum(count))},
             )
             params = res.x
             stability = params[0]
             rating_stability[int(first_rating)] = stability
-            rating_count[int(first_rating)] = total_count
+            rating_count[int(first_rating)] = sum(count)
             predict_recall = power_forgetting_curve(delta_t, *params)
-            rmse = mean_squared_error(
-                recall, predict_recall, sample_weight=count, squared=False
-            )
+            rmse = root_mean_squared_error(recall, predict_recall, sample_weight=count)
 
             if verbose:
                 fig = plt.figure()
@@ -904,7 +1050,7 @@ class Optimizer:
                     power_forgetting_curve(np.linspace(0, 30), *params),
                     label=f"Weighted fit (RMSE: {rmse:.4f})",
                 )
-                count_percent = np.array([x / total_count for x in count])
+                count_percent = np.array([x / sum(count) for x in count])
                 ax.scatter(delta_t, recall, s=count_percent * 1000, alpha=0.5)
                 ax.legend(loc="upper right", fancybox=True, shadow=False)
                 ax.grid(True)
@@ -912,7 +1058,7 @@ class Optimizer:
                 ax.set_xlabel("Interval")
                 ax.set_ylabel("Recall")
                 ax.set_title(
-                    f"Forgetting curve for first rating {first_rating} (n={total_count}, s={stability:.2f})"
+                    f"Forgetting curve for first rating {first_rating} (n={sum(count)}, s={stability:.2f})"
                 )
                 plots.append(fig)
                 tqdm.write(str(rating_stability))
@@ -926,6 +1072,8 @@ class Optimizer:
             (1, 4),
         ):
             if small_rating in rating_stability and big_rating in rating_stability:
+                # if rating_count[small_rating] > 300 and rating_count[big_rating] > 300:
+                #     continue
                 if rating_stability[small_rating] > rating_stability[big_rating]:
                     if rating_count[small_rating] > rating_count[big_rating]:
                         rating_stability[big_rating] = rating_stability[small_rating]
@@ -1012,16 +1160,15 @@ class Optimizer:
                 item[1] for item in sorted(rating_stability.items(), key=lambda x: x[0])
             ]
 
-        self.init_w[0:4] = init_s0
-
-        tqdm.write(f"Pretrain finished!")
+        self.init_w[0:4] = list(map(lambda x: max(min(100, x), S_MIN), init_s0))
+        if verbose:
+            tqdm.write(f"Pretrain finished!")
         return plots
 
     def train(
         self,
         lr: float = 4e-2,
         n_epoch: int = 5,
-        n_splits: int = 5,
         batch_size: int = 512,
         verbose: bool = True,
         split_by_time: bool = False,
@@ -1032,65 +1179,47 @@ class Optimizer:
             axis=1,
         )
         self.dataset["group"] = self.dataset["r_history"] + self.dataset["t_history"]
-        tqdm.write("Tensorized!")
+        if verbose:
+            tqdm.write("Tensorized!")
 
         w = []
         plots = []
-        if n_splits > 1:
-            if split_by_time:
-                tscv = TimeSeriesSplit(n_splits=n_splits)
-                self.dataset.sort_values(by=["review_time"], inplace=True)
-                for i, (train_index, test_index) in enumerate(tscv.split(self.dataset)):
+        if split_by_time:
+            tscv = TimeSeriesSplit(n_splits=5)
+            self.dataset.sort_values(by=["review_time"], inplace=True)
+            for i, (train_index, test_index) in enumerate(tscv.split(self.dataset)):
+                if verbose:
                     tqdm.write(f"TRAIN: {len(train_index)} TEST: {len(test_index)}")
-                    train_set = self.dataset.iloc[train_index].copy()
-                    test_set = self.dataset.iloc[test_index].copy()
-                    trainer = Trainer(
-                        train_set,
-                        test_set,
-                        self.init_w,
-                        n_epoch=n_epoch,
-                        lr=lr,
-                        batch_size=batch_size,
-                    )
-                    w.append(trainer.train(verbose=verbose))
-                    self.w = w[-1]
-                    self.evaluate()
-                    metrics, figures = self.calibration_graph(
-                        self.dataset.iloc[test_index]
-                    )
+                train_set = self.dataset.iloc[train_index].copy()
+                test_set = self.dataset.iloc[test_index].copy()
+                trainer = Trainer(
+                    train_set,
+                    test_set,
+                    self.init_w,
+                    n_epoch=n_epoch,
+                    lr=lr,
+                    batch_size=batch_size,
+                    float_delta_t=self.float_delta_t,
+                )
+                w.append(trainer.train(verbose=verbose))
+                self.w = w[-1]
+                self.evaluate()
+                metrics, figures = self.calibration_graph(self.dataset.iloc[test_index])
+                for j, f in enumerate(figures):
+                    f.savefig(f"graph_{j}_test_{i}.png")
+                    plt.close(f)
+                if verbose:
                     print(metrics)
-                    for j, f in enumerate(figures):
-                        f.savefig(f"graph_{j}_test_{i}.png")
-                        plt.close(f)
-                    if verbose:
-                        plots.append(trainer.plot())
-            else:
-                sgkf = StratifiedGroupKFold(n_splits=n_splits)
-                for train_index, test_index in sgkf.split(
-                    self.dataset, self.dataset["i"], self.dataset["group"]
-                ):
-                    tqdm.write(f"TRAIN: {len(train_index)} TEST: {len(test_index)}")
-                    train_set = self.dataset.iloc[train_index].copy()
-                    test_set = self.dataset.iloc[test_index].copy()
-                    trainer = Trainer(
-                        train_set,
-                        test_set,
-                        self.init_w,
-                        n_epoch=n_epoch,
-                        lr=lr,
-                        batch_size=batch_size,
-                    )
-                    w.append(trainer.train(verbose=verbose))
-                    if verbose:
-                        plots.append(trainer.plot())
+                    plots.append(trainer.plot())
         else:
             trainer = Trainer(
                 self.dataset,
-                self.dataset,
+                None,
                 self.init_w,
                 n_epoch=n_epoch,
                 lr=lr,
                 batch_size=batch_size,
+                float_delta_t=self.float_delta_t,
             )
             w.append(trainer.train(verbose=verbose))
             if verbose:
@@ -1100,42 +1229,72 @@ class Optimizer:
         avg_w = np.round(np.mean(w, axis=0), 4)
         self.w = avg_w.tolist()
 
-        tqdm.write("\nTraining finished!")
+        if verbose:
+            tqdm.write("\nTraining finished!")
         return plots
 
-    def preview(self, requestRetention: float, verbose=False):
-        my_collection = Collection(self.w)
+    def preview(self, requestRetention: float, verbose=False, n_steps=3):
+        my_collection = Collection(self.w, self.float_delta_t)
         preview_text = "1:again, 2:hard, 3:good, 4:easy\n"
+        n_learning_steps = n_steps if not self.float_delta_t else 0
         for first_rating in (1, 2, 3, 4):
             preview_text += f"\nfirst rating: {first_rating}\n"
             t_history = "0"
             d_history = "0"
+            s_history = "0"
             r_history = f"{first_rating}"  # the first rating of the new card
+            if first_rating in (1, 2):
+                left = n_learning_steps
+            elif first_rating == 3:
+                left = n_learning_steps - 1
+            else:
+                left = 1
             # print("stability, difficulty, lapses")
             for i in range(10):
                 states = my_collection.predict(t_history, r_history)
+                stability = round(float(states[0]), 1)
+                difficulty = round(float(states[1]), 1)
                 if verbose:
                     print(
                         "{0:9.2f} {1:11.2f} {2:7.0f}".format(
                             *list(map(lambda x: round(float(x), 4), states))
                         )
                     )
-                next_t = next_interval(states[0], requestRetention)
-                difficulty = round(float(states[1]), 1)
-                t_history += f",{int(next_t)}"
+                left -= 1
+                next_t = (
+                    next_interval(
+                        states[0].detach().numpy(), requestRetention, self.float_delta_t
+                    )
+                    if left <= 0
+                    else 0
+                )
+                t_history += f",{next_t}"
                 d_history += f",{difficulty}"
+                s_history += f",{stability}"
                 r_history += f",3"
+            r_history = wrap_short_term_ratings(r_history, t_history)
             preview_text += f"rating history: {r_history}\n"
             preview_text += (
                 "interval history: "
                 + ",".join(
                     [
-                        f"{ivl}d"
-                        if ivl < 30
-                        else f"{ivl / 30:.1f}m"
-                        if ivl < 365
-                        else f"{ivl / 365:.1f}y"
-                        for ivl in map(int, t_history.split(","))
+                        (
+                            f"{ivl:.4f}d"
+                            if ivl < 1 and ivl > 0
+                            else (
+                                f"{ivl:.1f}d"
+                                if ivl < 30
+                                else (
+                                    f"{ivl / 30:.1f}m"
+                                    if ivl < 365
+                                    else f"{ivl / 365:.1f}y"
+                                )
+                            )
+                        )
+                        for ivl in map(
+                            int if not self.float_delta_t else float,
+                            t_history.split(","),
+                        )
                     ]
                 )
                 + "\n"
@@ -1145,9 +1304,11 @@ class Optimizer:
                 + ",".join(
                     ["0.0"]
                     + [
-                        f"{float(ivl) / float(pre_ivl):.2f}"
-                        if pre_ivl != "0"
-                        else "0.0"
+                        (
+                            f"{float(ivl) / float(pre_ivl):.2f}"
+                            if pre_ivl != "0"
+                            else "0.0"
+                        )
                         for ivl, pre_ivl in zip(
                             t_history.split(",")[1:],
                             t_history.split(",")[:-1],
@@ -1157,18 +1318,21 @@ class Optimizer:
                 + "\n"
             )
             preview_text += f"difficulty history: {d_history}\n"
+            preview_text += f"stability history: {s_history}\n"
         return preview_text
 
     def preview_sequence(self, test_rating_sequence: str, requestRetention: float):
-        my_collection = Collection(self.w)
+        my_collection = Collection(self.w, self.float_delta_t)
 
         t_history = "0"
         d_history = "0"
         for i in range(len(test_rating_sequence.split(","))):
             r_history = test_rating_sequence[: 2 * i + 1]
             states = my_collection.predict(t_history, r_history)
-            next_t = next_interval(states[0], requestRetention)
-            t_history += f",{int(next_t)}"
+            next_t = next_interval(
+                states[0].detach().numpy(), requestRetention, self.float_delta_t
+            )
+            t_history += f",{next_t}"
             difficulty = round(float(states[1]), 1)
             d_history += f",{difficulty}"
         preview_text = f"rating history: {test_rating_sequence}\n"
@@ -1176,12 +1340,21 @@ class Optimizer:
             "interval history: "
             + ",".join(
                 [
-                    f"{ivl}d"
-                    if ivl < 30
-                    else f"{ivl / 30:.1f}m"
-                    if ivl < 365
-                    else f"{ivl / 365:.1f}y"
-                    for ivl in map(int, t_history.split(","))
+                    (
+                        f"{ivl:.4f}d"
+                        if ivl < 1 and ivl > 0
+                        else (
+                            f"{ivl:.1f}d"
+                            if ivl < 30
+                            else (
+                                f"{ivl / 30:.1f}m" if ivl < 365 else f"{ivl / 365:.1f}y"
+                            )
+                        )
+                    )
+                    for ivl in map(
+                        int if not self.float_delta_t else float,
+                        t_history.split(","),
+                    )
                 ]
             )
             + "\n"
@@ -1204,7 +1377,7 @@ class Optimizer:
         return preview_text
 
     def predict_memory_states(self):
-        my_collection = Collection(self.w)
+        my_collection = Collection(self.w, self.float_delta_t)
 
         stabilities, difficulties = my_collection.batch_predict(self.dataset)
         stabilities = map(lambda x: round(x, 2), stabilities)
@@ -1218,7 +1391,6 @@ class Optimizer:
         prediction.sort_values(by=["r_history"], inplace=True)
         prediction.rename(columns={"review_time": "count"}, inplace=True)
         prediction.to_csv("./prediction.tsv", sep="\t", index=None)
-        tqdm.write("prediction.tsv saved.")
         prediction["difficulty"] = prediction["difficulty"].map(lambda x: int(round(x)))
         self.difficulty_distribution = (
             prediction.groupby(by=["difficulty"])["count"].sum()
@@ -1227,96 +1399,65 @@ class Optimizer:
         self.difficulty_distribution_padding = np.zeros(10)
         for i in range(10):
             if i + 1 in self.difficulty_distribution.index:
-                self.difficulty_distribution_padding[
-                    i
-                ] = self.difficulty_distribution.loc[i + 1]
+                self.difficulty_distribution_padding[i] = (
+                    self.difficulty_distribution.loc[i + 1]
+                )
         return self.difficulty_distribution
 
     def find_optimal_retention(
         self,
-        deck_size=10000,
         learn_span=365,
-        max_cost_perday=1800,
         max_ivl=36500,
         loss_aversion=2.5,
+        verbose=True,
     ):
         """should not be called before predict_memory_states"""
-        recall_cost = 8
-        forget_cost = 25
+        if verbose:
+            print("Learn costs: ", self.learn_costs)
+            print("Review costs: ", self.review_costs)
+            print("Learn buttons: ", self.learn_buttons)
+            print("Review buttons: ", self.review_buttons)
+            print("First rating prob: ", self.first_rating_prob)
+            print("Review rating prob: ", self.review_rating_prob)
+            print("First rating offset: ", self.first_rating_offset)
+            print("First session len: ", self.first_session_len)
+            print("Forget rating offset: ", self.forget_rating_offset)
+            print("Forget session len: ", self.forget_session_len)
 
-        state_block = dict()
-        state_count = dict()
-        state_duration = dict()
-        last_state = self.state_sequence[0]
-        state_block[last_state] = 1
-        state_count[last_state] = 1
-        state_duration[last_state] = self.duration_sequence[0]
-        for i, state in enumerate(self.state_sequence[1:]):
-            state_count[state] = state_count.setdefault(state, 0) + 1
-            state_duration[state] = (
-                state_duration.setdefault(state, 0) + self.duration_sequence[i]
-            )
-            if state != last_state:
-                state_block[state] = state_block.setdefault(state, 0) + 1
-            last_state = state
-
-        recall_cost = round(state_duration[Review] / state_count[Review] / 1000, 1)
-
-        if Relearning in state_count and Relearning in state_block:
-            forget_cost = round(
-                state_duration[Relearning] / state_block[Relearning] / 1000
-                + recall_cost,
-                1,
-            )
-
-        tqdm.write(f"average time for failed reviews: {forget_cost}s")
-        tqdm.write(f"average time for recalled reviews: {recall_cost}s")
-        tqdm.write(
-            "average time for `hard`, `good` and `easy` reviews: %.1fs, %.1fs, %.1fs"
-            % tuple(self.recall_costs)
-        )
-        tqdm.write(f"average time for learning a new card: {self.learn_cost}s")
-        tqdm.write(
-            "Ratio of `hard`, `good` and `easy` ratings for recalled reviews: %.2f, %.2f, %.2f"
-            % tuple(self.review_rating_prob)
-        )
-        tqdm.write(
-            "Ratio of `again`, `hard`, `good` and `easy` ratings for new cards: %.2f, %.2f, %.2f, %.2f"
-            % tuple(self.first_rating_prob)
-        )
-
-        forget_cost *= loss_aversion
-
-        self.optimal_retention = optimal_retention(
-            self.w,
-            deck_size=deck_size,
-            learn_span=learn_span,
-            max_cost_perday=max_cost_perday,
-            max_ivl=max_ivl,
-            recall_costs=self.recall_costs,
-            forget_cost=forget_cost,
-            learn_cost=self.learn_cost,
-            first_rating_prob=self.first_rating_prob,
-            review_rating_prob=self.review_rating_prob,
-        )
+        simulate_config = {
+            "w": self.w,
+            "deck_size": learn_span * 10,
+            "learn_span": learn_span,
+            "max_cost_perday": math.inf,
+            "learn_limit_perday": 10,
+            "review_limit_perday": math.inf,
+            "max_ivl": max_ivl,
+            "learn_costs": self.learn_costs,
+            "review_costs": self.review_costs,
+            "first_rating_prob": self.first_rating_prob,
+            "review_rating_prob": self.review_rating_prob,
+            "first_rating_offset": self.first_rating_offset,
+            "first_session_len": self.first_session_len,
+            "forget_rating_offset": self.forget_rating_offset,
+            "forget_session_len": self.forget_session_len,
+            "loss_aversion": loss_aversion,
+        }
+        self.optimal_retention = optimal_retention(**simulate_config)
 
         tqdm.write(
             f"\n-----suggested retention (experimental): {self.optimal_retention:.2f}-----"
         )
 
-        (_, review_cnt_per_day, learn_cnt_per_day, memorized_cnt_per_day) = simulate(
-            self.w,
-            deck_size=deck_size,
-            learn_span=learn_span,
-            max_cost_perday=max_cost_perday,
-            max_ivl=max_ivl,
-            request_retention=self.optimal_retention,
-            recall_costs=self.recall_costs,
-            forget_cost=forget_cost,
-            learn_cost=self.learn_cost,
-            first_rating_prob=self.first_rating_prob,
-            review_rating_prob=self.review_rating_prob,
-        )
+        if not verbose:
+            return ()
+
+        (
+            _,
+            review_cnt_per_day,
+            learn_cnt_per_day,
+            memorized_cnt_per_day,
+            cost_per_day,
+        ) = simulate(**simulate_config)
 
         def moving_average(data, window_size=365 // 20):
             weights = np.ones(window_size) / window_size
@@ -1355,10 +1496,20 @@ class Optimizer:
         ax.legend()
         ax.grid(True)
 
-        return (fig1, fig2, fig3, fig4)
+        fig5 = plt.figure()
+        ax = fig5.gca()
+        ax.plot(cost_per_day, label=f"R={self.optimal_retention*100:.0f}%")
+        ax.set_title("Cost per Day")
+        ax.legend()
+        ax.grid(True)
 
-    def evaluate(self):
-        my_collection = Collection(self.init_w)
+        simulate_config["loss_aversion"] = 1
+        fig6 = workload_graph(simulate_config)
+
+        return (fig1, fig2, fig3, fig4, fig5, fig6)
+
+    def evaluate(self, save_to_file=True):
+        my_collection = Collection(DEFAULT_PARAMETER, self.float_delta_t)
         stabilities, difficulties = my_collection.batch_predict(self.dataset)
         self.dataset["stability"] = stabilities
         self.dataset["difficulty"] = difficulties
@@ -1371,7 +1522,7 @@ class Optimizer:
         )
         loss_before = self.dataset["log_loss"].mean()
 
-        my_collection = Collection(self.w)
+        my_collection = Collection(self.w, self.float_delta_t)
         stabilities, difficulties = my_collection.batch_predict(self.dataset)
         self.dataset["stability"] = stabilities
         self.dataset["difficulty"] = difficulties
@@ -1383,44 +1534,51 @@ class Optimizer:
             axis=1,
         )
         loss_after = self.dataset["log_loss"].mean()
-
-        tmp = self.dataset.copy()
-        tmp["stability"] = tmp["stability"].map(lambda x: round(x, 2))
-        tmp["difficulty"] = tmp["difficulty"].map(lambda x: round(x, 2))
-        tmp["p"] = tmp["p"].map(lambda x: round(x, 2))
-        tmp["log_loss"] = tmp["log_loss"].map(lambda x: round(x, 2))
-        tmp.rename(columns={"p": "retrievability"}, inplace=True)
-        tmp[
-            [
-                "review_time",
-                "card_id",
-                "review_date",
-                "r_history",
-                "t_history",
-                "delta_t",
-                "review_rating",
-                "stability",
-                "difficulty",
-                "retrievability",
-                "log_loss",
-            ]
-        ].to_csv("./evaluation.tsv", sep="\t", index=False)
-        del tmp
+        if save_to_file:
+            tmp = self.dataset.copy()
+            tmp["stability"] = tmp["stability"].map(lambda x: round(x, 2))
+            tmp["difficulty"] = tmp["difficulty"].map(lambda x: round(x, 2))
+            tmp["p"] = tmp["p"].map(lambda x: round(x, 2))
+            tmp["log_loss"] = tmp["log_loss"].map(lambda x: round(x, 2))
+            tmp.rename(columns={"p": "retrievability"}, inplace=True)
+            tmp[
+                [
+                    "review_time",
+                    "card_id",
+                    "review_date",
+                    "r_history",
+                    "t_history",
+                    "delta_t",
+                    "review_rating",
+                    "stability",
+                    "difficulty",
+                    "retrievability",
+                    "log_loss",
+                ]
+            ].to_csv("./evaluation.tsv", sep="\t", index=False)
+            del tmp
         return loss_before, loss_after
 
-    def calibration_graph(self, dataset=None):
+    def calibration_graph(self, dataset=None, verbose=True):
         if dataset is None:
             dataset = self.dataset
         fig1 = plt.figure()
+        rmse = rmse_matrix(dataset)
+        if verbose:
+            tqdm.write(f"RMSE(bins): {rmse:.4f}")
         metrics = plot_brier(
             dataset["p"], dataset["y"], bins=20, ax=fig1.add_subplot(111)
         )
+        metrics["rmse"] = rmse
         fig2 = plt.figure(figsize=(16, 12))
-        for last_rating in ("1", "2", "3", "4"):
-            calibration_data = dataset[dataset["r_history"].str.endswith(last_rating)]
+        for last_rating in (1, 2, 3, 4):
+            calibration_data = dataset[dataset["last_rating"] == last_rating]
             if calibration_data.empty:
                 continue
-            tqdm.write(f"\nLast rating: {last_rating}")
+            rmse = rmse_matrix(calibration_data)
+            if verbose:
+                tqdm.write(f"\nLast rating: {last_rating}")
+                tqdm.write(f"RMSE(bins): {rmse:.4f}")
             plot_brier(
                 calibration_data["p"],
                 calibration_data["y"],
@@ -1429,23 +1587,38 @@ class Optimizer:
                 title=f"Last rating: {last_rating}",
             )
 
-        fig3 = self.calibration_helper(
+        fig3 = plt.figure()
+        self.calibration_helper(
             dataset[["stability", "p", "y"]].copy(),
             "stability",
             lambda x: math.pow(1.2, math.floor(math.log(x, 1.2))),
             True,
+            fig3.add_subplot(111),
         )
-        fig4 = self.calibration_helper(
+
+        fig4 = plt.figure(figsize=(16, 12))
+        for last_rating in (1, 2, 3, 4):
+            calibration_data = dataset[dataset["last_rating"] == last_rating]
+            if calibration_data.empty:
+                continue
+            self.calibration_helper(
+                calibration_data[["stability", "p", "y"]].copy(),
+                "stability",
+                lambda x: math.pow(1.2, math.floor(math.log(x, 1.2))),
+                True,
+                fig4.add_subplot(2, 2, int(last_rating)),
+            )
+        fig5 = plt.figure()
+        self.calibration_helper(
             dataset[["difficulty", "p", "y"]].copy(),
             "difficulty",
             lambda x: round(x),
             False,
+            fig5.add_subplot(111),
         )
-        return metrics, (fig1, fig2, fig3, fig4)
+        return metrics, (fig1, fig2, fig3, fig4, fig5)
 
-    def calibration_helper(self, calibration_data, key, bin_func, semilogx):
-        fig = plt.figure()
-        ax1 = fig.add_subplot(111)
+    def calibration_helper(self, calibration_data, key, bin_func, semilogx, ax1):
         ax2 = ax1.twinx()
         lns = []
 
@@ -1482,18 +1655,21 @@ class Optimizer:
         ax2.legend(lns, labs, loc="lower right")
         ax2.grid(linestyle="--")
         ax2.yaxis.set_major_formatter(ticker.FuncFormatter(to_percent))
-        ax2.xaxis.set_major_formatter(ticker.FormatStrFormatter("%d"))
-        return fig
+        return ax1
 
     def formula_analysis(self):
         analysis_df = self.dataset[self.dataset["i"] > 2].copy()
         analysis_df["tensor"] = analysis_df["tensor"].map(lambda x: x[:-1])
-        my_collection = Collection(self.w)
+        my_collection = Collection(self.w, self.float_delta_t)
         stabilities, difficulties = my_collection.batch_predict(analysis_df)
         analysis_df["last_s"] = stabilities
         analysis_df["last_d"] = difficulties
         analysis_df["last_delta_t"] = analysis_df["t_history"].map(
-            lambda x: int(x.split(",")[-1])
+            lambda x: (
+                int(x.split(",")[-1])
+                if not self.float_delta_t
+                else float(x.split(",")[-1])
+            )
         )
         analysis_df["last_r"] = power_forgetting_curve(
             analysis_df["delta_t"], analysis_df["last_s"]
@@ -1513,12 +1689,13 @@ class Optimizer:
         )
         figs = []
         for group_key in ("last_s_bin", "last_d_bin", "last_r_bin"):
-            for last_rating in ("1", "3"):
+            for last_rating in (1, 3):
                 analysis_group = (
-                    analysis_df[analysis_df["r_history"].str.endswith(last_rating)]
+                    analysis_df[analysis_df["last_rating"] == last_rating]
                     .groupby(
                         by=["last_s_bin", "last_d_bin", "last_r_bin", "delta_t"],
-                        group_keys=False,
+                        group_keys=True,
+                        as_index=False,
                     )
                     .agg(
                         {
@@ -1529,53 +1706,38 @@ class Optimizer:
                         }
                     )
                 )
-                analysis_group.reset_index(inplace=True)
+                analysis_group.columns = [
+                    "_".join(col_name).rstrip("_")
+                    for col_name in analysis_group.columns
+                ]
 
                 def cal_stability(tmp):
                     delta_t = tmp["delta_t"]
-                    recall = tmp["y"]["mean"]
-                    count = tmp["y"]["count"]
+                    recall = tmp["y_mean"]
+                    count = tmp["y_count"]
                     total_count = sum(count)
 
-                    def loss(stability):
-                        y_pred = power_forgetting_curve(delta_t, stability)
-                        logloss = sum(
-                            -(
-                                recall * np.log(y_pred)
-                                + (1 - recall) * np.log(1 - y_pred)
-                            )
-                            * count
-                            / total_count
-                        )
-                        return logloss
-
-                    res = minimize(loss, 1, bounds=((0.1, 3650),))
-                    if res.success:
-                        tmp["true_s"] = res.x[0]
-                    else:
-                        tmp["true_s"] = np.nan
+                    tmp["true_s"] = fit_stability(delta_t, recall, count)
                     tmp["predicted_s"] = np.average(
-                        tmp["stability"]["mean"], weights=count
+                        tmp["stability_mean"], weights=count
                     )
                     tmp["total_count"] = total_count
                     return tmp
 
-                analysis_group = (
-                    analysis_group.groupby(by=[group_key], group_keys=False)
-                    .apply(cal_stability)
-                    .reset_index(drop=True)
-                )
-                analysis_group.drop_duplicates(subset=[(group_key, "")], inplace=True)
+                analysis_group = analysis_group.groupby(
+                    by=[group_key], group_keys=False
+                ).apply(cal_stability)
+                analysis_group.dropna(inplace=True)
+                analysis_group.drop_duplicates(subset=[group_key], inplace=True)
                 analysis_group.sort_values(by=[group_key], inplace=True)
-                rmse = mean_squared_error(
+                mape = mean_absolute_percentage_error(
                     analysis_group["true_s"],
                     analysis_group["predicted_s"],
                     sample_weight=analysis_group["total_count"],
-                    squared=False,
                 )
                 fig = plt.figure()
                 ax1 = fig.add_subplot(111)
-                ax1.set_title(f"RMSE={rmse:.2f}, last rating={last_rating}")
+                ax1.set_title(f"MAPE={mape:.2f}, last rating={last_rating}")
                 ax1.scatter(
                     analysis_group[group_key],
                     analysis_group["true_s"],
@@ -1594,7 +1756,7 @@ class Optimizer:
                 ax1.set_xlabel(group_key)
                 if group_key == "last_s_bin":
                     ax1.set_ylim(
-                        max(analysis_group["predicted_s"].min(), 0.1),
+                        max(analysis_group["predicted_s"].min(), S_MIN),
                         analysis_group["predicted_s"].max() * 1.1,
                     )
                     ax1.set_xscale("log")
@@ -1637,82 +1799,26 @@ class Optimizer:
             np.log(0.9) * self.dataset["delta_t"] / self.dataset["sm2_ivl"]
         )
         self.dataset["log_loss"] = self.dataset.apply(
-            lambda row: -np.log(row["sm2_p"])
-            if row["y"] == 1
-            else -np.log(1 - row["sm2_p"]),
+            lambda row: (
+                -np.log(row["sm2_p"]) if row["y"] == 1 else -np.log(1 - row["sm2_p"])
+            ),
             axis=1,
         )
         tqdm.write(f"Loss of SM-2: {self.dataset['log_loss'].mean():.4f}")
-        cross_comparison = self.dataset[["sm2_p", "p", "y"]].copy()
+        dataset = self.dataset[["sm2_p", "p", "y"]].copy()
+        dataset.rename(columns={"sm2_p": "R (SM2)", "p": "R (FSRS)"}, inplace=True)
         fig1 = plt.figure()
         plot_brier(
-            cross_comparison["sm2_p"],
-            cross_comparison["y"],
+            dataset["R (SM2)"],
+            dataset["y"],
             bins=20,
             ax=fig1.add_subplot(111),
         )
+        universal_metrics, fig2 = cross_comparison(dataset, "SM2", "FSRS")
 
-        fig2 = plt.figure(figsize=(6, 6))
-        ax = fig2.gca()
+        tqdm.write(f"Universal Metric of FSRS: {universal_metrics[0]:.4f}")
+        tqdm.write(f"Universal Metric of SM2: {universal_metrics[1]:.4f}")
 
-        def get_bin(x, bins=20):
-            return (
-                np.log(
-                    np.minimum(np.floor(np.exp(np.log(bins + 1) * x) - 1), bins - 1) + 1
-                )
-                / np.log(bins)
-            ).round(3)
-
-        cross_comparison["SM2_B-W"] = cross_comparison["sm2_p"] - cross_comparison["y"]
-        cross_comparison["SM2_bin"] = cross_comparison["sm2_p"].map(get_bin)
-        cross_comparison["FSRS_B-W"] = cross_comparison["p"] - cross_comparison["y"]
-        cross_comparison["FSRS_bin"] = cross_comparison["p"].map(get_bin)
-
-        ax.axhline(y=0.0, color="black", linestyle="-")
-
-        cross_comparison_group = cross_comparison.groupby(by="SM2_bin").agg(
-            {"y": ["mean"], "FSRS_B-W": ["mean"], "p": ["mean", "count"]}
-        )
-        tqdm.write(
-            f"Universal Metric of FSRS: {mean_squared_error(cross_comparison_group['y', 'mean'], cross_comparison_group['p', 'mean'], sample_weight=cross_comparison_group['p', 'count'], squared=False):.4f}"
-        )
-        cross_comparison_group["p", "percent"] = (
-            cross_comparison_group["p", "count"]
-            / cross_comparison_group["p", "count"].sum()
-        )
-        ax.scatter(
-            cross_comparison_group.index,
-            cross_comparison_group["FSRS_B-W", "mean"],
-            s=cross_comparison_group["p", "percent"] * 1024,
-            alpha=0.5,
-        )
-        ax.plot(cross_comparison_group["FSRS_B-W", "mean"], label="FSRS by SM2")
-
-        cross_comparison_group = cross_comparison.groupby(by="FSRS_bin").agg(
-            {"y": ["mean"], "SM2_B-W": ["mean"], "sm2_p": ["mean", "count"]}
-        )
-        tqdm.write(
-            f"Universal Metric of SM2: {mean_squared_error(cross_comparison_group['y', 'mean'], cross_comparison_group['sm2_p', 'mean'], sample_weight=cross_comparison_group['sm2_p', 'count'], squared=False):.4f}"
-        )
-        cross_comparison_group["sm2_p", "percent"] = (
-            cross_comparison_group["sm2_p", "count"]
-            / cross_comparison_group["sm2_p", "count"].sum()
-        )
-        ax.scatter(
-            cross_comparison_group.index,
-            cross_comparison_group["SM2_B-W", "mean"],
-            s=cross_comparison_group["sm2_p", "percent"] * 1024,
-            alpha=0.5,
-        )
-        ax.plot(cross_comparison_group["SM2_B-W", "mean"], label="SM2 by FSRS")
-
-        ax.legend(loc="lower center")
-        ax.grid(linestyle="--")
-        ax.set_title("SM2 vs. FSRS")
-        ax.set_xlabel("Predicted R")
-        ax.set_ylabel("B-W Metric")
-        ax.set_xlim(0, 1)
-        ax.set_xticks(np.arange(0, 1.1, 0.1))
         return fig1, fig2
 
 
@@ -1750,6 +1856,14 @@ def load_brier(predictions, real, bins=20):
 
 
 def plot_brier(predictions, real, bins=20, ax=None, title=None):
+    y, p = zip(*sorted(zip(real, predictions), key=lambda x: x[1]))
+    observation = lowess(
+        y, p, it=0, delta=0.01 * (max(p) - min(p)), is_sorted=True, return_sorted=False
+    )
+    ici = np.mean(np.abs(observation - p))
+    e_50 = np.median(np.abs(observation - p))
+    e_90 = np.quantile(np.abs(observation - p), 0.9)
+    e_max = np.max(np.abs(observation - p))
     brier = load_brier(predictions, real, bins=bins)
     bin_prediction_means = brier["detail"]["bin_prediction_means"]
     bin_correct_means = brier["detail"]["bin_correct_means"]
@@ -1760,20 +1874,17 @@ def plot_brier(predictions, real, bins=20, ax=None, title=None):
         bin_prediction_means[mask],
         sample_weight=bin_counts[mask],
     )
-    rmse = mean_squared_error(
-        bin_correct_means[mask],
-        bin_prediction_means[mask],
-        sample_weight=bin_counts[mask],
-        squared=False,
-    )
     mae = mean_absolute_error(
         bin_correct_means[mask],
         bin_prediction_means[mask],
         sample_weight=bin_counts[mask],
     )
     tqdm.write(f"R-squared: {r2:.4f}")
-    tqdm.write(f"RMSE: {rmse:.4f}")
     tqdm.write(f"MAE: {mae:.4f}")
+    tqdm.write(f"ICI: {ici:.4f}")
+    tqdm.write(f"E50: {e_50:.4f}")
+    tqdm.write(f"E90: {e_90:.4f}")
+    tqdm.write(f"EMax: {e_max:.4f}")
     ax.set_xlim([0, 1])
     ax.set_ylim([0, 1])
     ax.grid(True)
@@ -1798,7 +1909,9 @@ def plot_brier(predictions, real, bins=20, ax=None, title=None):
         bin_correct_means[mask],
         label="Actual Calibration",
         color="#1f77b4",
+        marker="*",
     )
+    ax.plot(p, observation, label="Lowess Smoothing", color="red")
     ax.plot((0, 1), (0, 1), label="Perfect Calibration", color="#ff7f0e")
     bin_count = brier["detail"]["bin_count"]
     counts = np.array(bin_counts)
@@ -1823,7 +1936,7 @@ def plot_brier(predictions, real, bins=20, ax=None, title=None):
     ax2.legend(loc="lower center")
     if title:
         ax.set_title(title)
-    metrics = {"R-squared": r2, "RMSE": rmse, "MAE": mae}
+    metrics = {"R-squared": r2, "MAE": mae, "ICI": ici}
     return metrics
 
 
@@ -1850,3 +1963,130 @@ def sm2(history):
         ef = max(1.3, ef + (0.1 - (5 - rating) * (0.08 + (5 - rating) * 0.02)))
         ivl = max(1, round(ivl + 0.01))
     return ivl
+
+
+def cross_comparison(dataset, algoA, algoB):
+    if algoA != algoB:
+        cross_comparison_record = dataset[[f"R ({algoA})", f"R ({algoB})", "y"]].copy()
+        bin_algo = (
+            algoA,
+            algoB,
+        )
+        pair_algo = [(algoA, algoB), (algoB, algoA)]
+    else:
+        cross_comparison_record = dataset[[f"R ({algoA})", "y"]].copy()
+        bin_algo = (algoA,)
+        pair_algo = [(algoA, algoA)]
+
+    def get_bin(x, bins=20):
+        return (
+            np.log(np.minimum(np.floor(np.exp(np.log(bins + 1) * x) - 1), bins - 1) + 1)
+            / np.log(bins)
+        ).round(3)
+
+    for algo in bin_algo:
+        cross_comparison_record[f"{algo}_B-W"] = (
+            cross_comparison_record[f"R ({algo})"] - cross_comparison_record["y"]
+        )
+        cross_comparison_record[f"{algo}_bin"] = cross_comparison_record[
+            f"R ({algo})"
+        ].map(get_bin)
+
+    fig = plt.figure(figsize=(6, 6))
+    ax = fig.gca()
+    ax.axhline(y=0.0, color="black", linestyle="-")
+
+    universal_metric_list = []
+
+    for algoA, algoB in pair_algo:
+        cross_comparison_group = cross_comparison_record.groupby(by=f"{algoA}_bin").agg(
+            {"y": ["mean"], f"{algoB}_B-W": ["mean"], f"R ({algoB})": ["mean", "count"]}
+        )
+        universal_metric = root_mean_squared_error(
+            y_true=cross_comparison_group["y", "mean"],
+            y_pred=cross_comparison_group[f"R ({algoB})", "mean"],
+            sample_weight=cross_comparison_group[f"R ({algoB})", "count"],
+        )
+        cross_comparison_group[f"R ({algoB})", "percent"] = (
+            cross_comparison_group[f"R ({algoB})", "count"]
+            / cross_comparison_group[f"R ({algoB})", "count"].sum()
+        )
+        ax.scatter(
+            cross_comparison_group.index,
+            cross_comparison_group[f"{algoB}_B-W", "mean"],
+            s=cross_comparison_group[f"R ({algoB})", "percent"] * 1024,
+            alpha=0.5,
+        )
+        ax.plot(
+            cross_comparison_group[f"{algoB}_B-W", "mean"],
+            label=f"{algoB} by {algoA}, UM={universal_metric:.4f}",
+        )
+        universal_metric_list.append(universal_metric)
+
+    ax.legend(loc="lower center")
+    ax.grid(linestyle="--")
+    ax.set_title(f"{algoA} vs {algoB}")
+    ax.set_xlabel("Predicted R")
+    ax.set_ylabel("B-W Metric")
+    ax.set_xlim(0, 1)
+    ax.set_xticks(np.arange(0, 1.1, 0.1))
+    return universal_metric_list, fig
+
+
+def rmse_matrix(df):
+    tmp = df.copy()
+
+    def count_lapse(r_history, t_history):
+        lapse = 0
+        for r, t in zip(r_history.split(","), t_history.split(",")):
+            if t != "0" and r == "1":
+                lapse += 1
+        return lapse
+
+    tmp["lapse"] = tmp.apply(
+        lambda x: count_lapse(x["r_history"], x["t_history"]), axis=1
+    )
+    tmp["delta_t"] = tmp["delta_t"].map(
+        lambda x: round(2.48 * np.power(3.62, np.floor(np.log(x) / np.log(3.62))), 2)
+    )
+    tmp["i"] = tmp["i"].map(
+        lambda x: round(1.99 * np.power(1.89, np.floor(np.log(x) / np.log(1.89))), 0)
+    )
+    tmp["lapse"] = tmp["lapse"].map(
+        lambda x: (
+            round(1.65 * np.power(1.73, np.floor(np.log(x) / np.log(1.73))), 0)
+            if x != 0
+            else 0
+        )
+    )
+    tmp = (
+        tmp.groupby(["delta_t", "i", "lapse"])
+        .agg({"y": "mean", "p": "mean", "card_id": "count"})
+        .reset_index()
+    )
+    return root_mean_squared_error(tmp["y"], tmp["p"], sample_weight=tmp["card_id"])
+
+
+def wrap_short_term_ratings(r_history, t_history):
+    result = []
+    in_zero_sequence = False
+
+    for t, r in zip(t_history.split(","), r_history.split(",")):
+        if t in ("-1", "0"):
+            if not in_zero_sequence:
+                result.append("(")
+                in_zero_sequence = True
+            result.append(r)
+            result.append(",")
+        else:
+            if in_zero_sequence:
+                result[-1] = "),"
+                in_zero_sequence = False
+            result.append(r)
+            result.append(",")
+
+    if in_zero_sequence:
+        result[-1] = ")"
+    else:
+        result.pop()
+    return "".join(result)
