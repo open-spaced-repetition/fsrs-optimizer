@@ -350,7 +350,7 @@ class Trainer:
                 retentions = power_forgetting_curve(delta_ts, stabilities)
                 pls_flag = sequences[seq_lens-1, torch.arange(real_batch_size), 1] == 1
                 penalty = torch.ones_like(retentions, requires_grad=False)
-                penalty[pls_flag] *= 10
+                penalty[pls_flag] *= 2
                 loss = (self.loss_fn(retentions, labels) * penalty).sum()
                 loss.backward()
                 if self.float_delta_t:
@@ -398,7 +398,7 @@ class Trainer:
                 stabilities = outputs[seq_lens - 1, torch.arange(real_batch_size), 0]
                 retentions = power_forgetting_curve(delta_ts, stabilities)
                 penalty = torch.ones_like(retentions, requires_grad=False)
-                pls_flag = sequences[seq_lens-1, torch.arange(real_batch_size), 1] == 1
+                pls_flag = sequences[torch.arange(real_batch_size), seq_lens-1, 1] == 1
                 penalty[pls_flag] *= 2
                 loss = (self.loss_fn(retentions, labels) * penalty).mean()
                 losses.append(loss)
