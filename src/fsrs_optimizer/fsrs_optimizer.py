@@ -1451,6 +1451,7 @@ class Optimizer:
             learn_cnt_per_day,
             memorized_cnt_per_day,
             cost_per_day,
+            _,
         ) = simulate(**simulate_config)
 
         def moving_average(data, window_size=365 // 20):
@@ -1873,12 +1874,6 @@ def plot_brier(predictions, real, bins=20, ax=None, title=None):
         bin_prediction_means[mask],
         sample_weight=bin_counts[mask],
     )
-    tqdm.write(f"R-squared: {r2:.4f}")
-    tqdm.write(f"MAE: {mae:.4f}")
-    tqdm.write(f"ICI: {ici:.4f}")
-    tqdm.write(f"E50: {e_50:.4f}")
-    tqdm.write(f"E90: {e_90:.4f}")
-    tqdm.write(f"EMax: {e_max:.4f}")
     ax.set_xlim([0, 1])
     ax.set_ylim([0, 1])
     ax.grid(True)
@@ -1888,12 +1883,12 @@ def plot_brier(predictions, real, bins=20, ax=None, title=None):
             sm.add_constant(bin_prediction_means[mask]),
             weights=bin_counts[mask],
         ).fit()
-        tqdm.write(str(fit_wls.params))
-        y_regression = [fit_wls.params[0] + fit_wls.params[1] * x for x in [0, 1]]
+        params = fit_wls.params
+        y_regression = [params[0] + params[1] * x for x in [0, 1]]
         ax.plot(
             [0, 1],
             y_regression,
-            label="Weighted Least Squares Regression",
+            label=f"y = {params[0]:.3f} + {params[1]:.3f}x",
             color="green",
         )
     except:
@@ -1930,7 +1925,7 @@ def plot_brier(predictions, real, bins=20, ax=None, title=None):
     ax2.legend(loc="lower center")
     if title:
         ax.set_title(title)
-    metrics = {"R-squared": r2, "MAE": mae, "ICI": ici}
+    metrics = {"R-squared": r2, "MAE": mae, "ICI": ici, "E50": e_50, "E90": e_90, "EMax": e_max}
     return metrics
 
 

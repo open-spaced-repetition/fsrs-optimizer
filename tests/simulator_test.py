@@ -9,6 +9,7 @@ class Test_Simulator:
             learn_cnt_per_day,
             memorized_cnt_per_day,
             cost_per_day,
+            revlogs,
         ) = simulate(w=DEFAULT_PARAMETER, request_retention=0.9)
         assert memorized_cnt_per_day[-1] == 5875.025236206539
 
