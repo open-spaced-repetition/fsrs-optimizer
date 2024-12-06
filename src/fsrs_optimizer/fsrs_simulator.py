@@ -75,6 +75,7 @@ def simulate(
     )
     card_table[col["rating"]] = card_table[col["rating"]].astype(int)
 
+    revlogs = {}
     review_cnt_per_day = np.zeros(learn_span)
     learn_cnt_per_day = np.zeros(learn_span)
     memorized_cnt_per_day = np.zeros(learn_span)
@@ -231,6 +232,11 @@ def simulate(
             today + card_table[col["ivl"]][true_review | true_learn]
         )
 
+        revlogs[today] = {
+            "card_id": np.where(true_review | true_learn)[0],
+            "rating": card_table[col["rating"]][true_review | true_learn],
+        }
+
         review_cnt_per_day[today] = np.sum(true_review)
         learn_cnt_per_day[today] = np.sum(true_learn)
         memorized_cnt_per_day[today] = card_table[col["retrievability"]].sum()
@@ -241,6 +247,7 @@ def simulate(
         learn_cnt_per_day,
         memorized_cnt_per_day,
         cost_per_day,
+        revlogs,
     )
 
 
@@ -284,7 +291,7 @@ def sample(
     SAMPLE_SIZE = best_sample_size(learn_span)
 
     for i in range(SAMPLE_SIZE):
-        _, _, _, memorized_cnt_per_day, cost_per_day = simulate(
+        _, _, _, memorized_cnt_per_day, cost_per_day, _ = simulate(
             w,
             r,
             deck_size,
@@ -629,7 +636,7 @@ if __name__ == "__main__":
         "review_limit_perday": math.inf,
         "max_ivl": 36500,
     }
-    (_, review_cnt_per_day, learn_cnt_per_day, memorized_cnt_per_day, _) = simulate(
+    (_, review_cnt_per_day, learn_cnt_per_day, memorized_cnt_per_day, _, _) = simulate(
         w=default_params["w"],
         max_cost_perday=math.inf,
         learn_limit_perday=10,
