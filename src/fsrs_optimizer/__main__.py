@@ -146,6 +146,12 @@ def process(filepath, filter_out_flags: list[int]):
     print(f"Loss before training: {loss_before:.4f}")
     print(f"Loss after training: {loss_after:.4f}")
     metrics, figures = optimizer.calibration_graph()
+    for partition in metrics:
+        print(f"Last rating = {partition}")
+        for metric in metrics[partition]:
+            print(f"{metric}: {metrics[partition][metric]:.4f}")
+        print()
+
     metrics["Log loss"] = loss_after
     if save_graphs:
         for i, f in enumerate(figures):

@@ -23,6 +23,7 @@ from sklearn.metrics import (  # type: ignore
     mean_absolute_error,
     mean_absolute_percentage_error,
     r2_score,
+    roc_auc_score,
 )
 from scipy.optimize import minimize  # type: ignore
 from itertools import accumulate
@@ -1561,10 +1562,17 @@ class Optimizer:
         rmse = rmse_matrix(dataset)
         if verbose:
             tqdm.write(f"RMSE(bins): {rmse:.4f}")
+        metrics_all = {}
         metrics = plot_brier(
             dataset["p"], dataset["y"], bins=20, ax=fig1.add_subplot(111)
         )
-        metrics["rmse"] = rmse
+        metrics["RMSE(bins)"] = rmse
+        metrics["AUC"] = (
+            roc_auc_score(y_true=dataset["y"], y_score=dataset["p"])
+            if len(dataset["y"].unique()) == 2
+            else np.nan
+        )
+        metrics_all["all"] = metrics
         fig2 = plt.figure(figsize=(16, 12))
         for last_rating in (1, 2, 3, 4):
             calibration_data = dataset[dataset["last_rating"] == last_rating]
@@ -1574,13 +1582,23 @@ class Optimizer:
             if verbose:
                 tqdm.write(f"\nLast rating: {last_rating}")
                 tqdm.write(f"RMSE(bins): {rmse:.4f}")
-            plot_brier(
+            metrics = plot_brier(
                 calibration_data["p"],
                 calibration_data["y"],
                 bins=20,
                 ax=fig2.add_subplot(2, 2, int(last_rating)),
                 title=f"Last rating: {last_rating}",
             )
+            metrics["RMSE(bins)"] = rmse
+            metrics["AUC"] = (
+                roc_auc_score(
+                    y_true=calibration_data["y"],
+                    y_score=calibration_data["p"],
+                )
+                if len(calibration_data["y"].unique()) == 2
+                else np.nan
+            )
+            metrics_all[last_rating] = metrics
 
         fig3 = plt.figure()
         self.calibration_helper(
@@ -1611,7 +1629,7 @@ class Optimizer:
             False,
             fig5.add_subplot(111),
         )
-        return metrics, (fig1, fig2, fig3, fig4, fig5)
+        return metrics_all, (fig1, fig2, fig3, fig4, fig5)
 
     def calibration_helper(self, calibration_data, key, bin_func, semilogx, ax1):
         ax2 = ax1.twinx()
@@ -1925,7 +1943,14 @@ def plot_brier(predictions, real, bins=20, ax=None, title=None):
     ax2.legend(loc="lower center")
     if title:
         ax.set_title(title)
-    metrics = {"R-squared": r2, "MAE": mae, "ICI": ici, "E50": e_50, "E90": e_90, "EMax": e_max}
+    metrics = {
+        "R-squared": r2,
+        "MAE": mae,
+        "ICI": ici,
+        "E50": e_50,
+        "E90": e_90,
+        "EMax": e_max,
+    }
     return metrics
 
 
