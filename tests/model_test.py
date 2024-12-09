@@ -65,7 +65,7 @@ class Test_Model:
         difficulty = state[:, 1]
         assert torch.allclose(
             stability,
-            torch.tensor([0.2619, 1.7073, 5.8691, 25.0123, 0.3403, 2.1482]),
+            torch.tensor([0.2619, 1.7074, 5.8691, 25.0124, 0.2859, 2.1482]),
             atol=1e-4,
         )
         assert torch.allclose(

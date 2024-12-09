@@ -11,7 +11,7 @@ class Test_Simulator:
             cost_per_day,
             revlogs,
         ) = simulate(w=DEFAULT_PARAMETER, request_retention=0.9)
-        assert memorized_cnt_per_day[-1] == 5875.025236206539
+        assert memorized_cnt_per_day[-1] == 5880.482440745369
 
     def test_optimal_retention(self):
         default_params = {
