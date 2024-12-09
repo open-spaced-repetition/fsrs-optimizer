@@ -106,7 +106,7 @@ def simulate(
                 * np.power(d, -w[12])
                 * (np.power(s + 1, w[13]) - 1)
                 * np.exp((1 - r) * w[14]),
-                s,
+                s / np.exp(w[17] * w[18]),
             ),
         )
 
