@@ -299,7 +299,11 @@ class Trainer:
         batch_size: int = 256,
         max_seq_len: int = 64,
         float_delta_t: bool = False,
+        enable_short_term: bool = True,
     ) -> None:
+        if not enable_short_term:
+            init_w[17] = 0
+            init_w[18] = 0
         self.model = FSRS(init_w, float_delta_t)
         self.optimizer = torch.optim.Adam(self.model.parameters(), lr=lr)
         self.clipper = ParameterClipper()
@@ -315,6 +319,7 @@ class Trainer:
         self.avg_eval_losses = []
         self.loss_fn = nn.BCELoss(reduction="none")
         self.float_delta_t = float_delta_t
+        self.enable_short_term = enable_short_term
 
     def build_dataset(self, train_set: pd.DataFrame, test_set: Optional[pd.DataFrame]):
         self.train_set = BatchDataset(
@@ -353,9 +358,12 @@ class Trainer:
                 retentions = power_forgetting_curve(delta_ts, stabilities)
                 loss = self.loss_fn(retentions, labels).sum()
                 loss.backward()
-                if self.float_delta_t:
+                if self.float_delta_t or not self.enable_short_term:
                     for param in self.model.parameters():
                         param.grad[:4] = torch.zeros(4)
+                if not self.enable_short_term:
+                    for param in self.model.parameters():
+                        param.grad[17:19] = torch.zeros(2)
                 self.optimizer.step()
                 self.scheduler.step()
                 self.model.apply(self.clipper)
@@ -504,10 +512,14 @@ def fit_stability(delta_t, retention, size):
 
 class Optimizer:
     float_delta_t: bool = False
+    enable_short_term: bool = True
 
-    def __init__(self, float_delta_t: bool = False) -> None:
+    def __init__(
+        self, float_delta_t: bool = False, enable_short_term: bool = True
+    ) -> None:
         tqdm.pandas()
         self.float_delta_t = float_delta_t
+        self.enable_short_term = enable_short_term
         global S_MIN
         S_MIN = 1e-6 if float_delta_t else 0.01
 
@@ -1197,6 +1209,7 @@ class Optimizer:
                     lr=lr,
                     batch_size=batch_size,
                     float_delta_t=self.float_delta_t,
+                    enable_short_term=self.enable_short_term,
                 )
                 w.append(trainer.train(verbose=verbose))
                 self.w = w[-1]
@@ -1217,6 +1230,7 @@ class Optimizer:
                 lr=lr,
                 batch_size=batch_size,
                 float_delta_t=self.float_delta_t,
+                enable_short_term=self.enable_short_term,
             )
             w.append(trainer.train(verbose=verbose))
             if verbose:
