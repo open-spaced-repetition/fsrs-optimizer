@@ -239,6 +239,10 @@ class BatchDataset(Dataset):
         self.seq_len = torch.tensor(
             dataframe["tensor"].map(len).values, dtype=torch.long
         )
+        if "weights" in dataframe.columns:
+            self.weights = torch.tensor(dataframe["weights"].values, dtype=torch.float)
+        else:
+            self.weights = torch.ones(len(dataframe), dtype=torch.float)
         length = len(dataframe)
         batch_num, remainder = divmod(length, max(1, batch_size))
         self.batch_num = batch_num + 1 if remainder > 0 else batch_num
@@ -256,6 +260,7 @@ class BatchDataset(Dataset):
                     self.t_train[start_index:end_index].to(device),
                     self.y_train[start_index:end_index].to(device),
                     seq_lens.to(device),
+                    self.weights[start_index:end_index].to(device),
                 )
 
     def __getitem__(self, idx):
