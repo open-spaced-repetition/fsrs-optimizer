@@ -17,7 +17,7 @@ dependencies = [
     "statsmodels>=0.13.5",
     "scipy<1.14.1"
 ]
-requires-python = ">=3.9"
+requires-python = ">=3.9,<3.13"
 
 [project.urls]
 Homepage = "https://github.com/open-spaced-repetition/fsrs-optimizer"
