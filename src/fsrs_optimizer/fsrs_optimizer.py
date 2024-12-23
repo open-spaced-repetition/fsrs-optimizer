@@ -1230,7 +1230,8 @@ class Optimizer:
                     plots.append(trainer.plot())
         else:
             if recency_weight:
-                self.dataset["weights"] = np.linspace(0.5, 1.5, len(self.dataset))
+                x = np.linspace(0, 1, len(self.dataset))
+                self.dataset["weights"] = 0.25 + 0.75 * np.power(x, 3)
             trainer = Trainer(
                 self.dataset,
                 None,
@@ -1541,6 +1542,11 @@ class Optimizer:
             lambda row: -np.log(row["p"]) if row["y"] == 1 else -np.log(1 - row["p"]),
             axis=1,
         )
+        self.dataset["log_loss"] = (
+            self.dataset["log_loss"]
+            * self.dataset["weights"]
+            / self.dataset["weights"].mean()
+        )
         loss_before = self.dataset["log_loss"].mean()
 
         my_collection = Collection(self.w, self.float_delta_t)
@@ -1553,6 +1559,11 @@ class Optimizer:
         self.dataset["log_loss"] = self.dataset.apply(
             lambda row: -np.log(row["p"]) if row["y"] == 1 else -np.log(1 - row["p"]),
             axis=1,
+        )
+        self.dataset["log_loss"] = (
+            self.dataset["log_loss"]
+            * self.dataset["weights"]
+            / self.dataset["weights"].mean()
         )
         loss_after = self.dataset["log_loss"].mean()
         if save_to_file:
@@ -2100,10 +2111,10 @@ def rmse_matrix(df):
     )
     tmp = (
         tmp.groupby(["delta_t", "i", "lapse"])
-        .agg({"y": "mean", "p": "mean", "card_id": "count"})
+        .agg({"y": "mean", "p": "mean", "weights": "sum"})
         .reset_index()
     )
-    return root_mean_squared_error(tmp["y"], tmp["p"], sample_weight=tmp["card_id"])
+    return root_mean_squared_error(tmp["y"], tmp["p"], sample_weight=tmp["weights"])
 
 
 def wrap_short_term_ratings(r_history, t_history):
