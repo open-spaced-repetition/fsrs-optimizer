@@ -1230,7 +1230,8 @@ class Optimizer:
                     plots.append(trainer.plot())
         else:
             if recency_weight:
-                self.dataset["weights"] = np.linspace(0.5, 1.5, len(self.dataset))
+                x = np.linspace(0, 1, len(self.dataset))
+                self.dataset["weights"] = 0.25 + 0.75 * np.power(x, 3)
             trainer = Trainer(
                 self.dataset,
                 None,
