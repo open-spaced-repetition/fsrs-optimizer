@@ -2109,6 +2109,8 @@ def rmse_matrix(df):
             else 0
         )
     )
+    if "weights" not in tmp.columns:
+        tmp["weights"] = 1
     tmp = (
         tmp.groupby(["delta_t", "i", "lapse"])
         .agg({"y": "mean", "p": "mean", "weights": "sum"})
