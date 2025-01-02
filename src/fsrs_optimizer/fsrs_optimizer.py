@@ -301,6 +301,7 @@ class Trainer:
         init_w: List[float],
         n_epoch: int = 1,
         lr: float = 1e-2,
+        gamma: float = 0.01,
         batch_size: int = 256,
         max_seq_len: int = 64,
         float_delta_t: bool = False,
@@ -312,6 +313,7 @@ class Trainer:
         self.model = FSRS(init_w, float_delta_t)
         self.optimizer = torch.optim.Adam(self.model.parameters(), lr=lr)
         self.clipper = ParameterClipper()
+        self.gamma = gamma
         self.batch_size = batch_size
         self.max_seq_len = max_seq_len
         self.build_dataset(train_set, test_set)
@@ -364,7 +366,7 @@ class Trainer:
                 retentions = power_forgetting_curve(delta_ts, stabilities)
                 loss = (self.loss_fn(retentions, labels) * weights).sum()
                 penalty = torch.mean(torch.abs(self.model.w - default_params_tensor) / (torch.abs(self.model.w) + torch.abs(default_params_tensor)) * 2)
-                loss += penalty * 0.01
+                loss += penalty * self.gamma / epoch_len
                 loss.backward()
                 if self.float_delta_t or not self.enable_short_term:
                     for param in self.model.parameters():
