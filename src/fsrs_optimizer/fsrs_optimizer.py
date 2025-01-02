@@ -519,6 +519,7 @@ def fit_stability(delta_t, retention, size):
 class Optimizer:
     float_delta_t: bool = False
     enable_short_term: bool = True
+    S0_dataset_group = None
 
     def __init__(
         self, float_delta_t: bool = False, enable_short_term: bool = True
@@ -1007,6 +1008,16 @@ class Optimizer:
         ]
         if self.dataset.empty:
             raise ValueError("Training data is inadequate.")
+        if self.S0_dataset_group is None:
+            self.dataset["first_rating"] = self.dataset["r_history"].map(
+                lambda x: x[0] if len(x) > 0 else ""
+            )
+            self.S0_dataset_group = (
+                self.dataset[self.dataset["i"] == 2]
+                .groupby(by=["first_rating", "delta_t"], group_keys=False)
+                .agg({"y": ["mean", "count"]})
+                .reset_index()
+            )
         rating_stability = {}
         rating_count = {}
         average_recall = self.dataset["y"].mean()
