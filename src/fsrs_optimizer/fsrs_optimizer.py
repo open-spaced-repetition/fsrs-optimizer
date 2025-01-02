@@ -342,6 +342,7 @@ class Trainer:
 
     def train(self, verbose: bool = True):
         self.verbose = verbose
+        default_params_tensor = torch.tensor(DEFAULT_PARAMETER, dtype=torch.float)
         best_loss = np.inf
         epoch_len = len(self.train_set.y_train)
         if verbose:
@@ -362,6 +363,8 @@ class Trainer:
                 stabilities = outputs[seq_lens - 1, torch.arange(real_batch_size), 0]
                 retentions = power_forgetting_curve(delta_ts, stabilities)
                 loss = (self.loss_fn(retentions, labels) * weights).sum()
+                penalty = torch.mean(torch.abs(self.model.w - default_params_tensor) / (torch.abs(self.model.w) + torch.abs(default_params_tensor)) * 2)
+                loss += penalty * 0.01
                 loss.backward()
                 if self.float_delta_t or not self.enable_short_term:
                     for param in self.model.parameters():
