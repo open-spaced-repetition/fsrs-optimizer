@@ -1003,12 +1003,6 @@ class Optimizer:
             )
         else:
             self.dataset = dataset
-        self.dataset = self.dataset[
-            (self.dataset["i"] > 1) & (self.dataset["delta_t"] > 0)
-        ]
-        if self.dataset.empty:
-            raise ValueError("Training data is inadequate.")
-        if self.S0_dataset_group is None:
             self.dataset["first_rating"] = self.dataset["r_history"].map(
                 lambda x: x[0] if len(x) > 0 else ""
             )
@@ -1018,6 +1012,11 @@ class Optimizer:
                 .agg({"y": ["mean", "count"]})
                 .reset_index()
             )
+        self.dataset = self.dataset[
+            (self.dataset["i"] > 1) & (self.dataset["delta_t"] > 0)
+        ]
+        if self.dataset.empty:
+            raise ValueError("Training data is inadequate.")
         rating_stability = {}
         rating_count = {}
         average_recall = self.dataset["y"].mean()
