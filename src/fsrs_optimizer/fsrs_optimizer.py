@@ -1002,6 +1002,15 @@ class Optimizer:
             )
         else:
             self.dataset = dataset
+            self.dataset["first_rating"] = self.dataset["r_history"].map(
+                lambda x: x[0] if len(x) > 0 else ""
+            )
+            self.S0_dataset_group = (
+                self.dataset[self.dataset["i"] == 2]
+                .groupby(by=["first_rating", "delta_t"], group_keys=False)
+                .agg({"y": ["mean", "count"]})
+                .reset_index()
+            )
         self.dataset = self.dataset[
             (self.dataset["i"] > 1) & (self.dataset["delta_t"] > 0)
         ]
