@@ -519,7 +519,7 @@ def fit_stability(delta_t, retention, size):
 class Optimizer:
     float_delta_t: bool = False
     enable_short_term: bool = True
-    S0_dataset_group = None
+    
 
     def __init__(
         self, float_delta_t: bool = False, enable_short_term: bool = True
