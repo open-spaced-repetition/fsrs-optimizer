@@ -1104,8 +1104,8 @@ class Optimizer:
                     else:
                         rating_stability[small_rating] = rating_stability[big_rating]
 
-        w1 = 3 / 5
-        w2 = 3 / 5
+        w1 = 0.41
+        w2 = 0.54
 
         if len(rating_stability) == 0:
             raise Exception("Not enough data for pretraining!")
