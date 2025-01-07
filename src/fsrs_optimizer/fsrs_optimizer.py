@@ -327,7 +327,7 @@ class Trainer:
         init_w: List[float],
         n_epoch: int = 1,
         lr: float = 1e-2,
-        gamma: float = 0.01,
+        gamma: float = 1,
         batch_size: int = 256,
         max_seq_len: int = 64,
         float_delta_t: bool = False,
