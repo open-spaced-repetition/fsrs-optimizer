@@ -1551,6 +1551,8 @@ class Optimizer:
             lambda row: -np.log(row["p"]) if row["y"] == 1 else -np.log(1 - row["p"]),
             axis=1,
         )
+        if "weights" not in self.dataset.columns:
+            self.dataset["weights"] = 1
         self.dataset["log_loss"] = (
             self.dataset["log_loss"]
             * self.dataset["weights"]
