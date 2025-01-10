@@ -67,6 +67,32 @@ DEFAULT_PARAMETER = [
 S_MIN = 0.01
 
 
+DEFAULT_PARAMS_STDDEV_TENSOR = torch.tensor(
+    [
+        6.61,
+        9.52,
+        17.69,
+        27.74,
+        0.55,
+        0.28,
+        0.67,
+        0.12,
+        0.4,
+        0.18,
+        0.34,
+        0.27,
+        0.08,
+        0.14,
+        0.57,
+        0.25,
+        1.03,
+        0.27,
+        0.39,
+    ],
+    dtype=torch.float,
+)
+
+
 class FSRS(nn.Module):
     def __init__(self, w: List[float], float_delta_t: bool = False):
         super(FSRS, self).__init__()
@@ -299,9 +325,10 @@ class Trainer:
         train_set: pd.DataFrame,
         test_set: Optional[pd.DataFrame],
         init_w: List[float],
-        n_epoch: int = 1,
-        lr: float = 1e-2,
-        batch_size: int = 256,
+        n_epoch: int = 5,
+        lr: float = 4e-2,
+        gamma: float = 2,
+        batch_size: int = 512,
         max_seq_len: int = 64,
         float_delta_t: bool = False,
         enable_short_term: bool = True,
@@ -310,8 +337,10 @@ class Trainer:
             init_w[17] = 0
             init_w[18] = 0
         self.model = FSRS(init_w, float_delta_t)
+        self.init_w_tensor = torch.tensor(init_w, dtype=torch.float)
         self.optimizer = torch.optim.Adam(self.model.parameters(), lr=lr)
         self.clipper = ParameterClipper()
+        self.gamma = gamma
         self.batch_size = batch_size
         self.max_seq_len = max_seq_len
         self.build_dataset(train_set, test_set)
@@ -362,6 +391,11 @@ class Trainer:
                 stabilities = outputs[seq_lens - 1, torch.arange(real_batch_size), 0]
                 retentions = power_forgetting_curve(delta_ts, stabilities)
                 loss = (self.loss_fn(retentions, labels) * weights).sum()
+                penalty = torch.sum(
+                    torch.square(self.model.w - self.init_w_tensor)
+                    / torch.square(DEFAULT_PARAMS_STDDEV_TENSOR)
+                )
+                loss += penalty * self.gamma * real_batch_size / epoch_len
                 loss.backward()
                 if self.float_delta_t or not self.enable_short_term:
                     for param in self.model.parameters():
@@ -412,6 +446,11 @@ class Trainer:
                 stabilities = outputs[seq_lens - 1, torch.arange(real_batch_size), 0]
                 retentions = power_forgetting_curve(delta_ts, stabilities)
                 loss = (self.loss_fn(retentions, labels) * weights).mean()
+                penalty = torch.sum(
+                    torch.square(self.model.w - self.init_w_tensor)
+                    / torch.square(DEFAULT_PARAMS_STDDEV_TENSOR)
+                )
+                loss += penalty * self.gamma / len(self.train_set.y_train)
                 losses.append(loss)
             self.avg_train_losses.append(losses[0])
             self.avg_eval_losses.append(losses[1])
