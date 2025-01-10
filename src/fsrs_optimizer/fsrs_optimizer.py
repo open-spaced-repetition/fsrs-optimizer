@@ -1143,8 +1143,8 @@ class Optimizer:
                     else:
                         rating_stability[small_rating] = rating_stability[big_rating]
 
-        w1 = 3 / 5
-        w2 = 3 / 5
+        w1 = 0.41
+        w2 = 0.54
 
         if len(rating_stability) == 0:
             raise Exception("Not enough data for pretraining!")
@@ -1580,6 +1580,13 @@ class Optimizer:
 
     def evaluate(self, save_to_file=True):
         my_collection = Collection(DEFAULT_PARAMETER, self.float_delta_t)
+        if "tensor" not in self.dataset.columns:
+            self.dataset["tensor"] = self.dataset.progress_apply(
+                lambda x: lineToTensor(
+                    list(zip([x["t_history"]], [x["r_history"]]))[0]
+                ),
+                axis=1,
+            )
         stabilities, difficulties = my_collection.batch_predict(self.dataset)
         self.dataset["stability"] = stabilities
         self.dataset["difficulty"] = difficulties
@@ -1590,6 +1597,8 @@ class Optimizer:
             lambda row: -np.log(row["p"]) if row["y"] == 1 else -np.log(1 - row["p"]),
             axis=1,
         )
+        if "weights" not in self.dataset.columns:
+            self.dataset["weights"] = 1
         self.dataset["log_loss"] = (
             self.dataset["log_loss"]
             * self.dataset["weights"]
