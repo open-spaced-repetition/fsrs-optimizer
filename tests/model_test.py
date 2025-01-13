@@ -76,6 +76,8 @@ class Test_Model:
 
     def test_loss_and_grad(self):
         model = FSRS(DEFAULT_PARAMETER)
+        init_w = torch.tensor(DEFAULT_PARAMETER)
+        params_stddev = DEFAULT_PARAMS_STDDEV_TENSOR
         optimizer = torch.optim.Adam(model.parameters(), lr=4e-2)
         loss_fn = nn.BCELoss(reduction="none")
         t_histories = torch.tensor(
@@ -163,6 +165,43 @@ class Test_Model:
                 ]
             ),
             atol=1e-4,
+        )
+
+        optimizer.zero_grad()
+        penalty = (
+            torch.sum(torch.square(model.w - init_w) / torch.square(params_stddev))
+            * 512
+            / 1000
+            * 2
+        )
+        assert round(penalty.item(), 4) == 0.6469
+        penalty.backward()
+        assert torch.allclose(
+            model.w.grad,
+            torch.tensor(
+                [
+                    0.0018749383,
+                    0.00090389,
+                    0.00026177685,
+                    -0.00010645759,
+                    0.27080965,
+                    -1.0448978,
+                    -0.18249036,
+                    5.688889,
+                    -0.5119995,
+                    2.528395,
+                    -0.7086509,
+                    1.1237301,
+                    -12.799997,
+                    4.179591,
+                    0.25213587,
+                    1.3107198,
+                    -0.07721739,
+                    -1.1237309,
+                    -0.5385926,
+                ]
+            ),
+            atol=1e-5,
         )
 
         optimizer.zero_grad()
