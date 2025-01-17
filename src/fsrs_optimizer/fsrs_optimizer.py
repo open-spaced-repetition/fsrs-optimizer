@@ -1041,6 +1041,7 @@ class Optimizer:
             )
         else:
             self.dataset = dataset
+            self.dataset["r_history"] = self.dataset["r_history"].fillna("")
             self.dataset["first_rating"] = self.dataset["r_history"].map(
                 lambda x: x[0] if len(x) > 0 else ""
             )
