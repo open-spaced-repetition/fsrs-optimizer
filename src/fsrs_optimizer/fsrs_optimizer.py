@@ -390,7 +390,12 @@ class Trainer:
                 outputs, _ = self.model(sequences)
                 stabilities = outputs[seq_lens - 1, torch.arange(real_batch_size), 0]
                 retentions = power_forgetting_curve(delta_ts, stabilities)
-                loss = (self.loss_fn(retentions, labels) * weights).sum()
+                normalized_retentions = torch.full_like(
+                    labels, labels.mean().clamp(0.0001, 0.9999)
+                )
+                loss = (
+                    self.loss_fn(retentions, labels) * weights
+                ).sum() / self.loss_fn(normalized_retentions, labels).mean()
                 penalty = torch.sum(
                     torch.square(self.model.w - self.init_w_tensor)
                     / torch.square(DEFAULT_PARAMS_STDDEV_TENSOR)
@@ -445,7 +450,12 @@ class Trainer:
                 outputs, _ = self.model(sequences.transpose(0, 1))
                 stabilities = outputs[seq_lens - 1, torch.arange(real_batch_size), 0]
                 retentions = power_forgetting_curve(delta_ts, stabilities)
-                loss = (self.loss_fn(retentions, labels) * weights).mean()
+                normalized_retentions = torch.full_like(
+                    labels, labels.mean().clamp(0.0001, 0.9999)
+                )
+                loss = (
+                    self.loss_fn(retentions, labels) * weights
+                ).sum() / self.loss_fn(normalized_retentions, labels).mean()
                 penalty = torch.sum(
                     torch.square(self.model.w - self.init_w_tensor)
                     / torch.square(DEFAULT_PARAMS_STDDEV_TENSOR)
