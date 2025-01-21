@@ -390,7 +390,7 @@ class Trainer:
                 outputs, _ = self.model(sequences)
                 stabilities = outputs[seq_lens - 1, torch.arange(real_batch_size), 0]
                 retentions = power_forgetting_curve(delta_ts, stabilities)
-                average_retention = retentions.mean().repeat(real_batch_size)
+                average_retention = labels.mean().repeat(real_batch_size)
                 normalized_cross_entropy = average_retention * torch.log(retentions) + (
                     1 - average_retention
                 ) * torch.log(1 - retentions)
@@ -453,7 +453,7 @@ class Trainer:
                 outputs, _ = self.model(sequences.transpose(0, 1))
                 stabilities = outputs[seq_lens - 1, torch.arange(real_batch_size), 0]
                 retentions = power_forgetting_curve(delta_ts, stabilities)
-                average_retention = retentions.mean().repeat(real_batch_size)
+                average_retention = labels.mean().repeat(real_batch_size)
                 normalized_cross_entropy = average_retention * torch.log(retentions) + (
                     1 - average_retention
                 ) * torch.log(1 - retentions)
