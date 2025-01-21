@@ -393,9 +393,14 @@ class Trainer:
                 normalized_retentions = torch.full_like(
                     labels, labels.mean().clamp(0.0001, 0.9999)
                 )
+                normalized_cross_entropy = normalized_retentions * torch.log(
+                    retentions
+                ) + (1 - normalized_retentions) * torch.log(1 - retentions)
                 loss = (
-                    self.loss_fn(retentions, labels) * weights
-                ).sum() / self.loss_fn(normalized_retentions, labels).mean()
+                    self.loss_fn(retentions, labels)
+                    * weights
+                    / normalized_cross_entropy
+                ).sum()
                 penalty = torch.sum(
                     torch.square(self.model.w - self.init_w_tensor)
                     / torch.square(DEFAULT_PARAMS_STDDEV_TENSOR)
@@ -453,9 +458,14 @@ class Trainer:
                 normalized_retentions = torch.full_like(
                     labels, labels.mean().clamp(0.0001, 0.9999)
                 )
+                normalized_cross_entropy = normalized_retentions * torch.log(
+                    retentions
+                ) + (1 - normalized_retentions) * torch.log(1 - retentions)
                 loss = (
-                    self.loss_fn(retentions, labels) * weights
-                ).sum() / self.loss_fn(normalized_retentions, labels).mean()
+                    self.loss_fn(retentions, labels)
+                    * weights
+                    / normalized_cross_entropy
+                ).sum()
                 penalty = torch.sum(
                     torch.square(self.model.w - self.init_w_tensor)
                     / torch.square(DEFAULT_PARAMS_STDDEV_TENSOR)
