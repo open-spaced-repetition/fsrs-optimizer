@@ -8,8 +8,9 @@ DECAY = -0.5
 FACTOR = 0.9 ** (1 / DECAY) - 1
 
 
-def power_forgetting_curve(t, s):
-    return (1 + FACTOR * t / s) ** DECAY
+def power_forgetting_curve(t, s, decay=DECAY):
+    factor = 0.9 ** (1 / decay) - 1
+    return (1 + factor * t / s) ** decay
 
 
 def next_interval(s, r, float_ivl: bool = False, fuzz: bool = False):
