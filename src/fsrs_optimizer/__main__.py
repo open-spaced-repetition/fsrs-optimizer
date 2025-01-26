@@ -40,13 +40,16 @@ def process(filepath, filter_out_flags: list[int]):
             "revlog_start_date": "2006-10-05",
             "preview": "y",
             "filter_out_suspended_cards": "n",
+            "enable_short_term": "y",
         }
 
     # Prompts the user with the key and then falls back on the last answer given.
     def remembered_fallback_prompt(key: str, pretty: str = None):
         if pretty is None:
             pretty = key
-        remembered_fallbacks[key] = prompt(f"input {pretty}", remembered_fallbacks[key])
+        remembered_fallbacks[key] = prompt(
+            f"input {pretty}", remembered_fallbacks.get(key, None)
+        )
 
     print("The defaults will switch to whatever you entered last.\n")
 
@@ -66,6 +69,9 @@ def process(filepath, filter_out_flags: list[int]):
         remembered_fallback_prompt(
             "filter_out_suspended_cards", "filter out suspended cards? (y/n)"
         )
+        remembered_fallback_prompt(
+            "enable_short_term", "enable short-term component in FSRS model? (y/n)"
+        )
 
         graphs_input = prompt("Save graphs? (y/n)", remembered_fallbacks["preview"])
     else:
@@ -82,8 +88,9 @@ def process(filepath, filter_out_flags: list[int]):
         json.dump(remembered_fallbacks, f)
 
     save_graphs = graphs_input != "n"
+    enable_short_term = remembered_fallbacks["enable_short_term"] == "y"
 
-    optimizer = fsrs_optimizer.Optimizer()
+    optimizer = fsrs_optimizer.Optimizer(enable_short_term=enable_short_term)
     if filepath.endswith(".apkg") or filepath.endswith(".colpkg"):
         optimizer.anki_extract(
             f"{filepath}",
@@ -108,7 +115,7 @@ def process(filepath, filter_out_flags: list[int]):
     for i, f in enumerate(figures):
         f.savefig(f"pretrain_{i}.png")
         plt.close(f)
-    figures = optimizer.train(verbose=save_graphs)
+    figures = optimizer.train(verbose=save_graphs, recency_weight=True)
     for i, f in enumerate(figures):
         f.savefig(f"train_{i}.png")
         plt.close(f)
