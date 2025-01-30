@@ -367,16 +367,16 @@ def brent(tol=0.01, maxiter=20, **kwargs):
     mintol = 1.0e-11
     cg = 0.3819660
 
-    funccalls = 0
-    xb = 0.75
+    xb = 0.70
     fb = sample(xb, **kwargs)
+    funccalls = 1
 
     #################################
     # BEGIN
     #################################
     x = w = v = xb
     fw = fv = fx = fb
-    a = 0.75
+    a = 0.70
     b = 0.95
     deltax = 0.0
     iter = 0
@@ -471,7 +471,7 @@ def brent(tol=0.01, maxiter=20, **kwargs):
     success = (
         iter < maxiter
         and not (np.isnan(fval) or np.isnan(xmin))
-        and (0.75 <= xmin <= 0.95)
+        and (0.70 <= xmin <= 0.95)
     )
 
     if success:
