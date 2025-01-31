@@ -242,7 +242,7 @@ def simulate(
             10,
         )
 
-        need_learn = card_table[col["due"]] == learn_span
+        need_learn = card_table[col["stability"]] == 1e-10
         card_table[col["cost"]][need_learn] = np.choose(
             card_table[col["rating"]][need_learn].astype(int) - 1,
             learn_costs,
@@ -281,6 +281,15 @@ def simulate(
             "card_id": np.where(true_review | true_learn)[0],
             "rating": card_table[col["rating"]][true_review | true_learn],
         }
+
+        has_learned = card_table[col["stability"]] > 1e-10
+        card_table[col["delta_t"]][has_learned] = (
+            today - card_table[col["last_date"]][has_learned]
+        )
+        card_table[col["retrievability"]][has_learned] = power_forgetting_curve(
+            card_table[col["delta_t"]][has_learned],
+            card_table[col["stability"]][has_learned],
+        )
 
         review_cnt_per_day[today] = np.sum(true_review)
         learn_cnt_per_day[today] = np.sum(true_learn)
@@ -367,16 +376,16 @@ def brent(tol=0.01, maxiter=20, **kwargs):
     mintol = 1.0e-11
     cg = 0.3819660
 
-    funccalls = 0
-    xb = 0.75
+    xb = 0.70
     fb = sample(xb, **kwargs)
+    funccalls = 1
 
     #################################
     # BEGIN
     #################################
     x = w = v = xb
     fw = fv = fx = fb
-    a = 0.75
+    a = 0.70
     b = 0.95
     deltax = 0.0
     iter = 0
@@ -471,7 +480,7 @@ def brent(tol=0.01, maxiter=20, **kwargs):
     success = (
         iter < maxiter
         and not (np.isnan(fval) or np.isnan(xmin))
-        and (0.75 <= xmin <= 0.95)
+        and (0.70 <= xmin <= 0.95)
     )
 
     if success:
