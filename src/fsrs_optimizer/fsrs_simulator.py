@@ -282,6 +282,15 @@ def simulate(
             "rating": card_table[col["rating"]][true_review | true_learn],
         }
 
+        has_learned = card_table[col["stability"]] > 1e-10
+        card_table[col["delta_t"]][has_learned] = (
+            today - card_table[col["last_date"]][has_learned]
+        )
+        card_table[col["retrievability"]][has_learned] = power_forgetting_curve(
+            card_table[col["delta_t"]][has_learned],
+            card_table[col["stability"]][has_learned],
+        )
+
         review_cnt_per_day[today] = np.sum(true_review)
         learn_cnt_per_day[today] = np.sum(true_learn)
         memorized_cnt_per_day[today] = card_table[col["retrievability"]].sum()
