@@ -242,7 +242,7 @@ def simulate(
             10,
         )
 
-        need_learn = card_table[col["due"]] == learn_span
+        need_learn = card_table[col["stability"]] == 1e-10
         card_table[col["cost"]][need_learn] = np.choose(
             card_table[col["rating"]][need_learn].astype(int) - 1,
             learn_costs,
