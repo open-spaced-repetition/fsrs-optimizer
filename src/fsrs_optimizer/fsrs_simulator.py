@@ -13,8 +13,11 @@ def power_forgetting_curve(t, s, decay=DECAY):
     return (1 + factor * t / s) ** decay
 
 
-def next_interval(s, r, float_ivl: bool = False, fuzz: bool = False):
-    ivl = s / FACTOR * (r ** (1 / DECAY) - 1)
+def next_interval(
+    s, r, float_ivl: bool = False, fuzz: bool = False, decay: float = DECAY
+):
+    factor = 0.9 ** (1 / decay) - 1
+    ivl = s / factor * (r ** (1 / decay) - 1)
     if float_ivl:
         ivl = np.round(ivl, 6)
     else:
@@ -271,6 +274,7 @@ def simulate(
                 card_table[col["stability"]][true_review | true_learn],
                 request_retention,
                 fuzz=fuzz,
+                decay=-w[19],
             ),
             1,
             max_ivl,
