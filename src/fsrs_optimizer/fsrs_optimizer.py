@@ -402,7 +402,7 @@ class Trainer:
                 )
                 loss += penalty * self.gamma * real_batch_size / epoch_len
                 loss.backward()
-                if self.float_delta_t or not self.enable_short_term:
+                if self.float_delta_t:
                     for param in self.model.parameters():
                         param.grad[:4] = torch.zeros(4)
                 if not self.enable_short_term:
