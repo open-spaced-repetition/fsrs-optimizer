@@ -193,6 +193,7 @@ def simulate(
         card_table[col["retrievability"]][has_learned] = power_forgetting_curve(
             card_table[col["delta_t"]][has_learned],
             card_table[col["stability"]][has_learned],
+            -w[19]
         )
         card_table[col["cost"]] = 0
         need_review = card_table[col["due"]] <= today
