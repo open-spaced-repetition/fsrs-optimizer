@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "FSRS-Optimizer"
-version = "5.7.1"
+version = "5.7.2"
 readme = "README.md"
 dependencies = [
     "matplotlib>=3.7.0",
@@ -23,3 +23,10 @@ requires-python = ">=3.9,<3.13"
 Homepage = "https://github.com/open-spaced-repetition/fsrs-optimizer"
 [tool.ruff.lint]
 ignore = ["F405", "F403", "E712", "F541", "E722", "E741"]
+[project.optional-dependencies]
+test = [
+    "ruff",
+    "mypy",
+    "pytest",
+    "pytest-cov",
+]
