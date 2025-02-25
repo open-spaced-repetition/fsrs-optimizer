@@ -115,13 +115,15 @@ class FSRS(nn.Module):
         )
         return new_s
 
-    def stability_after_failure(self, state: Tensor, r: Tensor) -> Tensor:
+    def stability_after_failure(self, state: Tensor, r: Tensor, rating: Tensor) -> Tensor:
         old_s = state[:, 0]
+        hard_bonus = torch.where(rating == 4, -self.w[15], rating)
         new_s = (
             self.w[11]
             * torch.pow(state[:, 1], -self.w[12])
             * (torch.pow(old_s + 1, self.w[13]) - 1)
             * torch.exp((1 - r) * self.w[14])
+            * hard_bonus
         )
         new_minimum_s = old_s / torch.exp(self.w[17] * self.w[18])
         return torch.minimum(new_s, new_minimum_s)
@@ -161,7 +163,7 @@ class FSRS(nn.Module):
         else:
             r = power_forgetting_curve(X[:, 0], state[:, 0])
             short_term = X[:, 0] < 1
-            success = X[:, 1] > 1
+            success = X[:, 1] > (2 - self.w[15])
             new_s = (
                 torch.where(
                     short_term,
@@ -169,7 +171,7 @@ class FSRS(nn.Module):
                     torch.where(
                         success,
                         self.stability_after_success(state, r, X[:, 1]),
-                        self.stability_after_failure(state, r),
+                        self.stability_after_failure(state, r, X[:, 1]),
                     ),
                 )
                 if not self.float_delta_t
@@ -224,7 +226,7 @@ class ParameterClipper:
             w[12] = w[12].clamp(0.001, 0.25)
             w[13] = w[13].clamp(0.001, 0.9)
             w[14] = w[14].clamp(0, 4)
-            w[15] = w[15].clamp(0, 1)
+            w[15] = w[15].clamp(-1, 1)
             w[16] = w[16].clamp(1, 6)
             w[17] = w[17].clamp(0, 2)
             w[18] = w[18].clamp(0, 2)
