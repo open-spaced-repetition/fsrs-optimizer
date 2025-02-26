@@ -226,7 +226,7 @@ class ParameterClipper:
             w[12] = w[12].clamp(0.001, 0.25)
             w[13] = w[13].clamp(0.001, 0.9)
             w[14] = w[14].clamp(0, 4)
-            w[15] = w[15].clamp(-1, 1)
+            w[15] = w[15].clamp(-0.9999, 0.9999)
             w[16] = w[16].clamp(1, 6)
             w[17] = w[17].clamp(0, 2)
             w[18] = w[18].clamp(0, 2)
