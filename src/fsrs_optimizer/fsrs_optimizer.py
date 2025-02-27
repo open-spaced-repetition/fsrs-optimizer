@@ -117,12 +117,12 @@ class FSRS(nn.Module):
 
     def stability_after_failure(self, state: Tensor, r: Tensor, rating: Tensor) -> Tensor:
         old_s = state[:, 0]
-        hard_bonus = torch.where(rating == 2, 2 + self.w[15], rating)
+        hard_bonus = torch.where(rating == 2, torch.exp(2 + self.w[15]), 1)
         new_s = (
             self.w[11]
             * torch.pow(state[:, 1], -self.w[12])
             * (torch.pow(old_s + 1, self.w[13]) - 1)
-            * torch.exp((1 - r) * self.w[14])
+            * torch.exp((1 - (r * 1)) * self.w[14])
             * hard_bonus
         )
         new_minimum_s = old_s / torch.exp(self.w[17] * self.w[18])
