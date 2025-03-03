@@ -1934,9 +1934,25 @@ class Optimizer:
 
 # code from https://github.com/papousek/duolingo-halflife-regression/blob/master/evaluation.py
 def load_brier(predictions, real, bins=20):
+    def clopper_pearson(k, n, alpha=0.05):
+        """Estimate the confidence interval for a sampled Bernoulli random
+        variable.
+        `k` is the number of successes and `n` is the number of trials (k <=
+        n). `alpha` is the confidence level (i.e., the true probability is
+        inside the confidence interval with probability 1-alpha). The
+        function returns a `(low, high)` pair of numbers indicating the
+        interval on the probability.
+        """
+        b = beta.ppf
+        lo = b(alpha / 2, k, n - k + 1)
+        hi = b(1 - alpha / 2, k + 1, n - k)
+        return 0.0 if np.isnan(lo) else lo, 1.0 if np.isnan(hi) else hi
+
     counts = np.zeros(bins)
     correct = np.zeros(bins)
     prediction = np.zeros(bins)
+
+    two_d_list = [[] for _ in range(bins)]
 
     def get_bin(x, bins=bins):
         return np.floor(np.exp(np.log(bins + 1) * x)) - 1
@@ -1946,21 +1962,42 @@ def load_brier(predictions, real, bins=20):
         counts[bin] += 1
         correct[bin] += r
         prediction[bin] += p
+        two_d_list[bin].append(r)  # for confidence interval calculations
 
     np.seterr(invalid="ignore")
     prediction_means = prediction / counts
-    correct_means = correct / counts
+    real_means = correct / counts
     size = len(predictions)
     answer_mean = sum(correct) / size
+
+    real_means_upper = []
+    real_means_lower = []
+    for n in range(len(two_d_list)):
+        if len(two_d_list[n]) > 0:
+            lower_bound, upper_bound = clopper_pearson(sum(two_d_list[n]), len(two_d_list[n]))
+        else:
+            lower_bound, upper_bound = float('NaN'), float('NaN')
+        real_means_upper.append(upper_bound)
+        real_means_lower.append(lower_bound)
+
+    assert len(real_means_lower) == len(prediction_means) == len(real_means_upper)
+    # sanity check
+    for n in range(len(real_means)):
+        # check that the mean is within the bounds, unless they are NaNs
+        if not np.isnan(real_means_lower[n]):
+            assert real_means_lower[n] <= real_means[n] <= real_means_upper[n], f'{real_means_lower[n]:4f}, {real_means[n]:4f}, {real_means_upper[n]:4f}'
+
     return {
-        "reliability": sum(counts * (correct_means - prediction_means) ** 2) / size,
-        "resolution": sum(counts * (correct_means - answer_mean) ** 2) / size,
+        "reliability": sum(counts * (real_means - prediction_means) ** 2) / size,
+        "resolution": sum(counts * (real_means - answer_mean) ** 2) / size,
         "uncertainty": answer_mean * (1 - answer_mean),
         "detail": {
             "bin_count": bins,
             "bin_counts": counts,
             "bin_prediction_means": prediction_means,
-            "bin_correct_means": correct_means,
+            "bin_real_means_upper_bounds": real_means_upper,
+            "bin_real_means_lower_bounds": real_means_lower,
+            "bin_real_means": real_means,
         },
     }
 
@@ -1976,7 +2013,13 @@ def plot_brier(predictions, real, bins=20, ax=None, title=None):
     e_max = np.max(np.abs(observation - p))
     brier = load_brier(predictions, real, bins=bins)
     bin_prediction_means = brier["detail"]["bin_prediction_means"]
-    bin_correct_means = brier["detail"]["bin_correct_means"]
+
+    bin_real_means = brier["detail"]["bin_real_means"]
+    bin_real_means_upper_bounds = brier["detail"]["bin_real_means_upper_bounds"]
+    bin_real_means_lower_bounds = brier["detail"]["bin_real_means_lower_bounds"]
+    bin_real_means_errors_upper = bin_real_means_upper_bounds - bin_real_means
+    bin_real_means_errors_lower = bin_real_means - bin_real_means_lower_bounds
+
     bin_counts = brier["detail"]["bin_counts"]
     mask = bin_counts > 0
     r2 = r2_score(
@@ -2008,14 +2051,28 @@ def plot_brier(predictions, real, bins=20, ax=None, title=None):
         )
     except:
         pass
-    ax.plot(
+    # ax.plot(
+    #     bin_prediction_means[mask],
+    #     bin_correct_means[mask],
+    #     label="Actual Calibration",
+    #     color="#1f77b4",
+    #     marker="*",
+    # )
+    assert not any(np.isnan(bin_real_means_errors_upper[mask]))
+    assert not any(np.isnan(bin_real_means_errors_lower[mask]))
+    ax.errorbar(
         bin_prediction_means[mask],
-        bin_correct_means[mask],
+        bin_real_means[mask],
+        yerr=[bin_real_means_errors_lower[mask], bin_real_means_errors_upper[mask]],
         label="Actual Calibration",
         color="#1f77b4",
-        marker="*",
+        ecolor='black',
+        elinewidth=1.0,
+        capsize=3.5,
+        capthick=1.0,
+        marker='',
     )
-    ax.plot(p, observation, label="Lowess Smoothing", color="red")
+    # ax.plot(p, observation, label="Lowess Smoothing", color="red")
     ax.plot((0, 1), (0, 1), label="Perfect Calibration", color="#ff7f0e")
     bin_count = brier["detail"]["bin_count"]
     counts = np.array(bin_counts)
