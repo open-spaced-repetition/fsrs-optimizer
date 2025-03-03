@@ -26,7 +26,6 @@ from sklearn.metrics import (  # type: ignore
     roc_auc_score,
 )
 from scipy.optimize import minimize  # type: ignore
-from scipy.stats import beta
 from itertools import accumulate
 from tqdm.auto import tqdm  # type: ignore
 import warnings
