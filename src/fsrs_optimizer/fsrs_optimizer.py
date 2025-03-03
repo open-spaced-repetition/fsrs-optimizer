@@ -1938,7 +1938,7 @@ def load_brier(predictions, real, bins=20):
     # Note that my implementation isn't exactly the same as in the paper, but it still has good coverage, better than Clopper-Pearson
     # I also made it possible to deal with k=0 and k=n, which was an issue with how this method is described in the paper
     def likelihood_interval(k, n, alpha=0.05):
-        def log_likelihood(p, k: int, n: int):
+        def log_likelihood(p: np.ndarray, k, n):
             assert k <= n
             p_hat = k / n
 
@@ -1953,8 +1953,8 @@ def load_brier(predictions, real, bins=20):
 
             return log_likelihood_f(k, n, p) - log_likelihood_f(k, n, p_hat)
 
-        def calc(x, y, target_p):
-            def loss(guess_y, target_p):
+        def calc(x: np.ndarray, y: np.ndarray, target_p: float):
+            def loss(guess_y: float, target_p: float) -> float:
                 # Find segments where the horizontal line intersects the curve
                 # This creates a boolean array where True indicates a potential intersection
                 intersect_segments = ((y[:-1] <= guess_y) & (y[1:] >= guess_y)) | \
@@ -1975,7 +1975,7 @@ def load_brier(predictions, real, bins=20):
                     x1, x2 = x[idx], x[idx + 1]
                     y1, y2 = y[idx], y[idx + 1]
 
-                    # If points are exactly the same y, just take the x
+                    # If points are exactly the same, just take the x
                     if y1 == y2:
                         intersection_points.append(x1)
                     else:
