@@ -1942,7 +1942,7 @@ def load_brier(predictions, real, bins=20):
             assert k <= n
             p_hat = k / n
 
-            def l(k, n, p):
+            def log_likelihood_f(k, n, p):
                 one_minus_p = np.ones_like(p) - p
                 if k == 0:
                     return n * np.log(one_minus_p)
@@ -1951,7 +1951,7 @@ def load_brier(predictions, real, bins=20):
                 else:
                     return k * np.log(p) + (n - k) * np.log(one_minus_p)
 
-            return l(k, n, p) - l(k, n, p_hat)
+            return log_likelihood_f(k, n, p) - log_likelihood_f(k, n, p_hat)
 
         def calc(x, y, target_p):
             def loss(guess_y, target_p):
