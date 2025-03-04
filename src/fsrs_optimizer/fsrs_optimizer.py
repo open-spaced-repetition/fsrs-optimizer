@@ -2311,12 +2311,12 @@ def plot_brier(predictions, real, bins=20, ax=None, title=None):
     bin_counts = brier["detail"]["bin_counts"]
     mask = bin_counts > 0
     r2 = r2_score(
-        bin_correct_means[mask],
+        bin_real_means[mask],
         bin_prediction_means[mask],
         sample_weight=bin_counts[mask],
     )
     mae = mean_absolute_error(
-        bin_correct_means[mask],
+        bin_real_means[mask],
         bin_prediction_means[mask],
         sample_weight=bin_counts[mask],
     )
@@ -2325,7 +2325,7 @@ def plot_brier(predictions, real, bins=20, ax=None, title=None):
     ax.grid(True)
     try:
         fit_wls = sm.WLS(
-            bin_correct_means[mask],
+            bin_real_means[mask],
             sm.add_constant(bin_prediction_means[mask]),
             weights=bin_counts[mask],
         ).fit()
