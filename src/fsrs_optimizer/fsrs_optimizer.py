@@ -1957,8 +1957,9 @@ def load_brier(predictions, real, bins=20):
             def loss(guess_y: float, target_p: float) -> float:
                 # Find segments where the horizontal line intersects the curve
                 # This creates a boolean array where True indicates a potential intersection
-                intersect_segments = ((y[:-1] <= guess_y) & (y[1:] >= guess_y)) | \
-                                     ((y[:-1] >= guess_y) & (y[1:] <= guess_y))
+                intersect_segments = ((y[:-1] <= guess_y) & (y[1:] >= guess_y)) | (
+                    (y[:-1] >= guess_y) & (y[1:] <= guess_y)
+                )
 
                 # Get indices of segments where intersections occur
                 intersection_indices = np.where(intersect_segments)[0]
@@ -1970,7 +1971,9 @@ def load_brier(predictions, real, bins=20):
                 # Find the first two intersection points (we only need two for a connected curve)
                 intersection_points = []
 
-                for idx in intersection_indices[:2]:  # Take at most first two intersections
+                for idx in intersection_indices[
+                    :2
+                ]:  # Take at most first two intersections
                     # Linear interpolation to find the x value at the intersection
                     x1, x2 = x[idx], x[idx + 1]
                     y1, y2 = y[idx], y[idx + 1]
@@ -2024,11 +2027,16 @@ def load_brier(predictions, real, bins=20):
                         denom = 2.0 * verysmall_num
                     else:
                         denom = 2.0 * val
-                    w = max(min((xb - ((xb - xc) * tmp2 - (xb - xa) * tmp1) / denom), u_lim), l_lim)
+                    w = max(
+                        min(
+                            (xb - ((xb - xc) * tmp2 - (xb - xa) * tmp1) / denom), u_lim
+                        ),
+                        l_lim,
+                    )
                     wlim = max(min(xb + grow_limit * (xc - xb), u_lim), l_lim)
 
                     if iter > maxiter:
-                        print('Failed to converge')
+                        print("Failed to converge")
                         break
 
                     iter += 1
@@ -2080,7 +2088,9 @@ def load_brier(predictions, real, bins=20):
                 mintol = 1.0e-11
                 cg = 0.3819660
 
-                xa, xb, xc, fa, fb, fc, funccalls = bracket(xa=min(y), xb=max(y), maxiter=maxiter, target_p=target_p)
+                xa, xb, xc, fa, fb, fc, funccalls = bracket(
+                    xa=min(y), xb=max(y), maxiter=maxiter, target_p=target_p
+                )
 
                 #################################
                 # BEGIN
@@ -2121,8 +2131,11 @@ def load_brier(predictions, real, bins=20):
                         dx_temp = deltax
                         deltax = rat
                         # check parabolic fit
-                        if ((p > tmp2 * (a - x)) and (p < tmp2 * (b - x)) and (
-                                np.abs(p) < np.abs(0.5 * tmp2 * dx_temp))):
+                        if (
+                            (p > tmp2 * (a - x))
+                            and (p < tmp2 * (b - x))
+                            and (np.abs(p) < np.abs(0.5 * tmp2 * dx_temp))
+                        ):
                             rat = p * 1.0 / tmp2  # if parabolic step is useful
                             u = x + rat
                             if (u - a) < tol2 or (b - u) < tol2:
@@ -2188,12 +2201,15 @@ def load_brier(predictions, real, bins=20):
                     # print(f'Loss function called {funccalls} times')
                     return xmin
                 else:
-                    raise Exception('The algorithm terminated without finding a valid value.')
+                    raise Exception(
+                        "The algorithm terminated without finding a valid value."
+                    )
 
             best_guess_y = brent_minimization(1e-5, 50)
 
-            intersect_segments = ((y[:-1] <= best_guess_y) & (y[1:] >= best_guess_y)) | \
-                                 ((y[:-1] >= best_guess_y) & (y[1:] <= best_guess_y))
+            intersect_segments = (
+                (y[:-1] <= best_guess_y) & (y[1:] >= best_guess_y)
+            ) | ((y[:-1] >= best_guess_y) & (y[1:] <= best_guess_y))
             intersection_indices = np.where(intersect_segments)[0]
             intersection_points = []
 
@@ -2226,14 +2242,16 @@ def load_brier(predictions, real, bins=20):
         x_low_cred, x_high_cred, probsum = calc(probs, y, 1 - alpha)
         assert 0 <= probsum <= 1
 
-        if p_hat == 1.:
-            x_high_cred = 1.
-        elif p_hat == 0.:
-            x_low_cred = 0.
+        if p_hat == 1.0:
+            x_high_cred = 1.0
+        elif p_hat == 0.0:
+            x_low_cred = 0.0
 
         assert not np.isnan(x_low_cred)
         assert not np.isnan(x_high_cred)
-        assert x_low_cred <= p_hat <= x_high_cred, f'{x_low_cred}, {p_hat}, {k / n}, {x_high_cred}'
+        assert (
+            x_low_cred <= p_hat <= x_high_cred
+        ), f"{x_low_cred}, {p_hat}, {k / n}, {x_high_cred}"
         return x_low_cred, x_high_cred
 
     counts = np.zeros(bins)
@@ -2262,9 +2280,11 @@ def load_brier(predictions, real, bins=20):
     real_means_lower = []
     for n in range(len(two_d_list)):
         if len(two_d_list[n]) > 0:
-            lower_bound, upper_bound = likelihood_interval(sum(two_d_list[n]), len(two_d_list[n]))
+            lower_bound, upper_bound = likelihood_interval(
+                sum(two_d_list[n]), len(two_d_list[n])
+            )
         else:
-            lower_bound, upper_bound = float('NaN'), float('NaN')
+            lower_bound, upper_bound = float("NaN"), float("NaN")
         real_means_upper.append(upper_bound)
         real_means_lower.append(lower_bound)
 
@@ -2273,7 +2293,9 @@ def load_brier(predictions, real, bins=20):
     for n in range(len(real_means)):
         # check that the mean is within the bounds, unless they are NaNs
         if not np.isnan(real_means_lower[n]):
-            assert real_means_lower[n] <= real_means[n] <= real_means_upper[n], f'{real_means_lower[n]:4f}, {real_means[n]:4f}, {real_means_upper[n]:4f}'
+            assert (
+                real_means_lower[n] <= real_means[n] <= real_means_upper[n]
+            ), f"{real_means_lower[n]:4f}, {real_means[n]:4f}, {real_means_upper[n]:4f}"
 
     return {
         "reliability": sum(counts * (real_means - prediction_means) ** 2) / size,
@@ -2354,11 +2376,11 @@ def plot_brier(predictions, real, bins=20, ax=None, title=None):
         yerr=[bin_real_means_errors_lower[mask], bin_real_means_errors_upper[mask]],
         label="Actual Calibration",
         color="#1f77b4",
-        ecolor='black',
+        ecolor="black",
         elinewidth=1.0,
         capsize=3.5,
         capthick=1.0,
-        marker='',
+        marker="",
     )
     # ax.plot(p, observation, label="Lowess Smoothing", color="red")
     ax.plot((0, 1), (0, 1), label="Perfect Calibration", color="#ff7f0e")
