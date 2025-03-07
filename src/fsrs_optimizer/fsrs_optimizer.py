@@ -62,6 +62,8 @@ DEFAULT_PARAMETER = [
     2.9898,
     0.51655,
     0.6621,
+    1.0,
+    3.0,
 ]
 
 S_MIN = 0.01
@@ -88,6 +90,8 @@ DEFAULT_PARAMS_STDDEV_TENSOR = torch.tensor(
         1.03,
         0.27,
         0.39,
+        10.0,
+        10.0,
     ],
     dtype=torch.float,
 )
@@ -146,7 +150,7 @@ class FSRS(nn.Module):
     def step(self, X: Tensor, state: Tensor) -> Tensor:
         """
         :param X: shape[batch_size, 2], X[:,0] is elapsed time, X[:,1] is rating
-        :param state: shape[batch_size, 2], state[:,0] is stability, state[:,1] is difficulty
+        :param state: shape[batch_size, 3], state[:,0] is stability, state[:,1] is difficulty, state[:,2] is streak
         :return state:
         """
         if torch.equal(state, torch.zeros_like(state)):
@@ -158,10 +162,24 @@ class FSRS(nn.Module):
             new_s[index[0]] = self.w[index[1]]
             new_d = self.init_d(X[:, 1])
             new_d = new_d.clamp(1, 10)
+            new_streak = torch.where(
+                X[:, 1] <= 2,
+                torch.zeros_like(state[:, 2]),
+                torch.ones_like(state[:, 2]),
+            )
         else:
             r = power_forgetting_curve(X[:, 0], state[:, 0])
             short_term = X[:, 0] < 1
             success = X[:, 1] > 1
+            new_streak = torch.where(
+                X[:, 1] == 1,
+                torch.zeros_like(state[:, 2]),
+                torch.where(
+                    X[:, 1] == 2,
+                    state[:, 2],
+                    state[:, 2] + 1,
+                ),
+            )
             new_s = (
                 torch.where(
                     short_term,
@@ -180,18 +198,21 @@ class FSRS(nn.Module):
                 )
             )
             new_d = self.next_d(state, X[:, 1])
+            new_d = new_d - self.w[19] * nn.functional.leaky_relu(
+                new_streak - self.w[20]
+            )
             new_d = new_d.clamp(1, 10)
         new_s = new_s.clamp(S_MIN, 36500)
-        return torch.stack([new_s, new_d], dim=1)
+        return torch.stack([new_s, new_d, new_streak], dim=1)
 
     def forward(
         self, inputs: Tensor, state: Optional[Tensor] = None
     ) -> Tuple[Tensor, Tensor]:
         """
-        :param inputs: shape[seq_len, batch_size, 2]
+        :param inputs: shape[seq_len, batch_size, 3]
         """
         if state is None:
-            state = torch.zeros((inputs.shape[1], 2))
+            state = torch.zeros((inputs.shape[1], 3))
         outputs = []
         for X in inputs:
             state = self.step(X, state)
@@ -228,6 +249,8 @@ class ParameterClipper:
             w[16] = w[16].clamp(1, 6)
             w[17] = w[17].clamp(0, 2)
             w[18] = w[18].clamp(0, 2)
+            w[19] = w[19].clamp(0, 4)
+            w[20] = w[20].clamp(0, 10)
             module.w.data = w
 
 
@@ -496,7 +519,7 @@ class Collection:
         fast_dataset = BatchDataset(dataset, sort_by_length=False)
         with torch.no_grad():
             outputs, _ = self.model(fast_dataset.x_train.transpose(0, 1))
-            stabilities, difficulties = outputs[
+            stabilities, difficulties, streaks = outputs[
                 fast_dataset.seq_len - 1, torch.arange(len(fast_dataset))
             ].transpose(0, 1)
             return stabilities.tolist(), difficulties.tolist()
