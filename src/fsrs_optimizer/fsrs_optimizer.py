@@ -107,7 +107,6 @@ class FSRS(nn.Module):
         new_s = state[:, 0] * (
             1
             + torch.exp(self.w[8])
-            * (11 - state[:, 1])
             * torch.pow(state[:, 0], -self.w[9])
             * (torch.exp((1 - r) * self.w[10]) - 1)
             * hard_penalty
@@ -119,7 +118,6 @@ class FSRS(nn.Module):
         old_s = state[:, 0]
         new_s = (
             self.w[11]
-            * torch.pow(state[:, 1], -self.w[12])
             * (torch.pow(old_s + 1, self.w[13]) - 1)
             * torch.exp((1 - r) * self.w[14])
         )
@@ -159,7 +157,7 @@ class FSRS(nn.Module):
             new_d = self.init_d(X[:, 1])
             new_d = new_d.clamp(1, 10)
         else:
-            r = power_forgetting_curve(X[:, 0], state[:, 0])
+            r = power_forgetting_curve(X[:, 0], state[:, 0], state[:, 1])
             short_term = X[:, 0] < 1
             success = X[:, 1] > 1
             new_s = (
@@ -389,7 +387,8 @@ class Trainer:
                 real_batch_size = seq_lens.shape[0]
                 outputs, _ = self.model(sequences)
                 stabilities = outputs[seq_lens - 1, torch.arange(real_batch_size), 0]
-                retentions = power_forgetting_curve(delta_ts, stabilities)
+                difficulties = outputs[seq_lens - 1, torch.arange(real_batch_size), 1]
+                retentions = power_forgetting_curve(delta_ts, stabilities, difficulties)
                 loss = (self.loss_fn(retentions, labels) * weights).sum()
                 penalty = torch.sum(
                     torch.square(self.model.w - self.init_w_tensor)
@@ -444,7 +443,8 @@ class Trainer:
                 real_batch_size = seq_lens.shape[0]
                 outputs, _ = self.model(sequences.transpose(0, 1))
                 stabilities = outputs[seq_lens - 1, torch.arange(real_batch_size), 0]
-                retentions = power_forgetting_curve(delta_ts, stabilities)
+                difficulties = outputs[seq_lens - 1, torch.arange(real_batch_size), 1]
+                retentions = power_forgetting_curve(delta_ts, stabilities, difficulties)
                 loss = (self.loss_fn(retentions, labels) * weights).mean()
                 penalty = torch.sum(
                     torch.square(self.model.w - self.init_w_tensor)
@@ -545,7 +545,7 @@ def remove_non_continuous_rows(group):
 
 def fit_stability(delta_t, retention, size):
     def loss(stability):
-        y_pred = power_forgetting_curve(delta_t, stability)
+        y_pred = power_forgetting_curve(delta_t, stability, 5)
         loss = sum(
             -(retention * np.log(y_pred) + (1 - retention) * np.log(1 - y_pred)) * size
         )
@@ -1083,8 +1083,9 @@ class Optimizer:
 
             init_s0 = r_s0_default[first_rating]
 
-            def loss(stability):
-                y_pred = power_forgetting_curve(delta_t, stability)
+            def loss(params):
+                stability, difficulty = params[0], params[1]
+                y_pred = power_forgetting_curve(delta_t, stability, difficulty)
                 logloss = sum(
                     -(recall * np.log(y_pred) + (1 - recall) * np.log(1 - y_pred))
                     * count
@@ -1094,8 +1095,8 @@ class Optimizer:
 
             res = minimize(
                 loss,
-                x0=init_s0,
-                bounds=((S_MIN, 100),),
+                x0=[init_s0, 5.0],
+                bounds=((S_MIN, 100), (1, 10)),
                 options={"maxiter": int(sum(count))},
             )
             params = res.x
@@ -1595,7 +1596,9 @@ class Optimizer:
         self.dataset["stability"] = stabilities
         self.dataset["difficulty"] = difficulties
         self.dataset["p"] = power_forgetting_curve(
-            self.dataset["delta_t"], self.dataset["stability"]
+            self.dataset["delta_t"],
+            self.dataset["stability"],
+            self.dataset["difficulty"],
         )
         self.dataset["log_loss"] = self.dataset.apply(
             lambda row: -np.log(row["p"]) if row["y"] == 1 else -np.log(1 - row["p"]),
@@ -1615,7 +1618,9 @@ class Optimizer:
         self.dataset["stability"] = stabilities
         self.dataset["difficulty"] = difficulties
         self.dataset["p"] = power_forgetting_curve(
-            self.dataset["delta_t"], self.dataset["stability"]
+            self.dataset["delta_t"],
+            self.dataset["stability"],
+            self.dataset["difficulty"],
         )
         self.dataset["log_loss"] = self.dataset.apply(
             lambda row: -np.log(row["p"]) if row["y"] == 1 else -np.log(1 - row["p"]),
@@ -1782,7 +1787,7 @@ class Optimizer:
             )
         )
         analysis_df["last_r"] = power_forgetting_curve(
-            analysis_df["delta_t"], analysis_df["last_s"]
+            analysis_df["delta_t"], analysis_df["last_s"], analysis_df["last_d"]
         )
         analysis_df["last_s_bin"] = analysis_df["last_s"].map(
             lambda x: math.pow(1.2, math.floor(math.log(x, 1.2)))

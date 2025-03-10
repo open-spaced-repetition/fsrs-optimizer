@@ -8,7 +8,9 @@ DECAY = -0.5
 FACTOR = 0.9 ** (1 / DECAY) - 1
 
 
-def power_forgetting_curve(t, s):
+def power_forgetting_curve(t, s, d):
+    DECAY = -0.1 * d
+    FACTOR = 0.9 ** (1 / DECAY) - 1
     return (1 + FACTOR * t / s) ** DECAY
 
 
@@ -125,7 +127,7 @@ def simulate(
     memorized_cnt_per_day = np.zeros(learn_span)
     cost_per_day = np.zeros(learn_span)
 
-    def stability_after_success(s, r, d, rating):
+    def stability_after_success(s, r, rating):
         hard_penalty = np.where(rating == 2, w[15], 1)
         easy_bonus = np.where(rating == 4, w[16], 1)
         return np.maximum(
@@ -134,7 +136,6 @@ def simulate(
             * (
                 1
                 + np.exp(w[8])
-                * (11 - d)
                 * np.power(s, -w[9])
                 * (np.exp((1 - r) * w[10]) - 1)
                 * hard_penalty
@@ -142,14 +143,11 @@ def simulate(
             ),
         )
 
-    def stability_after_failure(s, r, d):
+    def stability_after_failure(s, r):
         return np.maximum(
             0.01,
             np.minimum(
-                w[11]
-                * np.power(d, -w[12])
-                * (np.power(s + 1, w[13]) - 1)
-                * np.exp((1 - r) * w[14]),
+                w[11] * (np.power(s + 1, w[13]) - 1) * np.exp((1 - r) * w[14]),
                 s / np.exp(w[17] * w[18]),
             ),
         )
@@ -192,6 +190,7 @@ def simulate(
         card_table[col["retrievability"]][has_learned] = power_forgetting_curve(
             card_table[col["delta_t"]][has_learned],
             card_table[col["stability"]][has_learned],
+            card_table[col["difficulty"]][has_learned],
         )
         card_table[col["cost"]] = 0
         need_review = card_table[col["due"]] <= today
@@ -219,7 +218,6 @@ def simulate(
         card_table[col["stability"]][true_review & forget] = stability_after_failure(
             card_table[col["stability"]][true_review & forget],
             card_table[col["retrievability"]][true_review & forget],
-            card_table[col["difficulty"]][true_review & forget],
         )
         card_table[col["stability"]][true_review & forget] = stability_short_term(
             card_table[col["stability"]][true_review & forget]
@@ -227,7 +225,6 @@ def simulate(
         card_table[col["stability"]][true_review & ~forget] = stability_after_success(
             card_table[col["stability"]][true_review & ~forget],
             card_table[col["retrievability"]][true_review & ~forget],
-            card_table[col["difficulty"]][true_review & ~forget],
             card_table[col["rating"]][true_review & ~forget],
         )
 
@@ -289,6 +286,7 @@ def simulate(
         card_table[col["retrievability"]][has_learned] = power_forgetting_curve(
             card_table[col["delta_t"]][has_learned],
             card_table[col["stability"]][has_learned],
+            card_table[col["difficulty"]][has_learned],
         )
 
         review_cnt_per_day[today] = np.sum(true_review)
