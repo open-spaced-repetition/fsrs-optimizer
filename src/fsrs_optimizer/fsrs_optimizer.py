@@ -134,7 +134,7 @@ class FSRS(nn.Module):
         keys = torch.tensor([1, 2, 3, 4])
         keys = keys.view(1, -1).expand(rating.size(0), -1)
         index = (rating.unsqueeze(1) == keys).nonzero(as_tuple=True)
-        new_d = torch.ones_like(rating)
+        new_d = torch.ones_like(rating, dtype=torch.float32)
         new_d[index[0]] = self.w[index[1] + 4]
         return new_d
 
