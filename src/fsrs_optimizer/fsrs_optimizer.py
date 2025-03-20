@@ -62,6 +62,7 @@ DEFAULT_PARAMETER = [
     2.9898,
     0.51655,
     0.6621,
+    0.1192,
 ]
 
 S_MIN = 0.01
@@ -88,6 +89,7 @@ DEFAULT_PARAMS_STDDEV_TENSOR = torch.tensor(
         1.03,
         0.27,
         0.39,
+        0.18,
     ],
     dtype=torch.float,
 )
@@ -127,7 +129,11 @@ class FSRS(nn.Module):
         return torch.minimum(new_s, new_minimum_s)
 
     def stability_short_term(self, state: Tensor, rating: Tensor) -> Tensor:
-        new_s = state[:, 0] * torch.exp(self.w[17] * (rating - 3 + self.w[18]))
+        new_s = (
+            state[:, 0]
+            * torch.exp(self.w[17] * (rating - 3 + self.w[18]))
+            * torch.pow(state[:, 0], -self.w[19])
+        )
         return new_s
 
     def init_d(self, rating: Tensor) -> Tensor:
@@ -228,6 +234,7 @@ class ParameterClipper:
             w[16] = w[16].clamp(1, 6)
             w[17] = w[17].clamp(0, 2)
             w[18] = w[18].clamp(0, 2)
+            w[19] = w[19].clamp(0, 0.8)
             module.w.data = w
 
 
