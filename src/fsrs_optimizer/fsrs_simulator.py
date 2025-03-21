@@ -2,6 +2,7 @@ import math
 import numpy as np
 from matplotlib import pyplot as plt
 from tqdm import trange  # type: ignore
+import random
 
 
 DECAY = -0.5
@@ -154,15 +155,43 @@ def simulate(
             ),
         )
 
-    def stability_short_term(s, init_rating=None):
+    relearn_costs = np.array([1, 2, 3, 4])
+    relearn_chances = np.array([0.3, 0.05, 0.5, 0.15])
+    MAX_RELEARN_STEPS = 5
+    # learn_state: 1: Learning, 2: Review, 3: Relearning
+    def stability_short_term(s: np.array, init_rating=None):
         if init_rating is not None:
             rating_offset = np.choose(init_rating - 1, first_rating_offset)
-            session_len = np.choose(init_rating - 1, first_session_len)
         else:
             rating_offset = forget_rating_offset
-            session_len = forget_session_len
-        new_s = s * np.exp(w[17] * (rating_offset + session_len * w[18]))
-        return new_s
+
+        def step(s, next_weights):
+            rating = random.choice(relearn_costs, p=next_weights)
+            new_s = (
+                s
+                * (math.e ** (w[17] * (rating_offset + w[18])))
+                * (s ** -w[19])
+            )
+
+            return (new_s, rating)
+
+        def loop(s):
+            i = 0
+            consecutive = 0
+            rating = init_rating
+            while i < MAX_RELEARN_STEPS and consecutive > 1:
+                (s, rating) = step(s, relearn_chances)
+                i += 1
+
+            return s
+        
+        if len(s) != 0:
+            s = np.vectorize(loop)(s)
+        else:
+            s = np.array([])
+
+        return s
+        
 
     def init_d(rating):
         return w[4] - np.exp(w[5] * (rating - 1)) + 1
