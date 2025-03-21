@@ -175,10 +175,10 @@ def simulate(
 
             return (new_s, rating)
 
-        def loop(s):
+        def loop(s, init_rating):
             i = 0
             consecutive = 0
-            rating = 1 # No idea how we're going to get init_rating here
+            rating = init_rating or 1
             while i < MAX_RELEARN_STEPS and consecutive < 2:
                 (s, rating) = step(s, relearn_chances[rating - 1])
                 i += 1
@@ -189,8 +189,10 @@ def simulate(
 
             return s
 
+        
+
         if len(s) != 0:
-            s = np.vectorize(loop)(s)
+            s = np.vectorize(loop)(s, init_rating)
         else: # Initial stabilities
             s = np.array([])
 
