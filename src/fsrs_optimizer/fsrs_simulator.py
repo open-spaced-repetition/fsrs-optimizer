@@ -156,7 +156,7 @@ def simulate(
         )
 
     relearn_costs = np.array([1, 2, 3, 4])
-    relearn_chances = np.array([0.3, 0.05, 0.5, 0.15])
+    relearn_chances = np.array([[0.3, 0.05, 0.5, 0.15], [0.3, 0.05, 0.5, 0.15], [0.3, 0.05, 0.5, 0.15], [0.3, 0.05, 0.5, 0.15]])
     MAX_RELEARN_STEPS = 5
     # learn_state: 1: Learning, 2: Review, 3: Relearning
     def stability_short_term(s: np.array, init_rating=None):
@@ -166,10 +166,10 @@ def simulate(
             rating_offset = forget_rating_offset
 
         def step(s, next_weights):
-            rating = random.choice(relearn_costs, p=next_weights)
+            rating = np.random.choice(relearn_costs, p=next_weights)
             new_s = (
                 s
-                * (math.e ** (w[17] * (rating_offset + w[18])))
+                * (math.e ** (w[17] * (rating - 3 + w[18])))
                 * (s ** -w[19])
             )
 
@@ -178,19 +178,23 @@ def simulate(
         def loop(s):
             i = 0
             consecutive = 0
-            rating = init_rating
-            while i < MAX_RELEARN_STEPS and consecutive > 1:
-                (s, rating) = step(s, relearn_chances)
+            rating = 1 # No idea how we're going to get init_rating here
+            while i < MAX_RELEARN_STEPS and consecutive < 2:
+                (s, rating) = step(s, relearn_chances[rating - 1])
                 i += 1
+                if rating > 1:
+                    consecutive += 1
+                else:
+                    consecutive = 0
 
             return s
-        
+
         if len(s) != 0:
             s = np.vectorize(loop)(s)
-        else:
+        else: # Initial stabilities
             s = np.array([])
 
-        return s
+        return np.array(s)
         
 
     def init_d(rating):
@@ -711,6 +715,7 @@ if __name__ == "__main__":
             2.9466,
             0.4891,
             0.6468,
+            0.1192
         ],
         "deck_size": 20000,
         "learn_span": 365,
