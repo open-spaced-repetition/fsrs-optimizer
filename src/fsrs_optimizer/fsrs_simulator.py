@@ -160,11 +160,6 @@ def simulate(
     MAX_RELEARN_STEPS = 5
     # learn_state: 1: Learning, 2: Review, 3: Relearning
     def stability_short_term(s: np.array, init_rating=None):
-        if init_rating is not None:
-            rating_offset = np.choose(init_rating - 1, first_rating_offset)
-        else:
-            rating_offset = forget_rating_offset
-
         def step(s, next_weights):
             rating = np.random.choice(relearn_costs, p=next_weights)
             new_s = (
