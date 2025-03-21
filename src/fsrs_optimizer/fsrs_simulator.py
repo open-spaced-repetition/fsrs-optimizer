@@ -129,7 +129,7 @@ def simulate(
         hard_penalty = np.where(rating == 2, w[15], 1)
         easy_bonus = np.where(rating == 4, w[16], 1)
         return np.maximum(
-            0.01,
+            0.001,
             s
             * (
                 1
@@ -144,7 +144,7 @@ def simulate(
 
     def stability_after_failure(s, r, d):
         return np.maximum(
-            0.01,
+            0.001,
             np.minimum(
                 w[11]
                 * np.power(d, -w[12])

@@ -64,7 +64,7 @@ DEFAULT_PARAMETER = [
     0.6621,
 ]
 
-S_MIN = 0.01
+S_MIN = 0.001
 
 
 DEFAULT_PARAMS_STDDEV_TENSOR = torch.tensor(
@@ -566,7 +566,7 @@ class Optimizer:
         self.float_delta_t = float_delta_t
         self.enable_short_term = enable_short_term
         global S_MIN
-        S_MIN = 1e-6 if float_delta_t else 0.01
+        S_MIN = 1e-6 if float_delta_t else 0.001
 
     def anki_extract(
         self,
