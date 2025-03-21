@@ -181,7 +181,7 @@ def simulate(
             while i < MAX_RELEARN_STEPS and consecutive < 2:
                 (s, rating) = step(s, relearn_chances[rating - 1])
                 i += 1
-                if rating > 1:
+                if rating > 2:
                     consecutive += 1
                 else:
                     consecutive = 0
