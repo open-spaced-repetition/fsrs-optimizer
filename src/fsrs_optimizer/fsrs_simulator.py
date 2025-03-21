@@ -156,17 +156,21 @@ def simulate(
         )
 
     relearn_costs = np.array([1, 2, 3, 4])
-    relearn_chances = np.array([[0.3, 0.05, 0.5, 0.15], [0.3, 0.05, 0.5, 0.15], [0.3, 0.05, 0.5, 0.15], [0.3, 0.05, 0.5, 0.15]])
+    relearn_chances = np.array(
+        [
+            [0.3, 0.05, 0.5, 0.15],
+            [0.3, 0.05, 0.5, 0.15],
+            [0.3, 0.05, 0.5, 0.15],
+            [0.3, 0.05, 0.5, 0.15],
+        ]
+    )
     MAX_RELEARN_STEPS = 5
+
     # learn_state: 1: Learning, 2: Review, 3: Relearning
     def stability_short_term(s: np.array, init_rating=None):
         def step(s, next_weights):
             rating = np.random.choice(relearn_costs, p=next_weights)
-            new_s = (
-                s
-                * (math.e ** (w[17] * (rating - 3 + w[18])))
-                * (s ** -w[19])
-            )
+            new_s = s * (math.e ** (w[17] * (rating - 3 + w[18]))) * (s ** -w[19])
 
             return (new_s, rating)
 
@@ -184,15 +188,12 @@ def simulate(
 
             return s
 
-        
-
         if len(s) != 0:
-            s = np.vectorize(loop)(s, init_rating)
-        else: # Initial stabilities
-            s = np.array([])
+            new_s = np.vectorize(loop)(s, init_rating)
+        else: 
+            new_s = np.array([])
 
-        return np.array(s)
-        
+        return new_s
 
     def init_d(rating):
         return w[4] - np.exp(w[5] * (rating - 1)) + 1
@@ -712,7 +713,7 @@ if __name__ == "__main__":
             2.9466,
             0.4891,
             0.6468,
-            0.1192
+            0.1192,
         ],
         "deck_size": 20000,
         "learn_span": 365,
