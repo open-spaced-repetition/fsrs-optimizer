@@ -164,13 +164,24 @@ def simulate(
             [0.3, 0.05, 0.5, 0.15],
         ]
     )
+    learn_costs = np.array([[1, 2, 3, 4], [5, 6, 7, 8], [9, 10, 11, 12]])
     MAX_RELEARN_STEPS = 5
 
     # learn_state: 1: Learning, 2: Review, 3: Relearning
     def stability_short_term(s: np.array, init_rating=None):
+        if init_rating:
+            costs = learn_costs[0]
+        else:
+            costs = learn_costs[1]
+
+        cost = 0
+
         def step(s, next_weights):
-            rating = np.random.choice(relearn_costs, p=next_weights)
+            nonlocal cost
+
+            rating = np.random.choice([1 - 3, 2 - 3, 3 - 3, 4 - 3], p=next_weights) # Somethings wrong here
             new_s = s * (math.e ** (w[17] * (rating - 3 + w[18]))) * (s ** -w[19])
+            cost += costs[rating - 1]
 
             return (new_s, rating)
 
@@ -190,8 +201,10 @@ def simulate(
 
         if len(s) != 0:
             new_s = np.vectorize(loop)(s, init_rating)
-        else: 
+        else:
             new_s = np.array([])
+
+        cost_per_day[today] += cost
 
         return new_s
 
