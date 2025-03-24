@@ -178,7 +178,7 @@ def simulate(
 
         def step(s, next_weights):
 
-            rating = np.random.choice([1, 2, 3, 4], p=next_weights) # Somethings wrong here
+            rating = np.random.choice([1, 2, 3, 4], p=next_weights)
             new_s = s * (math.e ** (w[17] * (rating - 3 + w[18]))) * (s ** -w[19])
 
             return (new_s, rating)
