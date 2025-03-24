@@ -172,7 +172,7 @@ def simulate(
         if init_rating is not None:
             costs = state_rating_costs[0]
         else:
-            costs = state_rating_costs[1]
+            costs = state_rating_costs[2]
 
         cost = 0
 
