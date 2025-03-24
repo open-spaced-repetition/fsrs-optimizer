@@ -164,38 +164,40 @@ def simulate(
             [0.3, 0.05, 0.5, 0.15],
         ]
     )
-    learn_costs = np.array([[1, 2, 3, 4], [5, 6, 7, 8], [9, 10, 11, 12]])
+    learn_step_costs = np.array([[1, 2, 3, 4], [5, 6, 7, 8], [9, 10, 11, 12]])
     MAX_RELEARN_STEPS = 5
 
     # learn_state: 1: Learning, 2: Review, 3: Relearning
-    def stability_short_term(s: np.array, init_rating=None):
-        if init_rating:
-            costs = learn_costs[0]
+    def stability_short_term(s: np.ndarray, init_rating: np.ndarray=None):
+        if init_rating is not None:
+            costs = learn_step_costs[0]
         else:
-            costs = learn_costs[1]
+            costs = learn_step_costs[1]
 
         cost = 0
 
         def step(s, next_weights):
-            nonlocal cost
 
-            rating = np.random.choice([1 - 3, 2 - 3, 3 - 3, 4 - 3], p=next_weights) # Somethings wrong here
+            rating = np.random.choice([1, 2, 3, 4], p=next_weights) # Somethings wrong here
             new_s = s * (math.e ** (w[17] * (rating - 3 + w[18]))) * (s ** -w[19])
-            cost += costs[rating - 1]
 
             return (new_s, rating)
 
         def loop(s, init_rating):
+            nonlocal cost
             i = 0
             consecutive = 0
             rating = init_rating or 1
             while i < MAX_RELEARN_STEPS and consecutive < 2 and rating < 4:
                 (s, rating) = step(s, relearn_chances[rating - 1])
+                cost += costs[rating - 1]
                 i += 1
                 if rating > 2:
                     consecutive += 1
                 else:
                     consecutive = 0
+            
+            cost_per_day[today] += cost
 
             return s
 
