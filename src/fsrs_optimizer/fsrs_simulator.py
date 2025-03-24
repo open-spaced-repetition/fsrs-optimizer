@@ -155,20 +155,34 @@ def simulate(
             ),
         )
 
-    relearn_costs = np.array([1, 2, 3, 4])
-    relearn_chances = np.array(
+    # Learning, Relearning
+    rating_chances = np.array(
         [
-            [0.3, 0.05, 0.5, 0.15],
-            [0.3, 0.05, 0.5, 0.15],
-            [0.3, 0.05, 0.5, 0.15],
-            [0.3, 0.05, 0.5, 0.15],
+            [
+                [0.3, 0.05, 0.5, 0.15],
+                [0.3, 0.05, 0.5, 0.15],
+                [0.3, 0.05, 0.5, 0.15],
+                [0.3, 0.05, 0.5, 0.15],
+            ],
+            [
+                [0.3, 0.05, 0.5, 0.15],
+                [0.3, 0.05, 0.5, 0.15],
+                [0.3, 0.05, 0.5, 0.15],
+                [0.3, 0.05, 0.5, 0.15],
+            ],
         ]
     )
-    state_rating_costs = np.array([[19.58, 18.79, 13.78, 10.71], [19.38, 17.59, 12.38, 8.94], [16.44, 15.25, 12.32, 8.03]])
+    state_rating_costs = np.array(
+        [
+            [19.58, 18.79, 13.78, 10.71],
+            [19.38, 17.59, 12.38, 8.94],
+            [16.44, 15.25, 12.32, 8.03],
+        ]
+    )
     MAX_RELEARN_STEPS = 5
 
     # learn_state: 1: Learning, 2: Review, 3: Relearning
-    def stability_short_term(s: np.ndarray, init_rating: np.ndarray=None):
+    def stability_short_term(s: np.ndarray, init_rating: np.ndarray = None):
         if init_rating is not None:
             costs = state_rating_costs[0]
         else:
@@ -187,16 +201,17 @@ def simulate(
             nonlocal cost
             i = 0
             consecutive = 0
+            learning = init_rating is None
             rating = init_rating or 1
             while i < MAX_RELEARN_STEPS and consecutive < 2 and rating < 4:
-                (s, rating) = step(s, relearn_chances[rating - 1])
+                (s, rating) = step(s, rating_chances[int(not learning)][rating - 1])
                 cost += costs[rating - 1]
                 i += 1
                 if rating > 2:
                     consecutive += 1
                 else:
                     consecutive = 0
-            
+
             cost_per_day[today] += cost
 
             return s
