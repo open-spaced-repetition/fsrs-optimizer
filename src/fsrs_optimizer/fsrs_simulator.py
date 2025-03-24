@@ -155,22 +155,21 @@ def simulate(
             ),
         )
 
-    # Learning, Relearning
-    rating_chances = np.array(
+    learning_step_transitions = np.array(
         [
-            [
-                [0.3, 0.05, 0.5, 0.15],
-                [0.3, 0.05, 0.5, 0.15],
-                [0.3, 0.05, 0.5, 0.15],
-                [0.3, 0.05, 0.5, 0.15],
-            ],
-            [
-                [0.3, 0.05, 0.5, 0.15],
-                [0.3, 0.05, 0.5, 0.15],
-                [0.3, 0.05, 0.5, 0.15],
-                [0.3, 0.05, 0.5, 0.15],
-            ],
-        ]
+            [0.3, 0.05, 0.5, 0.15],
+            [0.3, 0.05, 0.5, 0.15],
+            [0.3, 0.05, 0.5, 0.15],
+            [0.3, 0.05, 0.5, 0.15],
+        ],
+    )
+    relearning_step_transitions = np.array(
+        [
+            [0.3, 0.05, 0.5, 0.15],
+            [0.3, 0.05, 0.5, 0.15],
+            [0.3, 0.05, 0.5, 0.15],
+            [0.3, 0.05, 0.5, 0.15],
+        ],
     )
     state_rating_costs = np.array(
         [
@@ -201,10 +200,14 @@ def simulate(
             nonlocal cost
             i = 0
             consecutive = 0
-            learning = init_rating is None
+            step_transitions = (
+                relearning_step_transitions
+                if init_rating is None
+                else learning_step_transitions
+            )
             rating = init_rating or 1
             while i < MAX_RELEARN_STEPS and consecutive < 2 and rating < 4:
-                (s, rating) = step(s, rating_chances[int(not learning)][rating - 1])
+                (s, rating) = step(s, step_transitions[rating - 1])
                 cost += costs[rating - 1]
                 i += 1
                 if rating > 2:
