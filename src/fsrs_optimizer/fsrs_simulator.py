@@ -206,8 +206,6 @@ def simulate(
         else:
             new_s = np.array([])
 
-        cost_per_day[today] += cost
-
         return new_s
 
     def init_d(rating):
