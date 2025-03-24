@@ -164,15 +164,15 @@ def simulate(
             [0.3, 0.05, 0.5, 0.15],
         ]
     )
-    learn_step_costs = np.array([[1, 2, 3, 4], [5, 6, 7, 8], [9, 10, 11, 12]])
+    state_rating_costs = np.array([[1, 2, 3, 4], [5, 6, 7, 8], [9, 10, 11, 12]])
     MAX_RELEARN_STEPS = 5
 
     # learn_state: 1: Learning, 2: Review, 3: Relearning
     def stability_short_term(s: np.ndarray, init_rating: np.ndarray=None):
         if init_rating is not None:
-            costs = learn_step_costs[0]
+            costs = state_rating_costs[0]
         else:
-            costs = learn_step_costs[1]
+            costs = state_rating_costs[1]
 
         cost = 0
 
