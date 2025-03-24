@@ -164,7 +164,7 @@ def simulate(
             [0.3, 0.05, 0.5, 0.15],
         ]
     )
-    state_rating_costs = np.array([[1, 2, 3, 4], [5, 6, 7, 8], [9, 10, 11, 12]])
+    state_rating_costs = np.array([[19.58, 18.79, 13.78, 10.71], [19.38, 17.59, 12.38, 8.94], [16.44, 15.25, 12.32, 8.03]])
     MAX_RELEARN_STEPS = 5
 
     # learn_state: 1: Learning, 2: Review, 3: Relearning
