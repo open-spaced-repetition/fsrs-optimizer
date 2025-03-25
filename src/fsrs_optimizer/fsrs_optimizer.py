@@ -129,11 +129,10 @@ class FSRS(nn.Module):
         return torch.minimum(new_s, new_minimum_s)
 
     def stability_short_term(self, state: Tensor, rating: Tensor) -> Tensor:
-        new_s = (
-            state[:, 0]
-            * torch.exp(self.w[17] * (rating - 3 + self.w[18]))
-            * torch.pow(state[:, 0], -self.w[19])
+        sinc = torch.exp(self.w[17] * (rating - 3 + self.w[18])) * torch.pow(
+            state[:, 0], -self.w[19]
         )
+        new_s = state[:, 0] * torch.where(rating >= 3, sinc.clamp(min=1), sinc)
         return new_s
 
     def init_d(self, rating: Tensor) -> Tensor:
