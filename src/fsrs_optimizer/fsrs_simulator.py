@@ -182,7 +182,9 @@ def simulate(
     MAX_RELEARN_STEPS = 5
 
     # learn_state: 1: Learning, 2: Review, 3: Relearning
-    def stability_short_term(s: np.ndarray, init_rating: Optional[np.ndarray] = None):
+    def stability_short_term(
+        s: np.ndarray, d: np.ndarray, init_rating: Optional[np.ndarray] = None
+    ):
         if init_rating is not None:
             costs = state_rating_costs[0]
         else:
@@ -196,7 +198,7 @@ def simulate(
 
             return (new_s, rating)
 
-        def loop(s, init_rating):
+        def loop(s, d, init_rating):
             nonlocal cost
             i = 0
             consecutive = 0
@@ -217,14 +219,16 @@ def simulate(
 
             cost_per_day[today] += cost
 
-            return s
+            return s, 1
 
         if len(s) != 0:
-            new_s = np.vectorize(loop)(s, init_rating)
+            new_s, new_d = np.vectorize(loop, otypes=["float", "float"])(
+                s, d, init_rating
+            )
         else:
-            new_s = np.array([])
+            new_s, new_d = np.array([[],[]])
 
-        return new_s
+        return new_s, new_d
 
     def init_d(rating):
         return w[4] - np.exp(w[5] * (rating - 1)) + 1
@@ -283,8 +287,12 @@ def simulate(
             card_table[col["retrievability"]][true_review & forget],
             card_table[col["difficulty"]][true_review & forget],
         )
-        card_table[col["stability"]][true_review & forget] = stability_short_term(
-            card_table[col["stability"]][true_review & forget]
+        (
+            card_table[col["stability"]][true_review & forget],
+            card_table[col["difficulty"]][true_review & forget],
+        ) = stability_short_term(
+            card_table[col["stability"]][true_review & forget],
+            card_table[col["difficulty"]][true_review & forget],
         )
         card_table[col["stability"]][true_review & ~forget] = stability_after_success(
             card_table[col["stability"]][true_review & ~forget],
@@ -318,8 +326,12 @@ def simulate(
         card_table[col["stability"]][true_learn] = np.choose(
             card_table[col["rating"]][true_learn].astype(int) - 1, w[:4]
         )
-        card_table[col["stability"]][true_learn] = stability_short_term(
+        (
             card_table[col["stability"]][true_learn],
+            card_table[col["difficulty"]][true_learn],
+        ) = stability_short_term(
+            card_table[col["stability"]][true_learn],
+            card_table[col["difficulty"]][true_learn],
             init_rating=card_table[col["rating"]][true_learn].astype(int),
         )
         card_table[col["difficulty"]][true_learn] = init_d_with_short_term(
