@@ -186,6 +186,8 @@ def simulate(
         s: np.ndarray, d: np.ndarray, init_rating: Optional[np.ndarray] = None
     ):
         if init_rating is not None:
+            s = np.choose(init_rating - 1, w)
+            d = init_d(init_rating)
             costs = state_rating_costs[0]
         else:
             costs = state_rating_costs[2]
@@ -233,11 +235,6 @@ def simulate(
 
     def init_d(rating):
         return w[4] - np.exp(w[5] * (rating - 1)) + 1
-
-    def init_d_with_short_term(rating):
-        rating_offset = np.choose(rating - 1, first_rating_offset)
-        new_d = init_d(rating) - w[6] * rating_offset
-        return np.clip(new_d, 1, 10)
 
     def linear_damping(delta_d, old_d):
         return delta_d * (10 - old_d) / 9
@@ -328,9 +325,6 @@ def simulate(
             card_table[col["stability"]][true_learn],
             card_table[col["difficulty"]][true_learn],
             init_rating=card_table[col["rating"]][true_learn].astype(int),
-        )
-        card_table[col["difficulty"]][true_learn] = init_d_with_short_term(
-            card_table[col["rating"]][true_learn].astype(int)
         )
 
         card_table[col["ivl"]][true_review | true_learn] = np.clip(
