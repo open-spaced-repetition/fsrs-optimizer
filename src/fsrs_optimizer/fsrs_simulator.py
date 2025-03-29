@@ -210,6 +210,7 @@ def simulate(
             rating = init_rating or 1
             while i < MAX_RELEARN_STEPS and consecutive < 2 and rating < 4:
                 (s, rating) = step(s, step_transitions[rating - 1])
+                d = next_d(d, rating)
                 cost += costs[rating - 1]
                 i += 1
                 if rating > 2:
@@ -219,14 +220,14 @@ def simulate(
 
             cost_per_day[today] += cost
 
-            return s, 1
+            return s, d
 
         if len(s) != 0:
             new_s, new_d = np.vectorize(loop, otypes=["float", "float"])(
                 s, d, init_rating
             )
         else:
-            new_s, new_d = np.array([[],[]])
+            new_s, new_d = [], []
 
         return new_s, new_d
 
@@ -304,12 +305,6 @@ def simulate(
         card_table[col["difficulty"]][true_review] = next_d(
             card_table[col["difficulty"]][true_review],
             card_table[col["rating"]][true_review],
-        )
-        card_table[col["difficulty"]][true_review & forget] = np.clip(
-            card_table[col["difficulty"]][true_review & forget]
-            - (w[6] * forget_rating_offset),
-            1,
-            10,
         )
 
         need_learn = card_table[col["stability"]] == 1e-10
