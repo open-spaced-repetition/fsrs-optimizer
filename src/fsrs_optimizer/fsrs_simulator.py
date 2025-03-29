@@ -182,7 +182,7 @@ def simulate(
     MAX_RELEARN_STEPS = 5
 
     # learn_state: 1: Learning, 2: Review, 3: Relearning
-    def stability_short_term(
+    def memory_state_short_term(
         s: np.ndarray, d: np.ndarray, init_rating: Optional[np.ndarray] = None
     ):
         if init_rating is not None:
@@ -291,7 +291,7 @@ def simulate(
         (
             card_table[col["stability"]][true_review & forget],
             card_table[col["difficulty"]][true_review & forget],
-        ) = stability_short_term(
+        ) = memory_state_short_term(
             card_table[col["stability"]][true_review & forget],
             card_table[col["difficulty"]][true_review & forget],
         )
@@ -324,7 +324,7 @@ def simulate(
         (
             card_table[col["stability"]][true_learn],
             card_table[col["difficulty"]][true_learn],
-        ) = stability_short_term(
+        ) = memory_state_short_term(
             card_table[col["stability"]][true_learn],
             card_table[col["difficulty"]][true_learn],
             init_rating=card_table[col["rating"]][true_learn].astype(int),
