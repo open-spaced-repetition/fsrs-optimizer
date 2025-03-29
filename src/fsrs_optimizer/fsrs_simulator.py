@@ -217,7 +217,7 @@ def simulate(
                 i += 1
                 if rating > 2:
                     consecutive += 1
-                else:
+                elif rating == 1:
                     consecutive = 0
 
             cost_per_day[today] += cost
