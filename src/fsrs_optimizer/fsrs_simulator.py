@@ -87,6 +87,8 @@ DEFAULT_FIRST_RATING_OFFSETS = np.array([-0.72, -0.15, -0.01, 0.0])
 DEFAULT_FIRST_SESSION_LENS = np.array([2.02, 1.28, 0.81, 0.0])
 DEFAULT_FORGET_RATING_OFFSET = -0.28
 DEFAULT_FORGET_SESSION_LEN = 1.05
+DEFAULT_LEARNING_STEP_COUNT = 2
+DEFAULT_RELEARNING_STEP_COUNT = 2
 DEFAULT_LEARNING_STEP_TRANSITIONS = np.array(
     [
         [0.3687, 0.0628, 0.5108, 0.0577],
@@ -127,6 +129,8 @@ def simulate(
     first_session_len=DEFAULT_FIRST_SESSION_LENS,
     forget_rating_offset=DEFAULT_FORGET_RATING_OFFSET,
     forget_session_len=DEFAULT_FORGET_SESSION_LEN,
+    learning_step_count = DEFAULT_LEARNING_STEP_COUNT,
+    relearning_step_count = DEFAULT_RELEARNING_STEP_COUNT,
     learning_step_transitions=DEFAULT_LEARNING_STEP_TRANSITIONS,
     relearning_step_transitions=DEFAULT_RELEARNING_STEP_TRANSITIONS,
     state_rating_costs=DEFAULT_STATE_RATING_COSTS,
@@ -189,8 +193,10 @@ def simulate(
             s = np.choose(init_rating - 1, w)
             d = init_d(init_rating)
             costs = state_rating_costs[0]
+            max_consecutive = learning_step_count - np.choose(init_rating - 1, [1, 0, 0, 0])
         else:
             costs = state_rating_costs[2]
+            max_consecutive = relearning_step_count
 
         cost = 0
 
@@ -200,7 +206,7 @@ def simulate(
 
             return (new_s, rating)
 
-        def loop(s, d, init_rating):
+        def loop(s, d, max_consecutive, init_rating):
             nonlocal cost
             i = 0
             consecutive = 0
@@ -210,7 +216,7 @@ def simulate(
                 else learning_step_transitions
             )
             rating = init_rating or 1
-            while i < MAX_RELEARN_STEPS and consecutive < 2 and rating < 4:
+            while i < MAX_RELEARN_STEPS and consecutive < max_consecutive and rating < 4:
                 (s, rating) = step(s, step_transitions[rating - 1])
                 d = next_d(d, rating)
                 cost += costs[rating - 1]
@@ -226,7 +232,7 @@ def simulate(
 
         if len(s) != 0:
             new_s, new_d = np.vectorize(loop, otypes=["float", "float"])(
-                s, d, init_rating
+                s, d, max_consecutive, init_rating
             )
         else:
             new_s, new_d = [], []
