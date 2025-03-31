@@ -194,11 +194,11 @@ def simulate(
             d = init_d(init_rating)
             costs = state_rating_costs[0]
             max_consecutive = learning_step_count - np.choose(init_rating - 1, [1, 0, 0, 0])
+            cost = np.choose(init_rating - 1, learn_costs).sum()
         else:
             costs = state_rating_costs[2]
             max_consecutive = relearning_step_count
-
-        cost = 0
+            cost = 0
 
         def step(s, next_weights):
             rating = np.random.choice([1, 2, 3, 4], p=next_weights)
