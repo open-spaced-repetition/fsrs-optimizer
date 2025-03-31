@@ -43,25 +43,26 @@ Review = 2
 Relearning = 3
 
 DEFAULT_PARAMETER = [
-    0.40255,
-    1.18385,
-    3.173,
-    15.69105,
-    7.1949,
-    0.5345,
-    1.4604,
-    0.0046,
-    1.54575,
-    0.1192,
-    1.01925,
-    1.9395,
-    0.11,
-    0.29605,
-    2.2698,
-    0.2315,
-    2.9898,
-    0.51655,
-    0.6621,
+    0.3095,
+    1.4192,
+    3.5093,
+    15.9819,
+    7.0529,
+    0.5676,
+    1.9836,
+    0.0088,
+    1.5255,
+    0.1074,
+    1.0011,
+    1.8766,
+    0.1111,
+    0.3333,
+    2.2994,
+    0.2249,
+    3.0004,
+    0.67,
+    0.4006,
+    0.1832,
 ]
 
 S_MIN = 0.01
@@ -69,25 +70,26 @@ S_MIN = 0.01
 
 DEFAULT_PARAMS_STDDEV_TENSOR = torch.tensor(
     [
-        6.61,
-        9.52,
-        17.69,
-        27.74,
-        0.55,
+        6.43,
+        9.66,
+        17.58,
+        27.85,
+        0.57,
         0.28,
-        0.67,
+        0.6,
         0.12,
-        0.4,
+        0.39,
         0.18,
-        0.34,
-        0.27,
-        0.08,
-        0.14,
+        0.33,
+        0.3,
+        0.09,
+        0.16,
         0.57,
         0.25,
         1.03,
-        0.27,
-        0.39,
+        0.31,
+        0.32,
+        0.14,
     ],
     dtype=torch.float,
 )
@@ -127,7 +129,10 @@ class FSRS(nn.Module):
         return torch.minimum(new_s, new_minimum_s)
 
     def stability_short_term(self, state: Tensor, rating: Tensor) -> Tensor:
-        new_s = state[:, 0] * torch.exp(self.w[17] * (rating - 3 + self.w[18]))
+        sinc = torch.exp(self.w[17] * (rating - 3 + self.w[18])) * torch.pow(
+            state[:, 0], -self.w[19]
+        )
+        new_s = state[:, 0] * torch.where(rating >= 3, sinc.clamp(min=1), sinc)
         return new_s
 
     def init_d(self, rating: Tensor) -> Tensor:
@@ -228,6 +233,7 @@ class ParameterClipper:
             w[16] = w[16].clamp(1, 6)
             w[17] = w[17].clamp(0, 2)
             w[18] = w[18].clamp(0, 2)
+            w[19] = w[19].clamp(0, 0.8)
             module.w.data = w
 
 

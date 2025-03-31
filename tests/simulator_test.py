@@ -1,7 +1,5 @@
 from src.fsrs_optimizer import *
 
-# Use `DEFAULT_PARAMETER` when updated
-TEMP_PARAMETERS = [*DEFAULT_PARAMETER, 0.1832]
 
 class Test_Simulator:
     def test_simulate(self):
@@ -12,8 +10,8 @@ class Test_Simulator:
             memorized_cnt_per_day,
             cost_per_day,
             revlogs,
-        ) = simulate(w=TEMP_PARAMETERS, request_retention=0.9)
-        assert memorized_cnt_per_day[-1] == 6064.7049740089315
+        ) = simulate(w=DEFAULT_PARAMETER, request_retention=0.9)
+        assert memorized_cnt_per_day[-1] == 5415.907257823876
 
     def test_optimal_retention(self):
         default_params = {
@@ -27,4 +25,4 @@ class Test_Simulator:
             "loss_aversion": 2.5,
         }
         r = optimal_retention(**default_params)
-        assert r == 0.86305357865811
+        assert r == 0.8251057979087782
