@@ -210,7 +210,6 @@ def simulate(
             return (new_s, rating)
 
         def loop(s, d, max_consecutive, init_rating):
-            nonlocal cost
             i = 0
             consecutive = 0
             step_transitions = (
@@ -219,6 +218,7 @@ def simulate(
                 else learning_step_transitions
             )
             rating = init_rating or 1
+            cost = 0
             while (
                 i < MAX_RELEARN_STEPS and consecutive < max_consecutive and rating < 4
             ):
@@ -231,18 +231,16 @@ def simulate(
                 elif rating == 1:
                     consecutive = 0
 
-            cost_per_day[today] += cost
-
-            return s, d
+            return s, d, cost
 
         if len(s) != 0:
-            new_s, new_d = np.vectorize(loop, otypes=["float", "float"])(
+            new_s, new_d, cost = np.vectorize(loop, otypes=["float", "float", "float"])(
                 s, d, max_consecutive, init_rating
             )
         else:
-            new_s, new_d = [], []
+            new_s, new_d, cost = [], [], []
 
-        return new_s, new_d
+        return new_s, new_d, cost
 
     def init_d(rating):
         return w[4] - np.exp(w[5] * (rating - 1)) + 1
@@ -302,6 +300,7 @@ def simulate(
         (
             card_table[col["stability"]][true_review & forget],
             card_table[col["difficulty"]][true_review & forget],
+            costs,
         ) = memory_state_short_term(
             card_table[col["stability"]][true_review & forget],
             card_table[col["difficulty"]][true_review & forget],
@@ -317,6 +316,10 @@ def simulate(
             card_table[col["difficulty"]][true_review & ~forget],
             card_table[col["rating"]][true_review & ~forget],
         )
+
+        card_table[col["cost"]][true_review & forget] = [
+            a + b for a, b in zip(card_table[col["cost"]][true_review & forget], costs)
+        ]
 
         need_learn = card_table[col["stability"]] == 1e-10
         card_table[col["cost"]][need_learn] = np.choose(
@@ -335,11 +338,16 @@ def simulate(
         (
             card_table[col["stability"]][true_learn],
             card_table[col["difficulty"]][true_learn],
+            costs,
         ) = memory_state_short_term(
             card_table[col["stability"]][true_learn],
             card_table[col["difficulty"]][true_learn],
             init_rating=card_table[col["rating"]][true_learn].astype(int),
         )
+
+        card_table[col["cost"]][true_learn] = [
+            a + b for a, b in zip(card_table[col["cost"]][true_learn], costs)
+        ]
 
         card_table[col["ivl"]][true_review | true_learn] = np.clip(
             next_interval(
