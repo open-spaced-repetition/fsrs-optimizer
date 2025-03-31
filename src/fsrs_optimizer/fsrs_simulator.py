@@ -4,7 +4,7 @@ from matplotlib import pyplot as plt
 from tqdm import trange  # type: ignore
 
 
-DECAY = -0.5
+DECAY = -0.2
 FACTOR = 0.9 ** (1 / DECAY) - 1
 
 
