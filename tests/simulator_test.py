@@ -15,7 +15,7 @@ class Test_Simulator:
 
     def test_optimal_retention(self):
         default_params = {
-            "w": TEMP_PARAMETERS,
+            "w": DEFAULT_PARAMETER,
             "deck_size": 10000,
             "learn_span": 1000,
             "max_cost_perday": math.inf,
