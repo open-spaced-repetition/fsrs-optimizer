@@ -129,8 +129,8 @@ def simulate(
     first_session_len=DEFAULT_FIRST_SESSION_LENS,
     forget_rating_offset=DEFAULT_FORGET_RATING_OFFSET,
     forget_session_len=DEFAULT_FORGET_SESSION_LEN,
-    learning_step_count = DEFAULT_LEARNING_STEP_COUNT,
-    relearning_step_count = DEFAULT_RELEARNING_STEP_COUNT,
+    learning_step_count=DEFAULT_LEARNING_STEP_COUNT,
+    relearning_step_count=DEFAULT_RELEARNING_STEP_COUNT,
     learning_step_transitions=DEFAULT_LEARNING_STEP_TRANSITIONS,
     relearning_step_transitions=DEFAULT_RELEARNING_STEP_TRANSITIONS,
     state_rating_costs=DEFAULT_STATE_RATING_COSTS,
@@ -193,8 +193,10 @@ def simulate(
             s = np.choose(init_rating - 1, w)
             d = init_d(init_rating)
             costs = state_rating_costs[0]
-            max_consecutive = learning_step_count - np.choose(init_rating - 1, [1, 0, 0, 0])
-            cost = np.choose(init_rating - 1, learn_costs).sum()
+            max_consecutive = learning_step_count - np.choose(
+                init_rating - 1, [0, 0, 1, 1]
+            )
+            cost = np.choose(init_rating - 1, costs).sum()
         else:
             costs = state_rating_costs[2]
             max_consecutive = relearning_step_count
@@ -202,7 +204,8 @@ def simulate(
 
         def step(s, next_weights):
             rating = np.random.choice([1, 2, 3, 4], p=next_weights)
-            new_s = s * (math.e ** (w[17] * (rating - 3 + w[18]))) * (s ** -w[19])
+            sinc = (math.e ** (w[17] * (rating - 3 + w[18]))) * (s ** -w[19])
+            new_s = s * (sinc.clip(min=1) if rating >= 3 else sinc)
 
             return (new_s, rating)
 
@@ -216,7 +219,9 @@ def simulate(
                 else learning_step_transitions
             )
             rating = init_rating or 1
-            while i < MAX_RELEARN_STEPS and consecutive < max_consecutive and rating < 4:
+            while (
+                i < MAX_RELEARN_STEPS and consecutive < max_consecutive and rating < 4
+            ):
                 (s, rating) = step(s, step_transitions[rating - 1])
                 d = next_d(d, rating)
                 cost += costs[rating - 1]
@@ -273,9 +278,8 @@ def simulate(
         )
         card_table[col["cost"]][need_review] = np.choose(
             card_table[col["rating"]][need_review].astype(int) - 1,
-            review_costs,
+            state_rating_costs[1],
         )
-        card_table[col["cost"]][need_review & forget] *= loss_aversion
         true_review = (
             need_review
             & (np.cumsum(card_table[col["cost"]]) <= max_cost_perday)
@@ -291,6 +295,10 @@ def simulate(
             card_table[col["retrievability"]][true_review & forget],
             card_table[col["difficulty"]][true_review & forget],
         )
+        card_table[col["difficulty"]][true_review & forget] = next_d(
+            card_table[col["difficulty"]][true_review & forget],
+            card_table[col["rating"]][true_review & forget],
+        )
         (
             card_table[col["stability"]][true_review & forget],
             card_table[col["difficulty"]][true_review & forget],
@@ -305,15 +313,15 @@ def simulate(
             card_table[col["rating"]][true_review & ~forget],
         )
 
-        card_table[col["difficulty"]][true_review] = next_d(
-            card_table[col["difficulty"]][true_review],
-            card_table[col["rating"]][true_review],
+        card_table[col["difficulty"]][true_review & ~forget] = next_d(
+            card_table[col["difficulty"]][true_review & ~forget],
+            card_table[col["rating"]][true_review & ~forget],
         )
 
         need_learn = card_table[col["stability"]] == 1e-10
         card_table[col["cost"]][need_learn] = np.choose(
             card_table[col["rating"]][need_learn].astype(int) - 1,
-            learn_costs,
+            state_rating_costs[0],
         )
         true_learn = (
             need_learn
