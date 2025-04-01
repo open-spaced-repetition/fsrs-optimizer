@@ -105,9 +105,9 @@ DEFAULT_RELEARNING_STEP_TRANSITIONS = np.array(
 )
 DEFAULT_STATE_RATING_COSTS = np.array(
     [
-        [19.58, 18.79, 13.78, 10.71],
-        [19.38, 17.59, 12.38, 8.94],
-        [16.44, 15.25, 12.32, 8.03],
+        [12.75, 12.26, 8.0, 6.38],
+        [13.05, 11.74, 7.42, 5.6],
+        [10.56, 10.0, 7.37, 5.4],
     ]
 )
 
@@ -278,6 +278,7 @@ def simulate(
             card_table[col["rating"]][need_review].astype(int) - 1,
             state_rating_costs[1],
         )
+        card_table[col["cost"]][need_review & forget] *= loss_aversion
         true_review = (
             need_review
             & (np.cumsum(card_table[col["cost"]]) <= max_cost_perday)
