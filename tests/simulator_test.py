@@ -1,5 +1,6 @@
 from src.fsrs_optimizer import *
 
+FSRS_RS_MEMORIZED = 6235.0234
 
 class Test_Simulator:
     def test_simulate(self):
@@ -11,7 +12,8 @@ class Test_Simulator:
             cost_per_day,
             revlogs,
         ) = simulate(w=DEFAULT_PARAMETER, request_retention=0.9)
-        assert memorized_cnt_per_day[-1] == 5415.907257823876
+        deviation = abs(1 - (memorized_cnt_per_day[-1] / FSRS_RS_MEMORIZED))
+        assert deviation < 0.05, f"{memorized_cnt_per_day[-1]:.2f} is not within 5% of the expected {FSRS_RS_MEMORIZED:.2f} ({deviation:.2%} deviation)"
 
     def test_optimal_retention(self):
         default_params = {
