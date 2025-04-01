@@ -258,6 +258,9 @@ def simulate(
         return w[7] * init + (1 - w[7]) * current
 
     for today in trange(learn_span, position=1, leave=False):
+        new_s = card_table[col["stability"]]
+        new_d = card_table[col["difficulty"]]
+
         has_learned = card_table[col["stability"]] > 1e-10
         card_table[col["delta_t"]][has_learned] = (
             today - card_table[col["last_date"]][has_learned]
@@ -281,7 +284,6 @@ def simulate(
         card_table[col["cost"]][need_review & forget] *= loss_aversion
         true_review = (
             need_review
-            & (np.cumsum(card_table[col["cost"]]) <= max_cost_perday)
             & (np.cumsum(need_review) <= review_limit_perday)
         )
         card_table[col["last_date"]][true_review] = today
@@ -289,12 +291,12 @@ def simulate(
         card_table[col["lapses"]][true_review & forget] += 1
         card_table[col["reps"]][true_review & ~forget] += 1
 
-        card_table[col["stability"]][true_review & forget] = stability_after_failure(
+        new_s[true_review & forget] = stability_after_failure(
             card_table[col["stability"]][true_review & forget],
             card_table[col["retrievability"]][true_review & forget],
             card_table[col["difficulty"]][true_review & forget],
         )
-        card_table[col["difficulty"]][true_review & forget] = next_d(
+        new_d[true_review & forget] = next_d(
             card_table[col["difficulty"]][true_review & forget],
             card_table[col["rating"]][true_review & forget],
         )
@@ -306,14 +308,14 @@ def simulate(
             card_table[col["stability"]][true_review & forget],
             card_table[col["difficulty"]][true_review & forget],
         )
-        card_table[col["stability"]][true_review & ~forget] = stability_after_success(
+        new_s[true_review & ~forget] = stability_after_success(
             card_table[col["stability"]][true_review & ~forget],
             card_table[col["retrievability"]][true_review & ~forget],
             card_table[col["difficulty"]][true_review & ~forget],
             card_table[col["rating"]][true_review & ~forget],
         )
 
-        card_table[col["difficulty"]][true_review & ~forget] = next_d(
+        new_d[true_review & ~forget] = next_d(
             card_table[col["difficulty"]][true_review & ~forget],
             card_table[col["rating"]][true_review & ~forget],
         )
@@ -333,16 +335,16 @@ def simulate(
             & (np.cumsum(need_learn) <= learn_limit_perday)
         )
         card_table[col["last_date"]][true_learn] = today
-        card_table[col["stability"]][true_learn] = np.choose(
+        new_s[true_learn] = np.choose(
             card_table[col["rating"]][true_learn].astype(int) - 1, w[:4]
         )
         (
-            card_table[col["stability"]][true_learn],
-            card_table[col["difficulty"]][true_learn],
+            new_s[true_learn],
+            new_d[true_learn],
             costs,
         ) = memory_state_short_term(
-            card_table[col["stability"]][true_learn],
-            card_table[col["difficulty"]][true_learn],
+            new_s[true_learn],
+            new_d[true_learn],
             init_rating=card_table[col["rating"]][true_learn].astype(int),
         )
 
@@ -350,22 +352,28 @@ def simulate(
             a + b for a, b in zip(card_table[col["cost"]][true_learn], costs)
         ]
 
-        card_table[col["ivl"]][true_review | true_learn] = np.clip(
+        below_cost_limit = np.cumsum(card_table[col["cost"]]) <= max_cost_perday
+        reviewed = (true_review | true_learn) & below_cost_limit
+
+        card_table[col["stability"]][reviewed] = new_s[reviewed]
+        card_table[col["difficulty"]][reviewed] = new_d[reviewed]
+
+        card_table[col["ivl"]][reviewed] = np.clip(
             next_interval(
-                card_table[col["stability"]][true_review | true_learn],
+                card_table[col["stability"]][reviewed],
                 request_retention,
                 fuzz=fuzz,
             ),
             1,
             max_ivl,
         )
-        card_table[col["due"]][true_review | true_learn] = (
-            today + card_table[col["ivl"]][true_review | true_learn]
+        card_table[col["due"]][reviewed] = (
+            today + card_table[col["ivl"]][reviewed]
         )
 
         revlogs[today] = {
-            "card_id": np.where(true_review | true_learn)[0],
-            "rating": card_table[col["rating"]][true_review | true_learn],
+            "card_id": np.where(reviewed)[0],
+            "rating": card_table[col["rating"]][reviewed],
         }
 
         has_learned = card_table[col["stability"]] > 1e-10
