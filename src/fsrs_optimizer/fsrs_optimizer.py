@@ -120,12 +120,13 @@ class FSRS(nn.Module):
     ) -> Tensor:
         old_s = state[:, 0]
         hard_bonus = torch.where(rating == 2, 3.5 + (self.w[15] * 2.5), 1)
-        new_s = (
+        new_s = torch.min(
             self.w[11]
             * torch.pow(state[:, 1], -self.w[12])
             * (torch.pow(old_s + 1, self.w[13]) - 1)
             * torch.exp((1 - r) * self.w[14])
-            * hard_bonus
+            * hard_bonus,
+            self.stability_after_success(state, r, torch.ones_like(r) * 3),
         )
         new_minimum_s = old_s / torch.exp(self.w[17] * self.w[18])
         return torch.minimum(new_s, new_minimum_s)
