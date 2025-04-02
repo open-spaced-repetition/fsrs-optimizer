@@ -258,8 +258,8 @@ def simulate(
         return w[7] * init + (1 - w[7]) * current
 
     for today in trange(learn_span, position=1, leave=False):
-        new_s = card_table[col["stability"]]
-        new_d = card_table[col["difficulty"]]
+        new_s = np.copy(card_table[col["stability"]])
+        new_d = np.copy(card_table[col["difficulty"]])
 
         has_learned = card_table[col["stability"]] > 1e-10
         card_table[col["delta_t"]][has_learned] = (
@@ -305,13 +305,13 @@ def simulate(
             card_table[col["difficulty"]][true_review & forget],
             costs,
         ) = memory_state_short_term(
-            card_table[col["stability"]][true_review & forget],
-            card_table[col["difficulty"]][true_review & forget],
+            new_s[true_review & forget],
+            new_d[true_review & forget],
         )
         new_s[true_review & ~forget] = stability_after_success(
-            card_table[col["stability"]][true_review & ~forget],
+            new_s[true_review & ~forget],
             card_table[col["retrievability"]][true_review & ~forget],
-            card_table[col["difficulty"]][true_review & ~forget],
+            new_d[true_review & ~forget],
             card_table[col["rating"]][true_review & ~forget],
         )
 
@@ -331,7 +331,6 @@ def simulate(
         )
         true_learn = (
             need_learn
-            & (np.cumsum(card_table[col["cost"]]) <= max_cost_perday)
             & (np.cumsum(need_learn) <= learn_limit_perday)
         )
         card_table[col["last_date"]][true_learn] = today
@@ -385,10 +384,10 @@ def simulate(
             card_table[col["stability"]][has_learned],
         )
 
-        review_cnt_per_day[today] = np.sum(true_review)
-        learn_cnt_per_day[today] = np.sum(true_learn)
+        review_cnt_per_day[today] = np.sum(true_review & reviewed)
+        learn_cnt_per_day[today] = np.sum(true_learn & reviewed)
         memorized_cnt_per_day[today] = card_table[col["retrievability"]].sum()
-        cost_per_day[today] = card_table[col["cost"]][true_review | true_learn].sum()
+        cost_per_day[today] = card_table[col["cost"]][reviewed].sum()
     return (
         card_table,
         review_cnt_per_day,
