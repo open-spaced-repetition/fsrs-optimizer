@@ -1945,9 +1945,331 @@ class Optimizer:
 
 # code from https://github.com/papousek/duolingo-halflife-regression/blob/master/evaluation.py
 def load_brier(predictions, real, bins=20):
+    # https://www.scirp.org/pdf/ojs_2021101415023495.pdf
+    # Note that my implementation isn't exactly the same as in the paper, but it still has good coverage, better than Clopper-Pearson
+    # I also made it possible to deal with k=0 and k=n, which was an issue with how this method is described in the paper
+    def likelihood_interval(k, n, alpha=0.05):
+        def log_likelihood(p: np.ndarray, k, n):
+            assert k <= n
+            p_hat = k / n
+
+            def log_likelihood_f(k, n, p):
+                one_minus_p = np.ones_like(p) - p
+                if k == 0:
+                    return n * np.log(one_minus_p)
+                elif k == n:
+                    return k * np.log(p)
+                else:
+                    return k * np.log(p) + (n - k) * np.log(one_minus_p)
+
+            return log_likelihood_f(k, n, p) - log_likelihood_f(k, n, p_hat)
+
+        def calc(x: np.ndarray, y: np.ndarray, target_p: float):
+            def loss(guess_y: float, target_p: float) -> float:
+                # Find segments where the horizontal line intersects the curve
+                # This creates a boolean array where True indicates a potential intersection
+                intersect_segments = ((y[:-1] <= guess_y) & (y[1:] >= guess_y)) | (
+                    (y[:-1] >= guess_y) & (y[1:] <= guess_y)
+                )
+
+                # Get indices of segments where intersections occur
+                intersection_indices = np.where(intersect_segments)[0]
+
+                # If we don't have intersections, return a large error
+                if len(intersection_indices) < 2:
+                    return 1e100
+
+                # Find the first two intersection points (we only need two for a connected curve)
+                intersection_points = []
+
+                for idx in intersection_indices[
+                    :2
+                ]:  # Take at most first two intersections
+                    # Linear interpolation to find the x value at the intersection
+                    x1, x2 = x[idx], x[idx + 1]
+                    y1, y2 = y[idx], y[idx + 1]
+
+                    # If points are exactly the same, just take the x
+                    if y1 == y2:
+                        intersection_points.append(x1)
+                    else:
+                        # Linear interpolation
+                        t = (guess_y - y1) / (y2 - y1)
+                        intersection_x = x1 + t * (x2 - x1)
+                        intersection_points.append(intersection_x)
+
+                # Get the range bounds
+                x_low, x_high = min(intersection_points), max(intersection_points)
+
+                # Find indices of x values that fall within our range
+                in_range = (x >= x_low) & (x <= x_high)
+
+                # Calculate the sum of probabilities in the range
+                probability_sum = np.sum(y[in_range])
+
+                # Return the absolute difference from target probability
+                return abs(probability_sum - target_p)
+
+            def bracket(xa, xb, maxiter, target_p):
+                u_lim = xa
+                l_lim = xb
+
+                grow_limit = 100.0
+                gold = 1.6180339
+                verysmall_num = 1e-21
+
+                fa = loss(xa, target_p)
+                fb = loss(xb, target_p)
+                funccalls = 2
+
+                if fa < fb:  # Switch so fa > fb
+                    xa, xb = xb, xa
+                    fa, fb = fb, fa
+                xc = max(min(xb + gold * (xb - xa), u_lim), l_lim)
+                fc = loss(xc, target_p)
+                funccalls += 1
+
+                iter = 0
+                while fc < fb:
+                    tmp1 = (xb - xa) * (fb - fc)
+                    tmp2 = (xb - xc) * (fb - fa)
+                    val = tmp2 - tmp1
+                    if np.abs(val) < verysmall_num:
+                        denom = 2.0 * verysmall_num
+                    else:
+                        denom = 2.0 * val
+                    w = max(
+                        min(
+                            (xb - ((xb - xc) * tmp2 - (xb - xa) * tmp1) / denom), u_lim
+                        ),
+                        l_lim,
+                    )
+                    wlim = max(min(xb + grow_limit * (xc - xb), u_lim), l_lim)
+
+                    if iter > maxiter:
+                        print("Failed to converge")
+                        break
+
+                    iter += 1
+                    if (w - xc) * (xb - w) > 0.0:
+                        fw = loss(w, target_p)
+                        funccalls += 1
+                        if fw < fc:
+                            xa = max(min(xb, u_lim), l_lim)
+                            xb = max(min(w, u_lim), l_lim)
+                            fa = fb
+                            fb = fw
+                            break
+                        elif fw > fb:
+                            xc = max(min(w, u_lim), l_lim)
+                            fc = fw
+                            break
+                        w = max(min(xc + gold * (xc - xb), u_lim), l_lim)
+                        fw = loss(w, target_p)
+                        funccalls += 1
+                    elif (w - wlim) * (wlim - xc) >= 0.0:
+                        w = wlim
+                        fw = loss(w, target_p)
+                        funccalls += 1
+                    elif (w - wlim) * (xc - w) > 0.0:
+                        fw = loss(w, target_p)
+                        funccalls += 1
+                        if fw < fc:
+                            xb = max(min(xc, u_lim), l_lim)
+                            xc = max(min(w, u_lim), l_lim)
+                            w = max(min(xc + gold * (xc - xb), u_lim), l_lim)
+                            fb = fc
+                            fc = fw
+                            fw = loss(w, target_p)
+                            funccalls += 1
+                    else:
+                        w = max(min(xc + gold * (xc - xb), u_lim), l_lim)
+                        fw = loss(w, target_p)
+                        funccalls += 1
+                    xa = max(min(xb, u_lim), l_lim)
+                    xb = max(min(xc, u_lim), l_lim)
+                    xc = max(min(w, u_lim), l_lim)
+                    fa = fb
+                    fb = fc
+                    fc = fw
+
+                return xa, xb, xc, fa, fb, fc, funccalls
+
+            def brent_minimization(tol, maxiter):
+                mintol = 1.0e-11
+                cg = 0.3819660
+
+                xa, xb, xc, fa, fb, fc, funccalls = bracket(
+                    xa=min(y), xb=max(y), maxiter=maxiter, target_p=target_p
+                )
+
+                #################################
+                # BEGIN
+                #################################
+                x = w = v = xb
+                fw = fv = fx = fb
+                if xa < xc:
+                    a = xa
+                    b = xc
+                else:
+                    a = xc
+                    b = xa
+                deltax = 0.0
+                iter = 0
+
+                while iter < maxiter:
+                    tol1 = tol * np.abs(x) + mintol
+                    tol2 = 2.0 * tol1
+                    xmid = 0.5 * (a + b)
+                    # check for convergence
+                    if np.abs(x - xmid) < (tol2 - 0.5 * (b - a)):
+                        break
+
+                    if np.abs(deltax) <= tol1:
+                        if x >= xmid:
+                            deltax = a - x  # do a golden section step
+                        else:
+                            deltax = b - x
+                        rat = cg * deltax
+                    else:  # do a parabolic step
+                        tmp1 = (x - w) * (fx - fv)
+                        tmp2 = (x - v) * (fx - fw)
+                        p = (x - v) * tmp2 - (x - w) * tmp1
+                        tmp2 = 2.0 * (tmp2 - tmp1)
+                        if tmp2 > 0.0:
+                            p = -p
+                        tmp2 = np.abs(tmp2)
+                        dx_temp = deltax
+                        deltax = rat
+                        # check parabolic fit
+                        if (
+                            (p > tmp2 * (a - x))
+                            and (p < tmp2 * (b - x))
+                            and (np.abs(p) < np.abs(0.5 * tmp2 * dx_temp))
+                        ):
+                            rat = p * 1.0 / tmp2  # if parabolic step is useful
+                            u = x + rat
+                            if (u - a) < tol2 or (b - u) < tol2:
+                                if xmid - x >= 0:
+                                    rat = tol1
+                                else:
+                                    rat = -tol1
+                        else:
+                            if x >= xmid:
+                                deltax = a - x  # if it's not do a golden section step
+                            else:
+                                deltax = b - x
+                            rat = cg * deltax
+
+                    if np.abs(rat) < tol1:  # update by at least tol1
+                        if rat >= 0:
+                            u = x + tol1
+                        else:
+                            u = x - tol1
+                    else:
+                        u = x + rat
+                    fu = loss(u, target_p)  # calculate new output value
+                    funccalls += 1
+
+                    if fu > fx:  # if it's bigger than current
+                        if u < x:
+                            a = u
+                        else:
+                            b = u
+                        if (fu <= fw) or (w == x):
+                            v = w
+                            w = u
+                            fv = fw
+                            fw = fu
+                        elif (fu <= fv) or (v == x) or (v == w):
+                            v = u
+                            fv = fu
+                    else:
+                        if u >= x:
+                            a = x
+                        else:
+                            b = x
+                        v = w
+                        w = x
+                        x = u
+                        fv = fw
+                        fw = fx
+                        fx = fu
+
+                    iter += 1
+                    # print(f'Iteration={iter}')
+                    # print(f'x={x:.3f}')
+                #################################
+                # END
+                #################################
+
+                xmin = x
+                fval = fx
+
+                success = not (np.isnan(fval) or np.isnan(xmin)) and (0 <= xmin <= 1)
+
+                if success:
+                    # print(f'Loss function called {funccalls} times')
+                    return xmin
+                else:
+                    raise Exception(
+                        "The algorithm terminated without finding a valid value."
+                    )
+
+            best_guess_y = brent_minimization(1e-5, 50)
+
+            intersect_segments = (
+                (y[:-1] <= best_guess_y) & (y[1:] >= best_guess_y)
+            ) | ((y[:-1] >= best_guess_y) & (y[1:] <= best_guess_y))
+            intersection_indices = np.where(intersect_segments)[0]
+            intersection_points = []
+
+            for idx in intersection_indices[:2]:
+                x1, x2 = x[idx], x[idx + 1]
+                y1, y2 = y[idx], y[idx + 1]
+                if y1 == y2:
+                    intersection_points.append(x1)
+                else:
+                    t = (best_guess_y - y1) / (y2 - y1)
+                    intersection_x = x1 + t * (x2 - x1)
+                    intersection_points.append(intersection_x)
+
+            x_low, x_high = min(intersection_points), max(intersection_points)
+            in_range = (x >= x_low) & (x <= x_high)
+            probability_sum = np.sum(y[in_range])
+            return x_low, x_high, probability_sum
+
+        p_hat = k / n
+        # continuity correction
+        if k == 0 or k == n:
+            k, n = k + 0.5, n + 1
+
+        probs = np.arange(1e-5, 1, 1e-5)
+
+        likelihoods = np.exp(log_likelihood(probs, k, n))
+        likelihoods = np.asarray(likelihoods)
+        y = likelihoods / np.sum(likelihoods)
+
+        x_low_cred, x_high_cred, probsum = calc(probs, y, 1 - alpha)
+        assert 0 <= probsum <= 1
+
+        if p_hat == 1.0:
+            x_high_cred = 1.0
+        elif p_hat == 0.0:
+            x_low_cred = 0.0
+
+        assert not np.isnan(x_low_cred)
+        assert not np.isnan(x_high_cred)
+        assert (
+            x_low_cred <= p_hat <= x_high_cred
+        ), f"{x_low_cred}, {p_hat}, {k / n}, {x_high_cred}"
+        return x_low_cred, x_high_cred
+
     counts = np.zeros(bins)
     correct = np.zeros(bins)
     prediction = np.zeros(bins)
+
+    two_d_list = [[] for _ in range(bins)]
 
     def get_bin(x, bins=bins):
         return np.floor(np.exp(np.log(bins + 1) * x)) - 1
@@ -1957,21 +2279,46 @@ def load_brier(predictions, real, bins=20):
         counts[bin] += 1
         correct[bin] += r
         prediction[bin] += p
+        two_d_list[bin].append(r)  # for confidence interval calculations
 
     np.seterr(invalid="ignore")
     prediction_means = prediction / counts
-    correct_means = correct / counts
+    real_means = correct / counts
     size = len(predictions)
     answer_mean = sum(correct) / size
+
+    real_means_upper = []
+    real_means_lower = []
+    for n in range(len(two_d_list)):
+        if len(two_d_list[n]) > 0:
+            lower_bound, upper_bound = likelihood_interval(
+                sum(two_d_list[n]), len(two_d_list[n])
+            )
+        else:
+            lower_bound, upper_bound = float("NaN"), float("NaN")
+        real_means_upper.append(upper_bound)
+        real_means_lower.append(lower_bound)
+
+    assert len(real_means_lower) == len(prediction_means) == len(real_means_upper)
+    # sanity check
+    for n in range(len(real_means)):
+        # check that the mean is within the bounds, unless they are NaNs
+        if not np.isnan(real_means_lower[n]):
+            assert (
+                real_means_lower[n] <= real_means[n] <= real_means_upper[n]
+            ), f"{real_means_lower[n]:4f}, {real_means[n]:4f}, {real_means_upper[n]:4f}"
+
     return {
-        "reliability": sum(counts * (correct_means - prediction_means) ** 2) / size,
-        "resolution": sum(counts * (correct_means - answer_mean) ** 2) / size,
+        "reliability": sum(counts * (real_means - prediction_means) ** 2) / size,
+        "resolution": sum(counts * (real_means - answer_mean) ** 2) / size,
         "uncertainty": answer_mean * (1 - answer_mean),
         "detail": {
             "bin_count": bins,
             "bin_counts": counts,
             "bin_prediction_means": prediction_means,
-            "bin_correct_means": correct_means,
+            "bin_real_means_upper_bounds": real_means_upper,
+            "bin_real_means_lower_bounds": real_means_lower,
+            "bin_real_means": real_means,
         },
     }
 
@@ -1987,16 +2334,22 @@ def plot_brier(predictions, real, bins=20, ax=None, title=None):
     e_max = np.max(np.abs(observation - p))
     brier = load_brier(predictions, real, bins=bins)
     bin_prediction_means = brier["detail"]["bin_prediction_means"]
-    bin_correct_means = brier["detail"]["bin_correct_means"]
+
+    bin_real_means = brier["detail"]["bin_real_means"]
+    bin_real_means_upper_bounds = brier["detail"]["bin_real_means_upper_bounds"]
+    bin_real_means_lower_bounds = brier["detail"]["bin_real_means_lower_bounds"]
+    bin_real_means_errors_upper = bin_real_means_upper_bounds - bin_real_means
+    bin_real_means_errors_lower = bin_real_means - bin_real_means_lower_bounds
+
     bin_counts = brier["detail"]["bin_counts"]
     mask = bin_counts > 0
     r2 = r2_score(
-        bin_correct_means[mask],
+        bin_real_means[mask],
         bin_prediction_means[mask],
         sample_weight=bin_counts[mask],
     )
     mae = mean_absolute_error(
-        bin_correct_means[mask],
+        bin_real_means[mask],
         bin_prediction_means[mask],
         sample_weight=bin_counts[mask],
     )
@@ -2005,7 +2358,7 @@ def plot_brier(predictions, real, bins=20, ax=None, title=None):
     ax.grid(True)
     try:
         fit_wls = sm.WLS(
-            bin_correct_means[mask],
+            bin_real_means[mask],
             sm.add_constant(bin_prediction_means[mask]),
             weights=bin_counts[mask],
         ).fit()
@@ -2019,14 +2372,28 @@ def plot_brier(predictions, real, bins=20, ax=None, title=None):
         )
     except:
         pass
-    ax.plot(
+    # ax.plot(
+    #     bin_prediction_means[mask],
+    #     bin_correct_means[mask],
+    #     label="Actual Calibration",
+    #     color="#1f77b4",
+    #     marker="*",
+    # )
+    assert not any(np.isnan(bin_real_means_errors_upper[mask]))
+    assert not any(np.isnan(bin_real_means_errors_lower[mask]))
+    ax.errorbar(
         bin_prediction_means[mask],
-        bin_correct_means[mask],
+        bin_real_means[mask],
+        yerr=[bin_real_means_errors_lower[mask], bin_real_means_errors_upper[mask]],
         label="Actual Calibration",
         color="#1f77b4",
-        marker="*",
+        ecolor="black",
+        elinewidth=1.0,
+        capsize=3.5,
+        capthick=1.0,
+        marker="",
     )
-    ax.plot(p, observation, label="Lowess Smoothing", color="red")
+    # ax.plot(p, observation, label="Lowess Smoothing", color="red")
     ax.plot((0, 1), (0, 1), label="Perfect Calibration", color="#ff7f0e")
     bin_count = brier["detail"]["bin_count"]
     counts = np.array(bin_counts)
