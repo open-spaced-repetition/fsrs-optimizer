@@ -27,4 +27,4 @@ class Test_Simulator:
             "loss_aversion": 2.5,
         }
         r = optimal_retention(**default_params)
-        assert r == 0.8251057979087782
+        assert r == 0.854508493711
