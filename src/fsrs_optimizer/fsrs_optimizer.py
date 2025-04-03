@@ -201,7 +201,7 @@ class FSRS(nn.Module):
         for X in inputs:
             state = self.step(X, state)
             outputs.append(state)
-        return torch.stack(outputs), state
+        return torch.stack(outputs), state, torch.tensor([0, self.w[15] > 0, 1, 1], dtype=torch.float)
 
     def mean_reversion(self, init: Tensor, current: Tensor) -> Tensor:
         return self.w[7] * init + (1 - self.w[7]) * current
@@ -393,11 +393,9 @@ class Trainer:
                 self.optimizer.zero_grad()
                 sequences, delta_ts, ratings, seq_lens, weights = batch
                 real_batch_size = seq_lens.shape[0]
-                outputs, _ = self.model(sequences)
+                outputs, _, rating_label_map = self.model(sequences)
                 stabilities = outputs[seq_lens - 1, torch.arange(real_batch_size), 0]
                 retentions = power_forgetting_curve(delta_ts, stabilities)
-                rating_label_map = torch.tensor([0, 1, 1, 1], dtype=torch.float)
-                rating_label_map[1] = self.model.w[15] > 0
                 labels = rating_label_map[ratings - 1]
                 loss = (self.loss_fn(retentions, labels) * weights).sum()
                 penalty = torch.sum(
@@ -443,15 +441,16 @@ class Trainer:
                 if len(dataset) == 0:
                     losses.append(0)
                     continue
-                sequences, delta_ts, labels, seq_lens, weights = (
+                sequences, delta_ts, ratings, seq_lens, weights = (
                     dataset.x_train,
                     dataset.t_train,
-                    dataset.y_train,
+                    dataset.ratings,
                     dataset.seq_len,
                     dataset.weights,
                 )
                 real_batch_size = seq_lens.shape[0]
-                outputs, _ = self.model(sequences.transpose(0, 1))
+                outputs, _, rating_label_map = self.model(sequences.transpose(0, 1))
+                labels = rating_label_map[ratings - 1]
                 stabilities = outputs[seq_lens - 1, torch.arange(real_batch_size), 0]
                 retentions = power_forgetting_curve(delta_ts, stabilities)
                 loss = (self.loss_fn(retentions, labels) * weights).mean()
@@ -504,7 +503,7 @@ class Collection:
     def batch_predict(self, dataset):
         fast_dataset = BatchDataset(dataset, sort_by_length=False)
         with torch.no_grad():
-            outputs, _ = self.model(fast_dataset.x_train.transpose(0, 1))
+            outputs, _, _ = self.model(fast_dataset.x_train.transpose(0, 1))
             stabilities, difficulties = outputs[
                 fast_dataset.seq_len - 1, torch.arange(len(fast_dataset))
             ].transpose(0, 1)
