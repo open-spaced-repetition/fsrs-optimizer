@@ -270,6 +270,7 @@ class BatchDataset(Dataset):
         self.seq_len = torch.tensor(
             dataframe["tensor"].map(len).values, dtype=torch.long
         )
+        self.ratings = torch.tensor(dataframe["rating"].to_list(), dtype=torch.int)
         if "weights" in dataframe.columns:
             self.weights = torch.tensor(dataframe["weights"].values, dtype=torch.float)
         else:
@@ -289,7 +290,7 @@ class BatchDataset(Dataset):
                 self.batches[i] = (
                     sequences_truncated.transpose(0, 1).to(device),
                     self.t_train[start_index:end_index].to(device),
-                    self.y_train[start_index:end_index].to(device),
+                    self.ratings[start_index:end_index].to(device),
                     seq_lens.to(device),
                     self.weights[start_index:end_index].to(device),
                 )
@@ -390,11 +391,14 @@ class Trainer:
             for i, batch in enumerate(self.train_data_loader):
                 self.model.train()
                 self.optimizer.zero_grad()
-                sequences, delta_ts, labels, seq_lens, weights = batch
+                sequences, delta_ts, ratings, seq_lens, weights = batch
                 real_batch_size = seq_lens.shape[0]
                 outputs, _ = self.model(sequences)
                 stabilities = outputs[seq_lens - 1, torch.arange(real_batch_size), 0]
                 retentions = power_forgetting_curve(delta_ts, stabilities)
+                rating_label_map = torch.tensor([0, 1, 1, 1], dtype=torch.float)
+                rating_label_map[1] = self.model.w[15] > 0
+                labels = rating_label_map[ratings - 1]
                 loss = (self.loss_fn(retentions, labels) * weights).sum()
                 penalty = torch.sum(
                     torch.square(self.model.w - self.init_w_tensor)
