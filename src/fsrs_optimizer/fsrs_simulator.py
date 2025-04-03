@@ -299,12 +299,12 @@ def simulate(
         card_table[col["lapses"]][true_review & forget] += 1
         card_table[col["reps"]][true_review & ~forget] += 1
 
-        new_s[true_review[within_limits] & forget[within_limits]] = stability_after_failure(
+        new_s[(true_review & forget)[within_limits]] = stability_after_failure(
             card_table[col["stability"]][true_review & forget],
             card_table[col["retrievability"]][true_review & forget],
             card_table[col["difficulty"]][true_review & forget],
         )
-        new_d[true_review[within_limits] & forget[within_limits]] = next_d(
+        new_d[(true_review & forget)[within_limits]] = next_d(
             card_table[col["difficulty"]][true_review & forget],
             card_table[col["rating"]][true_review & forget],
         )
@@ -313,17 +313,17 @@ def simulate(
             card_table[col["difficulty"]][true_review & forget],
             costs,
         ) = memory_state_short_term(
-            new_s[true_review[within_limits] & forget[within_limits]],
-            new_d[true_review[within_limits] & forget[within_limits]],
+            new_s[(true_review & forget)[within_limits]],
+            new_d[(true_review& forget)[within_limits]],
         )
-        new_s[true_review[within_limits] & ~forget[within_limits]] = stability_after_success(
-            new_s[true_review[within_limits] & ~forget[within_limits]],
+        new_s[(true_review & ~forget)[within_limits]] = stability_after_success(
+            new_s[(true_review& ~forget)[within_limits]],
             card_table[col["retrievability"]][true_review & ~forget],
-            new_d[true_review[within_limits] & ~forget[within_limits]],
+            new_d[(true_review & ~forget)[within_limits]],
             card_table[col["rating"]][true_review & ~forget],
         )
 
-        new_d[true_review[within_limits] & ~forget[within_limits]] = next_d(
+        new_d[(true_review & ~forget)[within_limits]] = next_d(
             card_table[col["difficulty"]][true_review & ~forget],
             card_table[col["rating"]][true_review & ~forget],
         )
