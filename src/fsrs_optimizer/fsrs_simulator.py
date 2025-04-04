@@ -282,10 +282,7 @@ def simulate(
             state_rating_costs[1],
         )
         card_table[col["cost"]][need_review & forget] *= loss_aversion
-        true_review = (
-            need_review
-            & (np.cumsum(need_review) <= review_limit_perday)
-        )
+        true_review = need_review & (np.cumsum(need_review) <= review_limit_perday)
         card_table[col["last_date"]][true_review] = today
 
         card_table[col["lapses"]][true_review & forget] += 1
@@ -329,10 +326,7 @@ def simulate(
             card_table[col["rating"]][need_learn].astype(int) - 1,
             state_rating_costs[0],
         )
-        true_learn = (
-            need_learn
-            & (np.cumsum(need_learn) <= learn_limit_perday)
-        )
+        true_learn = need_learn & (np.cumsum(need_learn) <= learn_limit_perday)
         card_table[col["last_date"]][true_learn] = today
         new_s[true_learn] = np.choose(
             card_table[col["rating"]][true_learn].astype(int) - 1, w[:4]
@@ -366,9 +360,7 @@ def simulate(
             1,
             max_ivl,
         )
-        card_table[col["due"]][reviewed] = (
-            today + card_table[col["ivl"]][reviewed]
-        )
+        card_table[col["due"]][reviewed] = today + card_table[col["ivl"]][reviewed]
 
         revlogs[today] = {
             "card_id": np.where(reviewed)[0],
