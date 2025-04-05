@@ -461,7 +461,7 @@ def brent(tol=0.01, maxiter=20, **kwargs):
     mintol = 1.0e-11
     cg = 0.3819660
 
-    xb = 0.70
+    xb = 0.75
     fb = sample(xb, **kwargs)
     funccalls = 1
 
@@ -470,7 +470,7 @@ def brent(tol=0.01, maxiter=20, **kwargs):
     #################################
     x = w = v = xb
     fw = fv = fx = fb
-    a = 0.70
+    a = 0.75
     b = 0.95
     deltax = 0.0
     iter = 0
@@ -565,7 +565,7 @@ def brent(tol=0.01, maxiter=20, **kwargs):
     success = (
         iter < maxiter
         and not (np.isnan(fval) or np.isnan(xmin))
-        and (0.70 <= xmin <= 0.95)
+        and (0.75 <= xmin <= 0.95)
     )
 
     if success:
@@ -575,7 +575,7 @@ def brent(tol=0.01, maxiter=20, **kwargs):
 
 
 def workload_graph(default_params, sampling_size=30):
-    R = np.linspace(0.7, 0.999, sampling_size).tolist()
+    R = np.linspace(0.75, 0.999, sampling_size).tolist()
     default_params["max_cost_perday"] = math.inf
     default_params["learn_limit_perday"] = int(
         default_params["deck_size"] / default_params["learn_span"]
@@ -669,9 +669,9 @@ def workload_graph(default_params, sampling_size=30):
         alpha=1,
     )
     ax.set_yticks([])
-    ax.set_xticks([0.7, 0.75, 0.8, 0.85, 0.9, 0.95, 0.99])
+    ax.set_xticks([0.75, 0.8, 0.85, 0.9, 0.95, 0.99])
     ax.xaxis.set_tick_params(labelsize=14)
-    ax.set_xlim(0.7, 0.99)
+    ax.set_xlim(0.75, 0.99)
 
     if max_w >= 3.5 * min_w:
         lim = 3.5 * min_w
@@ -689,7 +689,7 @@ def workload_graph(default_params, sampling_size=30):
     ax.set_xlabel("Desired Retention", fontsize=20)
     ax.axhline(y=min_w, color="black", alpha=0.75, ls="--")
     ax.text(
-        0.701,
+        0.751,
         min_w,
         "minimum workload",
         ha="left",
@@ -700,7 +700,7 @@ def workload_graph(default_params, sampling_size=30):
     if lim >= 1.8 * min_w:
         ax.axhline(y=1.5 * min_w, color="black", alpha=0.75, ls="--")
         ax.text(
-            0.701,
+            0.751,
             1.5 * min_w,
             "minimum workload x1.5",
             ha="left",
@@ -711,7 +711,7 @@ def workload_graph(default_params, sampling_size=30):
     if lim >= 2.3 * min_w:
         ax.axhline(y=2 * min_w, color="black", alpha=0.75, ls="--")
         ax.text(
-            0.701,
+            0.751,
             2 * min_w,
             "minimum workload x2",
             ha="left",
@@ -722,7 +722,7 @@ def workload_graph(default_params, sampling_size=30):
     if lim >= 2.8 * min_w:
         ax.axhline(y=2.5 * min_w, color="black", alpha=0.75, ls="--")
         ax.text(
-            0.701,
+            0.751,
             2.5 * min_w,
             "minimum workload x2.5",
             ha="left",
@@ -733,7 +733,7 @@ def workload_graph(default_params, sampling_size=30):
     if lim >= 3.3 * min_w:
         ax.axhline(y=3 * min_w, color="black", alpha=0.75, ls="--")
         ax.text(
-            0.701,
+            0.751,
             3 * min_w,
             "minimum workload x3",
             ha="left",
