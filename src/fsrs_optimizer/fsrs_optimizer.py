@@ -65,7 +65,7 @@ DEFAULT_PARAMETER = [
     0.1832,
 ]
 
-S_MIN = 0.01
+S_MIN = 0.001
 
 
 DEFAULT_PARAMS_STDDEV_TENSOR = torch.tensor(
