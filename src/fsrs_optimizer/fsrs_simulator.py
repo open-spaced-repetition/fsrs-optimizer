@@ -1,8 +1,10 @@
 import math
 import numpy as np
 from matplotlib import pyplot as plt
-from tqdm import trange  # type: ignore
 from typing import Optional
+import concurrent.futures
+from concurrent.futures import ProcessPoolExecutor
+from multiprocessing import cpu_count
 
 
 DECAY = -0.2
@@ -83,10 +85,6 @@ DEFAULT_LEARN_COSTS = np.array([33.79, 24.3, 13.68, 6.5])
 DEFAULT_REVIEW_COSTS = np.array([23.0, 11.68, 7.33, 5.6])
 DEFAULT_FIRST_RATING_PROB = np.array([0.24, 0.094, 0.495, 0.171])
 DEFAULT_REVIEW_RATING_PROB = np.array([0.224, 0.631, 0.145])
-DEFAULT_FIRST_RATING_OFFSETS = np.array([-0.72, -0.15, -0.01, 0.0])
-DEFAULT_FIRST_SESSION_LENS = np.array([2.02, 1.28, 0.81, 0.0])
-DEFAULT_FORGET_RATING_OFFSET = -0.28
-DEFAULT_FORGET_SESSION_LEN = 1.05
 DEFAULT_LEARNING_STEP_COUNT = 2
 DEFAULT_RELEARNING_STEP_COUNT = 1
 DEFAULT_LEARNING_STEP_TRANSITIONS = np.array(
@@ -121,14 +119,8 @@ def simulate(
     learn_limit_perday=math.inf,
     review_limit_perday=math.inf,
     max_ivl=36500,
-    learn_costs=DEFAULT_LEARN_COSTS,
-    review_costs=DEFAULT_REVIEW_COSTS,
     first_rating_prob=DEFAULT_FIRST_RATING_PROB,
     review_rating_prob=DEFAULT_REVIEW_RATING_PROB,
-    first_rating_offset=DEFAULT_FIRST_RATING_OFFSETS,
-    first_session_len=DEFAULT_FIRST_SESSION_LENS,
-    forget_rating_offset=DEFAULT_FORGET_RATING_OFFSET,
-    forget_session_len=DEFAULT_FORGET_SESSION_LEN,
     learning_step_count=DEFAULT_LEARNING_STEP_COUNT,
     relearning_step_count=DEFAULT_RELEARNING_STEP_COUNT,
     learning_step_transitions=DEFAULT_LEARNING_STEP_TRANSITIONS,
@@ -257,7 +249,7 @@ def simulate(
     def mean_reversion(init, current):
         return w[7] * init + (1 - w[7]) * current
 
-    for today in trange(learn_span, position=1, leave=False):
+    for today in range(learn_span):
         new_s = np.copy(card_table[col["stability"]])
         new_d = np.copy(card_table[col["difficulty"]])
 
@@ -394,6 +386,17 @@ def optimal_retention(**kwargs):
     return brent(**kwargs)
 
 
+def run_simulation(args):
+    workload_only, kwargs = args
+
+    (_, _, _, _, cost_per_day, _) = simulate(**kwargs)
+
+    if workload_only:
+        return np.mean(cost_per_day)
+    else:
+        return np.sum(cost_per_day)
+
+
 def sample(
     r,
     w,
@@ -403,14 +406,11 @@ def sample(
     learn_limit_perday=math.inf,
     review_limit_perday=math.inf,
     max_ivl=36500,
-    learn_costs=DEFAULT_LEARN_COSTS,
-    review_costs=DEFAULT_REVIEW_COSTS,
     first_rating_prob=DEFAULT_FIRST_RATING_PROB,
     review_rating_prob=DEFAULT_REVIEW_RATING_PROB,
-    first_rating_offset=DEFAULT_FIRST_RATING_OFFSETS,
-    first_session_len=DEFAULT_FIRST_SESSION_LENS,
-    forget_rating_offset=DEFAULT_FORGET_RATING_OFFSET,
-    forget_session_len=DEFAULT_FORGET_SESSION_LEN,
+    learning_step_transitions=DEFAULT_LEARNING_STEP_TRANSITIONS,
+    relearning_step_transitions=DEFAULT_RELEARNING_STEP_TRANSITIONS,
+    state_rating_costs=DEFAULT_STATE_RATING_COSTS,
     loss_aversion=2.5,
     workload_only=False,
 ):
@@ -429,31 +429,30 @@ def sample(
 
     SAMPLE_SIZE = best_sample_size(learn_span)
 
-    for i in range(SAMPLE_SIZE):
-        _, _, _, memorized_cnt_per_day, cost_per_day, _ = simulate(
-            w=w,
-            request_retention=r,
-            deck_size=deck_size,
-            learn_span=learn_span,
-            max_cost_perday=max_cost_perday,
-            learn_limit_perday=learn_limit_perday,
-            review_limit_perday=review_limit_perday,
-            max_ivl=max_ivl,
-            learn_costs=learn_costs,
-            review_costs=review_costs,
-            first_rating_prob=first_rating_prob,
-            review_rating_prob=review_rating_prob,
-            first_rating_offset=first_rating_offset,
-            first_session_len=first_session_len,
-            forget_rating_offset=forget_rating_offset,
-            forget_session_len=forget_session_len,
-            loss_aversion=loss_aversion,
-            seed=42 + i,
-        )
-        if workload_only:
-            results.append(cost_per_day.sum())
-        else:
-            results.append(cost_per_day.sum() / memorized_cnt_per_day[-1])
+    with ProcessPoolExecutor(max_workers=cpu_count()) as executor:
+        futures = []
+        for i in range(SAMPLE_SIZE):
+            kwargs = {
+                "w": w,
+                "request_retention": r,
+                "deck_size": deck_size,
+                "learn_span": learn_span,
+                "max_cost_perday": max_cost_perday,
+                "learn_limit_perday": learn_limit_perday,
+                "review_limit_perday": review_limit_perday,
+                "max_ivl": max_ivl,
+                "first_rating_prob": first_rating_prob,
+                "review_rating_prob": review_rating_prob,
+                "learning_step_transitions": learning_step_transitions,
+                "relearning_step_transitions": relearning_step_transitions,
+                "state_rating_costs": state_rating_costs,
+                "loss_aversion": loss_aversion,
+                "seed": 42 + i,
+            }
+            futures.append(executor.submit(run_simulation, (workload_only, kwargs)))
+
+        for future in concurrent.futures.as_completed(futures):
+            results.append(future.result())
     return np.mean(results)
 
 
@@ -748,26 +747,26 @@ def workload_graph(default_params, sampling_size=30):
 if __name__ == "__main__":
     default_params = {
         "w": [
-            0.4197,
-            1.1869,
-            3.0412,
-            15.2441,
-            7.1434,
-            0.6477,
-            1.0007,
-            0.0674,
-            1.6597,
-            0.1712,
-            1.1178,
-            2.0225,
-            0.0904,
-            0.3025,
-            2.1214,
-            0.2498,
-            2.9466,
-            0.4891,
-            0.6468,
-            0.1192,
+            0.3095,
+            1.4192,
+            3.5093,
+            15.9819,
+            7.0529,
+            0.5676,
+            1.9836,
+            0.0088,
+            1.5255,
+            0.1074,
+            1.0011,
+            1.8766,
+            0.1111,
+            0.3333,
+            2.2994,
+            0.2249,
+            3.0004,
+            0.67,
+            0.4006,
+            0.1832,
         ],
         "deck_size": 20000,
         "learn_span": 365,

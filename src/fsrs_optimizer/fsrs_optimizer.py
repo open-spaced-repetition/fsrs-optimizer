@@ -28,6 +28,12 @@ from sklearn.metrics import (  # type: ignore
 from scipy.optimize import minimize  # type: ignore
 from itertools import accumulate
 from tqdm.auto import tqdm  # type: ignore
+
+try:
+    from .utils import FirstOrderMarkovChain
+except ImportError:
+    from utils import FirstOrderMarkovChain  # type: ignore
+
 import warnings
 
 try:
@@ -674,20 +680,59 @@ class Optimizer:
         tqdm.write("revlog.csv saved.")
 
     def extract_simulation_config(self, df):
-        def rating_counts(x):
-            tmp = {1: 0, 2: 0, 3: 0, 4: 0}
-            tmp.update(x.value_counts().to_dict())
-            first = x.iloc[0]
-            tmp[first] -= 1
-            return tmp
+        df_tmp = df[
+            (df["review_duration"] > 0) & (df["review_duration"] < 1200000)
+        ].copy()
+
+        state_rating_costs = (
+            df_tmp[df_tmp["review_state"] != 4]
+            .groupby(["review_state", "review_rating"])["review_duration"]
+            .median()
+            .unstack(fill_value=0)
+        ) / 1000
+        state_rating_counts = (
+            df_tmp[df_tmp["review_state"] != 4]
+            .groupby(["review_state", "review_rating"])["review_duration"]
+            .count()
+            .unstack(fill_value=0)
+        )
+
+        # Ensure all ratings (1-4) exist in columns
+        for rating in range(1, 5):
+            if rating not in state_rating_costs.columns:
+                state_rating_costs[rating] = 0
+            if rating not in state_rating_counts.columns:
+                state_rating_counts[rating] = 0
+
+        # Ensure all states exist in index
+        for state in [Learning, Review, Relearning]:
+            if state not in state_rating_costs.index:
+                state_rating_costs.loc[state] = 0
+            if state not in state_rating_counts.index:
+                state_rating_counts.loc[state] = 0
+
+        self.state_rating_costs = state_rating_costs.values.round(2).tolist()
+        for i, (rating_costs, default_rating_cost, rating_counts) in enumerate(
+            zip(
+                state_rating_costs.values.tolist(),
+                DEFAULT_STATE_RATING_COSTS,
+                state_rating_counts.values.tolist(),
+            )
+        ):
+            for j, (cost, default_cost, count) in enumerate(
+                zip(rating_costs, default_rating_cost, rating_counts)
+            ):
+                weight = count / (50 + count)
+                self.state_rating_costs[i][j] = cost * weight + default_cost * (
+                    1 - weight
+                )
 
         df1 = (
-            df[(df["review_duration"] > 0) & (df["review_duration"] < 1200000)]
-            .groupby(by=["card_id", "real_days"])
+            df_tmp.groupby(by=["card_id", "real_days"])
             .agg(
                 {
                     "review_state": "first",
-                    "review_rating": ["first", rating_counts],
+                    "review_rating": ["first", list],
                     "review_duration": "sum",
                 }
             )
@@ -696,34 +741,66 @@ class Optimizer:
         del df1["real_days"]
         df1.columns = [
             "card_id",
-            "first_review_state",
-            "first_review_rating",
-            "review_rating_counts",
+            "first_state",
+            "first_rating",
+            "same_day_ratings",
             "sum_review_duration",
         ]
-        rating_counts_df = (
-            df1["review_rating_counts"].apply(pd.Series).fillna(0).astype(int)
+        model = FirstOrderMarkovChain()
+        learning_step_rating_sequences = df1[df1["first_state"] == Learning][
+            "same_day_ratings"
+        ]
+        result = model.fit(learning_step_rating_sequences)
+        learning_transition_matrix, learning_transition_counts = (
+            result.transition_matrix[:3],
+            result.transition_counts[:3],
         )
-        df1 = pd.concat(
-            [df1.drop("review_rating_counts", axis=1), rating_counts_df], axis=1
-        )
+        self.learning_step_transitions = learning_transition_matrix.round(2).tolist()
+        for i, (rating_probs, default_rating_probs, transition_counts) in enumerate(
+            zip(
+                learning_transition_matrix.tolist(),
+                DEFAULT_LEARNING_STEP_TRANSITIONS,
+                learning_transition_counts.tolist(),
+            )
+        ):
+            weight = sum(transition_counts) / (50 + sum(transition_counts))
+            for j, (prob, default_prob) in enumerate(
+                zip(rating_probs, default_rating_probs)
+            ):
+                self.learning_step_transitions[i][j] = prob * weight + default_prob * (
+                    1 - weight
+                )
 
-        cost_dict = defaultdict(
-            int,
-            (
-                df1.groupby(by=["first_review_state", "first_review_rating"])[
-                    "sum_review_duration"
-                ]
-                .median()
-                .to_dict()
-            ),
+        relearning_step_rating_sequences = df1[
+            (df1["first_state"] == Review) & (df1["first_rating"] == 1)
+        ]["same_day_ratings"]
+        result = model.fit(relearning_step_rating_sequences)
+        relearning_transition_matrix, relearning_transition_counts = (
+            result.transition_matrix[:3],
+            result.transition_counts[:3],
         )
-        self.learn_costs = np.array([cost_dict[(1, i)] / 1000 for i in range(1, 5)])
-        self.review_costs = np.array([cost_dict[(2, i)] / 1000 for i in range(1, 5)])
+        self.relearning_step_transitions = relearning_transition_matrix.round(
+            2
+        ).tolist()
+        for i, (rating_probs, default_rating_probs, transition_counts) in enumerate(
+            zip(
+                relearning_transition_matrix.tolist(),
+                DEFAULT_RELEARNING_STEP_TRANSITIONS,
+                relearning_transition_counts.tolist(),
+            )
+        ):
+            weight = sum(transition_counts) / (50 + sum(transition_counts))
+            for j, (prob, default_prob) in enumerate(
+                zip(rating_probs, default_rating_probs)
+            ):
+                self.relearning_step_transitions[i][j] = (
+                    prob * weight + default_prob * (1 - weight)
+                )
+
         button_usage_dict = defaultdict(
             int,
             (
-                df1.groupby(by=["first_review_state", "first_review_rating"])["card_id"]
+                df1.groupby(by=["first_state", "first_rating"])["card_id"]
                 .count()
                 .to_dict()
             ),
@@ -739,49 +816,6 @@ class Optimizer:
             self.review_buttons[1:] / self.review_buttons[1:].sum()
         )
 
-        df2 = (
-            df1.groupby(by=["first_review_state", "first_review_rating"])[[1, 2, 3, 4]]
-            .mean()
-            .round(2)
-        )
-        rating_offset_dict = defaultdict(
-            float, sum([df2[g] * (g - 3) for g in range(1, 5)]).to_dict()
-        )
-        session_len_dict = defaultdict(
-            float, sum([df2[g] for g in range(1, 5)]).to_dict()
-        )
-        self.first_rating_offset = np.array(
-            [rating_offset_dict[(1, i)] for i in range(1, 5)]
-        )
-        self.first_session_len = np.array(
-            [session_len_dict[(1, i)] for i in range(1, 5)]
-        )
-        self.forget_rating_offset = rating_offset_dict[(2, 1)]
-        self.forget_session_len = session_len_dict[(2, 1)]
-
-        weight = self.learn_buttons / (50 + self.learn_buttons)
-        self.learn_costs = self.learn_costs * weight + DEFAULT_LEARN_COSTS * (
-            1 - weight
-        )
-        self.first_rating_offset = (
-            self.first_rating_offset * weight
-            + DEFAULT_FIRST_RATING_OFFSETS * (1 - weight)
-        )
-        self.first_session_len = (
-            self.first_session_len * weight + DEFAULT_FIRST_SESSION_LENS * (1 - weight)
-        )
-
-        weight = self.review_buttons / (50 + self.review_buttons)
-        self.review_costs = self.review_costs * weight + DEFAULT_REVIEW_COSTS * (
-            1 - weight
-        )
-        self.forget_rating_offset = self.forget_rating_offset * weight[
-            0
-        ] + DEFAULT_FORGET_RATING_OFFSET * (1 - weight[0])
-        self.forget_session_len = self.forget_session_len * weight[
-            0
-        ] + DEFAULT_FORGET_SESSION_LEN * (1 - weight[0])
-
         weight = sum(self.learn_buttons) / (50 + sum(self.learn_buttons))
         self.first_rating_prob = (
             self.first_rating_prob * weight + DEFAULT_FIRST_RATING_PROB * (1 - weight)
@@ -791,9 +825,6 @@ class Optimizer:
         self.review_rating_prob = (
             self.review_rating_prob * weight + DEFAULT_REVIEW_RATING_PROB * (1 - weight)
         )
-
-        self.first_rating_offset[-1] = 0
-        self.first_session_len[-1] = 0
 
     def create_time_series(
         self,
@@ -1492,16 +1523,13 @@ class Optimizer:
     ):
         """should not be called before predict_memory_states"""
         if verbose:
-            print("Learn costs: ", self.learn_costs)
-            print("Review costs: ", self.review_costs)
             print("Learn buttons: ", self.learn_buttons)
             print("Review buttons: ", self.review_buttons)
             print("First rating prob: ", self.first_rating_prob)
             print("Review rating prob: ", self.review_rating_prob)
-            print("First rating offset: ", self.first_rating_offset)
-            print("First session len: ", self.first_session_len)
-            print("Forget rating offset: ", self.forget_rating_offset)
-            print("Forget session len: ", self.forget_session_len)
+            print("Learning step transitions: ", self.learning_step_transitions)
+            print("Relearning step transitions: ", self.relearning_step_transitions)
+            print("State rating costs: ", self.state_rating_costs)
 
         simulate_config = {
             "w": self.w,
@@ -1511,14 +1539,11 @@ class Optimizer:
             "learn_limit_perday": 10,
             "review_limit_perday": math.inf,
             "max_ivl": max_ivl,
-            "learn_costs": self.learn_costs,
-            "review_costs": self.review_costs,
             "first_rating_prob": self.first_rating_prob,
             "review_rating_prob": self.review_rating_prob,
-            "first_rating_offset": self.first_rating_offset,
-            "first_session_len": self.first_session_len,
-            "forget_rating_offset": self.forget_rating_offset,
-            "forget_session_len": self.forget_session_len,
+            "learning_step_transitions": self.learning_step_transitions,
+            "relearning_step_transitions": self.relearning_step_transitions,
+            "state_rating_costs": self.state_rating_costs,
             "loss_aversion": loss_aversion,
         }
         self.optimal_retention = optimal_retention(**simulate_config)
