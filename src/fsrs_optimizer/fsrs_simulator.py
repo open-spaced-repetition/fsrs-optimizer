@@ -2,9 +2,7 @@ import math
 import numpy as np
 from matplotlib import pyplot as plt
 from typing import Optional
-import concurrent.futures
-from concurrent.futures import ProcessPoolExecutor
-from multiprocessing import cpu_count
+from concurrent.futures import ProcessPoolExecutor, as_completed
 
 
 DECAY = -0.2
@@ -274,6 +272,9 @@ def simulate(
             state_rating_costs[1],
         )
         card_table[col["cost"]][need_review & forget] *= loss_aversion
+        card_table[col["cost"]][need_review] *= (
+            1.9 - card_table[col["retrievability"]][need_review]
+        )
         true_review = need_review & (np.cumsum(need_review) <= review_limit_perday)
         card_table[col["last_date"]][true_review] = today
 
@@ -309,6 +310,7 @@ def simulate(
             card_table[col["rating"]][true_review & ~forget],
         )
 
+        costs *= 1.9 - card_table[col["retrievability"]][true_review & forget]
         card_table[col["cost"]][true_review & forget] = [
             a + b for a, b in zip(card_table[col["cost"]][true_review & forget], costs)
         ]
@@ -389,12 +391,12 @@ def optimal_retention(**kwargs):
 def run_simulation(args):
     workload_only, kwargs = args
 
-    (_, _, _, _, cost_per_day, _) = simulate(**kwargs)
+    (_, _, _, memorized_cnt_per_day, cost_per_day, _) = simulate(**kwargs)
 
     if workload_only:
         return np.mean(cost_per_day)
     else:
-        return np.sum(cost_per_day)
+        return np.sum(cost_per_day) / memorized_cnt_per_day[-1]
 
 
 def sample(
@@ -429,7 +431,7 @@ def sample(
 
     SAMPLE_SIZE = best_sample_size(learn_span)
 
-    with ProcessPoolExecutor(max_workers=cpu_count()) as executor:
+    with ProcessPoolExecutor() as executor:
         futures = []
         for i in range(SAMPLE_SIZE):
             kwargs = {
@@ -451,7 +453,7 @@ def sample(
             }
             futures.append(executor.submit(run_simulation, (workload_only, kwargs)))
 
-        for future in concurrent.futures.as_completed(futures):
+        for future in as_completed(futures):
             results.append(future.result())
     return np.mean(results)
 
@@ -747,26 +749,26 @@ def workload_graph(default_params, sampling_size=30):
 if __name__ == "__main__":
     default_params = {
         "w": [
-            0.3095,
-            1.4192,
-            3.5093,
-            15.9819,
-            7.0529,
-            0.5676,
-            1.9836,
-            0.0088,
-            1.5255,
-            0.1074,
-            1.0011,
-            1.8766,
-            0.1111,
-            0.3333,
-            2.2994,
-            0.2249,
+            0.2172,
+            1.1771,
+            3.2602,
+            16.1507,
+            7.0114,
+            0.57,
+            2.0966,
+            0.0069,
+            1.5261,
+            0.112,
+            1.0178,
+            1.849,
+            0.1133,
+            0.3127,
+            2.2934,
+            0.2191,
             3.0004,
-            0.67,
-            0.4006,
-            0.1832,
+            0.7536,
+            0.3332,
+            0.1437,
         ],
         "deck_size": 20000,
         "learn_span": 365,
@@ -811,4 +813,4 @@ if __name__ == "__main__":
     ax.set_title("Memorized Count per Day")
     ax.grid(True)
     plt.show()
-    workload_graph(default_params, sampling_size=300).savefig("workload.png")
+    workload_graph(default_params, sampling_size=30).savefig("workload.png")
