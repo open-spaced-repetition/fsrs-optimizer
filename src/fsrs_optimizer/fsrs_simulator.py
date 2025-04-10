@@ -124,7 +124,6 @@ def simulate(
     learning_step_transitions=DEFAULT_LEARNING_STEP_TRANSITIONS,
     relearning_step_transitions=DEFAULT_RELEARNING_STEP_TRANSITIONS,
     state_rating_costs=DEFAULT_STATE_RATING_COSTS,
-    loss_aversion=2.5,
     seed=42,
     fuzz=False,
 ):
@@ -271,10 +270,6 @@ def simulate(
             card_table[col["rating"]][need_review].astype(int) - 1,
             state_rating_costs[1],
         )
-        card_table[col["cost"]][need_review & forget] *= loss_aversion
-        card_table[col["cost"]][need_review] *= (
-            1.9 - card_table[col["retrievability"]][need_review]
-        )
         true_review = need_review & (np.cumsum(need_review) <= review_limit_perday)
         card_table[col["last_date"]][true_review] = today
 
@@ -310,7 +305,6 @@ def simulate(
             card_table[col["rating"]][true_review & ~forget],
         )
 
-        costs *= 1.9 - card_table[col["retrievability"]][true_review & forget]
         card_table[col["cost"]][true_review & forget] = [
             a + b for a, b in zip(card_table[col["cost"]][true_review & forget], costs)
         ]
@@ -413,7 +407,6 @@ def sample(
     learning_step_transitions=DEFAULT_LEARNING_STEP_TRANSITIONS,
     relearning_step_transitions=DEFAULT_RELEARNING_STEP_TRANSITIONS,
     state_rating_costs=DEFAULT_STATE_RATING_COSTS,
-    loss_aversion=2.5,
     workload_only=False,
 ):
     results = []
@@ -448,7 +441,6 @@ def sample(
                 "learning_step_transitions": learning_step_transitions,
                 "relearning_step_transitions": relearning_step_transitions,
                 "state_rating_costs": state_rating_costs,
-                "loss_aversion": loss_aversion,
                 "seed": 42 + i,
             }
             futures.append(executor.submit(run_simulation, (workload_only, kwargs)))
@@ -582,7 +574,6 @@ def workload_graph(default_params, sampling_size=30):
         default_params["deck_size"] / default_params["learn_span"]
     )
     default_params["review_limit_perday"] = math.inf
-    default_params["loss_aversion"] = 1
     workload = [sample(r=r, workload_only=True, **default_params) for r in R]
 
     # this is for testing

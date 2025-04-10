@@ -1,6 +1,6 @@
 from src.fsrs_optimizer import *
 
-FSRS_RS_MEMORIZED = 5742.5576
+FSRS_RS_MEMORIZED = 6752.645
 
 
 class Test_Simulator:
@@ -27,7 +27,6 @@ class Test_Simulator:
             "learn_limit_perday": 10,
             "review_limit_perday": math.inf,
             "max_ivl": 36500,
-            "loss_aversion": 2.5,
         }
         r = optimal_retention(**default_params)
-        assert round(r, 6) == 0.837748
+        assert r == 0.7

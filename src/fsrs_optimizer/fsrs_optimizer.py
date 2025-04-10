@@ -1512,7 +1512,6 @@ class Optimizer:
         self,
         learn_span=365,
         max_ivl=36500,
-        loss_aversion=2.5,
         verbose=True,
     ):
         """should not be called before predict_memory_states"""
@@ -1538,7 +1537,6 @@ class Optimizer:
             "learning_step_transitions": self.learning_step_transitions,
             "relearning_step_transitions": self.relearning_step_transitions,
             "state_rating_costs": self.state_rating_costs,
-            "loss_aversion": loss_aversion,
         }
         self.optimal_retention = optimal_retention(**simulate_config)
 
@@ -1602,7 +1600,6 @@ class Optimizer:
         ax.legend()
         ax.grid(True)
 
-        simulate_config["loss_aversion"] = 1
         fig6 = workload_graph(simulate_config)
 
         return (fig1, fig2, fig3, fig4, fig5, fig6)
