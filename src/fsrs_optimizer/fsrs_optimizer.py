@@ -166,7 +166,7 @@ class FSRS(nn.Module):
             new_d = self.init_d(X[:, 1])
             new_d = new_d.clamp(1, 10)
         else:
-            r = power_forgetting_curve(X[:, 0], state[:, 0], -self.w[19])
+            r = power_forgetting_curve(X[:, 0], state[:, 0], -self.w[20])
             short_term = X[:, 0] < 1
             success = X[:, 1] > 1
             new_s = (
@@ -399,7 +399,7 @@ class Trainer:
                 outputs, _ = self.model(sequences)
                 stabilities = outputs[seq_lens - 1, torch.arange(real_batch_size), 0]
                 retentions = power_forgetting_curve(
-                    delta_ts, stabilities, -self.model.w[19]
+                    delta_ts, stabilities, -self.model.w[20]
                 )
                 loss = (self.loss_fn(retentions, labels) * weights).sum()
                 penalty = torch.sum(
@@ -456,7 +456,7 @@ class Trainer:
                 outputs, _ = self.model(sequences.transpose(0, 1))
                 stabilities = outputs[seq_lens - 1, torch.arange(real_batch_size), 0]
                 retentions = power_forgetting_curve(
-                    delta_ts, stabilities, -self.model.w[19]
+                    delta_ts, stabilities, -self.model.w[20]
                 )
                 loss = (self.loss_fn(retentions, labels) * weights).mean()
                 penalty = torch.sum(
@@ -1626,7 +1626,7 @@ class Optimizer:
         self.dataset["p"] = power_forgetting_curve(
             self.dataset["delta_t"],
             self.dataset["stability"],
-            -my_collection.model.w[19].detach().numpy(),
+            -my_collection.model.w[20].detach().numpy(),
         )
         self.dataset["log_loss"] = self.dataset.apply(
             lambda row: -np.log(row["p"]) if row["y"] == 1 else -np.log(1 - row["p"]),
@@ -1648,7 +1648,7 @@ class Optimizer:
         self.dataset["p"] = power_forgetting_curve(
             self.dataset["delta_t"],
             self.dataset["stability"],
-            -my_collection.model.w[19].detach().numpy(),
+            -my_collection.model.w[20].detach().numpy(),
         )
         self.dataset["log_loss"] = self.dataset.apply(
             lambda row: -np.log(row["p"]) if row["y"] == 1 else -np.log(1 - row["p"]),
