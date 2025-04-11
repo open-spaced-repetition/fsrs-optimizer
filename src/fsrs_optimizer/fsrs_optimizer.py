@@ -43,52 +43,54 @@ Review = 2
 Relearning = 3
 
 DEFAULT_PARAMETER = [
-    0.40255,
-    1.18385,
-    3.173,
-    15.69105,
-    7.1949,
-    0.5345,
-    1.4604,
-    0.0046,
-    1.54575,
-    0.1192,
-    1.01925,
-    1.9395,
-    0.11,
-    0.29605,
-    2.2698,
-    0.2315,
-    2.9898,
-    0.51655,
-    0.6621,
-    0.5,
+    0.2172,
+    1.1771,
+    3.2602,
+    16.1507,
+    7.0114,
+    0.57,
+    2.0966,
+    0.0069,
+    1.5261,
+    0.112,
+    1.0178,
+    1.849,
+    0.1133,
+    0.3127,
+    2.2934,
+    0.2191,
+    3.0004,
+    0.7536,
+    0.3332,
+    0.1437,
+    0.2,
 ]
 
-S_MIN = 0.01
+S_MIN = 0.001
 
 
 DEFAULT_PARAMS_STDDEV_TENSOR = torch.tensor(
     [
-        6.61,
-        9.52,
-        17.69,
-        27.74,
-        0.55,
+        6.43,
+        9.66,
+        17.58,
+        27.85,
+        0.57,
         0.28,
-        0.67,
+        0.6,
         0.12,
-        0.4,
+        0.39,
         0.18,
-        0.34,
-        0.27,
-        0.08,
-        0.14,
+        0.33,
+        0.3,
+        0.09,
+        0.16,
         0.57,
         0.25,
         1.03,
-        0.27,
-        0.39,
+        0.31,
+        0.32,
+        0.14,
         1,
     ],
     dtype=torch.float,
@@ -129,7 +131,10 @@ class FSRS(nn.Module):
         return torch.minimum(new_s, new_minimum_s)
 
     def stability_short_term(self, state: Tensor, rating: Tensor) -> Tensor:
-        new_s = state[:, 0] * torch.exp(self.w[17] * (rating - 3 + self.w[18]))
+        sinc = torch.exp(self.w[17] * (rating - 3 + self.w[18])) * torch.pow(
+            state[:, 0], -self.w[19]
+        )
+        new_s = state[:, 0] * torch.where(rating >= 3, sinc.clamp(min=1), sinc)
         return new_s
 
     def init_d(self, rating: Tensor) -> Tensor:
@@ -230,7 +235,8 @@ class ParameterClipper:
             w[16] = w[16].clamp(1, 6)
             w[17] = w[17].clamp(0, 2)
             w[18] = w[18].clamp(0, 2)
-            w[19] = w[19].clamp(0.01, 1)
+            w[19] = w[19].clamp(0, 0.8)
+            w[20] = w[20].clamp(0.01, 1)
             module.w.data = w
 
 
@@ -675,20 +681,59 @@ class Optimizer:
         tqdm.write("revlog.csv saved.")
 
     def extract_simulation_config(self, df):
-        def rating_counts(x):
-            tmp = {1: 0, 2: 0, 3: 0, 4: 0}
-            tmp.update(x.value_counts().to_dict())
-            first = x.iloc[0]
-            tmp[first] -= 1
-            return tmp
+        df_tmp = df[
+            (df["review_duration"] > 0) & (df["review_duration"] < 1200000)
+        ].copy()
+
+        state_rating_costs = (
+            df_tmp[df_tmp["review_state"] != 4]
+            .groupby(["review_state", "review_rating"])["review_duration"]
+            .median()
+            .unstack(fill_value=0)
+        ) / 1000
+        state_rating_counts = (
+            df_tmp[df_tmp["review_state"] != 4]
+            .groupby(["review_state", "review_rating"])["review_duration"]
+            .count()
+            .unstack(fill_value=0)
+        )
+
+        # Ensure all ratings (1-4) exist in columns
+        for rating in range(1, 5):
+            if rating not in state_rating_costs.columns:
+                state_rating_costs[rating] = 0
+            if rating not in state_rating_counts.columns:
+                state_rating_counts[rating] = 0
+
+        # Ensure all states exist in index
+        for state in [Learning, Review, Relearning]:
+            if state not in state_rating_costs.index:
+                state_rating_costs.loc[state] = 0
+            if state not in state_rating_counts.index:
+                state_rating_counts.loc[state] = 0
+
+        self.state_rating_costs = state_rating_costs.values.round(2).tolist()
+        for i, (rating_costs, default_rating_cost, rating_counts) in enumerate(
+            zip(
+                state_rating_costs.values.tolist(),
+                DEFAULT_STATE_RATING_COSTS,
+                state_rating_counts.values.tolist(),
+            )
+        ):
+            for j, (cost, default_cost, count) in enumerate(
+                zip(rating_costs, default_rating_cost, rating_counts)
+            ):
+                weight = count / (50 + count)
+                self.state_rating_costs[i][j] = cost * weight + default_cost * (
+                    1 - weight
+                )
 
         df1 = (
-            df[(df["review_duration"] > 0) & (df["review_duration"] < 1200000)]
-            .groupby(by=["card_id", "real_days"])
+            df_tmp.groupby(by=["card_id", "real_days"])
             .agg(
                 {
                     "review_state": "first",
-                    "review_rating": ["first", rating_counts],
+                    "review_rating": ["first", list],
                     "review_duration": "sum",
                 }
             )
@@ -697,34 +742,66 @@ class Optimizer:
         del df1["real_days"]
         df1.columns = [
             "card_id",
-            "first_review_state",
-            "first_review_rating",
-            "review_rating_counts",
+            "first_state",
+            "first_rating",
+            "same_day_ratings",
             "sum_review_duration",
         ]
-        rating_counts_df = (
-            df1["review_rating_counts"].apply(pd.Series).fillna(0).astype(int)
+        model = FirstOrderMarkovChain()
+        learning_step_rating_sequences = df1[df1["first_state"] == Learning][
+            "same_day_ratings"
+        ]
+        result = model.fit(learning_step_rating_sequences)
+        learning_transition_matrix, learning_transition_counts = (
+            result.transition_matrix[:3],
+            result.transition_counts[:3],
         )
-        df1 = pd.concat(
-            [df1.drop("review_rating_counts", axis=1), rating_counts_df], axis=1
-        )
+        self.learning_step_transitions = learning_transition_matrix.round(2).tolist()
+        for i, (rating_probs, default_rating_probs, transition_counts) in enumerate(
+            zip(
+                learning_transition_matrix.tolist(),
+                DEFAULT_LEARNING_STEP_TRANSITIONS,
+                learning_transition_counts.tolist(),
+            )
+        ):
+            weight = sum(transition_counts) / (50 + sum(transition_counts))
+            for j, (prob, default_prob) in enumerate(
+                zip(rating_probs, default_rating_probs)
+            ):
+                self.learning_step_transitions[i][j] = prob * weight + default_prob * (
+                    1 - weight
+                )
 
-        cost_dict = defaultdict(
-            int,
-            (
-                df1.groupby(by=["first_review_state", "first_review_rating"])[
-                    "sum_review_duration"
-                ]
-                .median()
-                .to_dict()
-            ),
+        relearning_step_rating_sequences = df1[
+            (df1["first_state"] == Review) & (df1["first_rating"] == 1)
+        ]["same_day_ratings"]
+        result = model.fit(relearning_step_rating_sequences)
+        relearning_transition_matrix, relearning_transition_counts = (
+            result.transition_matrix[:3],
+            result.transition_counts[:3],
         )
-        self.learn_costs = np.array([cost_dict[(1, i)] / 1000 for i in range(1, 5)])
-        self.review_costs = np.array([cost_dict[(2, i)] / 1000 for i in range(1, 5)])
+        self.relearning_step_transitions = relearning_transition_matrix.round(
+            2
+        ).tolist()
+        for i, (rating_probs, default_rating_probs, transition_counts) in enumerate(
+            zip(
+                relearning_transition_matrix.tolist(),
+                DEFAULT_RELEARNING_STEP_TRANSITIONS,
+                relearning_transition_counts.tolist(),
+            )
+        ):
+            weight = sum(transition_counts) / (50 + sum(transition_counts))
+            for j, (prob, default_prob) in enumerate(
+                zip(rating_probs, default_rating_probs)
+            ):
+                self.relearning_step_transitions[i][j] = (
+                    prob * weight + default_prob * (1 - weight)
+                )
+
         button_usage_dict = defaultdict(
             int,
             (
-                df1.groupby(by=["first_review_state", "first_review_rating"])["card_id"]
+                df1.groupby(by=["first_state", "first_rating"])["card_id"]
                 .count()
                 .to_dict()
             ),
@@ -740,49 +817,6 @@ class Optimizer:
             self.review_buttons[1:] / self.review_buttons[1:].sum()
         )
 
-        df2 = (
-            df1.groupby(by=["first_review_state", "first_review_rating"])[[1, 2, 3, 4]]
-            .mean()
-            .round(2)
-        )
-        rating_offset_dict = defaultdict(
-            float, sum([df2[g] * (g - 3) for g in range(1, 5)]).to_dict()
-        )
-        session_len_dict = defaultdict(
-            float, sum([df2[g] for g in range(1, 5)]).to_dict()
-        )
-        self.first_rating_offset = np.array(
-            [rating_offset_dict[(1, i)] for i in range(1, 5)]
-        )
-        self.first_session_len = np.array(
-            [session_len_dict[(1, i)] for i in range(1, 5)]
-        )
-        self.forget_rating_offset = rating_offset_dict[(2, 1)]
-        self.forget_session_len = session_len_dict[(2, 1)]
-
-        weight = self.learn_buttons / (50 + self.learn_buttons)
-        self.learn_costs = self.learn_costs * weight + DEFAULT_LEARN_COSTS * (
-            1 - weight
-        )
-        self.first_rating_offset = (
-            self.first_rating_offset * weight
-            + DEFAULT_FIRST_RATING_OFFSETS * (1 - weight)
-        )
-        self.first_session_len = (
-            self.first_session_len * weight + DEFAULT_FIRST_SESSION_LENS * (1 - weight)
-        )
-
-        weight = self.review_buttons / (50 + self.review_buttons)
-        self.review_costs = self.review_costs * weight + DEFAULT_REVIEW_COSTS * (
-            1 - weight
-        )
-        self.forget_rating_offset = self.forget_rating_offset * weight[
-            0
-        ] + DEFAULT_FORGET_RATING_OFFSET * (1 - weight[0])
-        self.forget_session_len = self.forget_session_len * weight[
-            0
-        ] + DEFAULT_FORGET_SESSION_LEN * (1 - weight[0])
-
         weight = sum(self.learn_buttons) / (50 + sum(self.learn_buttons))
         self.first_rating_prob = (
             self.first_rating_prob * weight + DEFAULT_FIRST_RATING_PROB * (1 - weight)
@@ -792,9 +826,6 @@ class Optimizer:
         self.review_rating_prob = (
             self.review_rating_prob * weight + DEFAULT_REVIEW_RATING_PROB * (1 - weight)
         )
-
-        self.first_rating_offset[-1] = 0
-        self.first_session_len[-1] = 0
 
     def create_time_series(
         self,
@@ -1488,21 +1519,17 @@ class Optimizer:
         self,
         learn_span=365,
         max_ivl=36500,
-        loss_aversion=2.5,
         verbose=True,
     ):
         """should not be called before predict_memory_states"""
         if verbose:
-            print("Learn costs: ", self.learn_costs)
-            print("Review costs: ", self.review_costs)
             print("Learn buttons: ", self.learn_buttons)
             print("Review buttons: ", self.review_buttons)
             print("First rating prob: ", self.first_rating_prob)
             print("Review rating prob: ", self.review_rating_prob)
-            print("First rating offset: ", self.first_rating_offset)
-            print("First session len: ", self.first_session_len)
-            print("Forget rating offset: ", self.forget_rating_offset)
-            print("Forget session len: ", self.forget_session_len)
+            print("Learning step transitions: ", self.learning_step_transitions)
+            print("Relearning step transitions: ", self.relearning_step_transitions)
+            print("State rating costs: ", self.state_rating_costs)
 
         simulate_config = {
             "w": self.w,
@@ -1512,15 +1539,11 @@ class Optimizer:
             "learn_limit_perday": 10,
             "review_limit_perday": math.inf,
             "max_ivl": max_ivl,
-            "learn_costs": self.learn_costs,
-            "review_costs": self.review_costs,
             "first_rating_prob": self.first_rating_prob,
             "review_rating_prob": self.review_rating_prob,
-            "first_rating_offset": self.first_rating_offset,
-            "first_session_len": self.first_session_len,
-            "forget_rating_offset": self.forget_rating_offset,
-            "forget_session_len": self.forget_session_len,
-            "loss_aversion": loss_aversion,
+            "learning_step_transitions": self.learning_step_transitions,
+            "relearning_step_transitions": self.relearning_step_transitions,
+            "state_rating_costs": self.state_rating_costs,
         }
         self.optimal_retention = optimal_retention(**simulate_config)
 
@@ -1584,7 +1607,6 @@ class Optimizer:
         ax.legend()
         ax.grid(True)
 
-        simulate_config["loss_aversion"] = 1
         fig6 = workload_graph(simulate_config)
 
         return (fig1, fig2, fig3, fig4, fig5, fig6)
@@ -2581,3 +2603,145 @@ def wrap_short_term_ratings(r_history, t_history):
     else:
         result.pop()
     return "".join(result)
+
+
+class FirstOrderMarkovChain:
+    def __init__(self, n_states=4):
+        """
+        Initialize a first-order Markov chain model
+
+        Parameters:
+        n_states: Number of states, default is 4 (corresponding to states 1,2,3,4)
+        """
+        self.n_states = n_states
+        self.transition_matrix = None
+        self.initial_distribution = None
+        self.transition_counts = None
+        self.initial_counts = None
+
+    def fit(self, sequences, smoothing=1.0):
+        """
+        Fit the Markov chain model based on given sequences
+
+        Parameters:
+        sequences: List of sequences, each sequence is a list containing 1,2,3,4
+        smoothing: Laplace smoothing parameter to avoid zero probability issues
+        """
+        # Initialize transition count matrix and initial state counts
+        self.transition_counts = np.zeros((self.n_states, self.n_states))
+        self.initial_counts = np.zeros(self.n_states)
+
+        # Count transition frequencies and initial state frequencies
+        for sequence in sequences:
+            if len(sequence) == 0:
+                continue
+
+            # Record initial state
+            self.initial_counts[sequence[0] - 1] += 1
+
+            # Record transitions
+            for i in range(len(sequence) - 1):
+                current_state = sequence[i] - 1  # Convert to 0-indexed
+                next_state = sequence[i + 1] - 1  # Convert to 0-indexed
+                self.transition_counts[current_state, next_state] += 1
+
+        # Apply Laplace smoothing and calculate probabilities
+        self.transition_counts += smoothing
+        self.initial_counts += smoothing
+
+        # Calculate transition probability matrix
+        self.transition_matrix = np.zeros((self.n_states, self.n_states))
+        for i in range(self.n_states):
+            row_sum = np.sum(self.transition_counts[i])
+            if row_sum > 0:
+                self.transition_matrix[i] = self.transition_counts[i] / row_sum
+            else:
+                # If a state never appears, assume uniform distribution
+                self.transition_matrix[i] = np.ones(self.n_states) / self.n_states
+
+        # Calculate initial state distribution
+        self.initial_distribution = self.initial_counts / np.sum(self.initial_counts)
+
+        return self
+
+    def generate_sequence(self, length):
+        """
+        Generate a new sequence
+
+        Parameters:
+        length: Length of the sequence to generate
+
+        Returns:
+        Generated sequence (elements are 1,2,3,4)
+        """
+        if self.transition_matrix is None or self.initial_distribution is None:
+            raise ValueError("Model not yet fitted, please call the fit method first")
+
+        sequence = []
+
+        # Generate initial state
+        current_state = np.random.choice(self.n_states, p=self.initial_distribution)
+        sequence.append(current_state + 1)  # Convert to 1-indexed
+
+        # Generate subsequent states
+        for _ in range(length - 1):
+            current_state = np.random.choice(
+                self.n_states, p=self.transition_matrix[current_state]
+            )
+            sequence.append(current_state + 1)  # Convert to 1-indexed
+
+        return sequence
+
+    def log_likelihood(self, sequences):
+        """
+        Calculate the log-likelihood of sequences
+
+        Parameters:
+        sequences: List of sequences
+
+        Returns:
+        Log-likelihood value
+        """
+        if self.transition_matrix is None or self.initial_distribution is None:
+            raise ValueError("Model not yet fitted, please call the fit method first")
+
+        log_likelihood = 0.0
+
+        for sequence in sequences:
+            if len(sequence) == 0:
+                continue
+
+            # Log probability of initial state
+            log_likelihood += np.log(self.initial_distribution[sequence[0] - 1])
+
+            # Log probability of transitions
+            for i in range(len(sequence) - 1):
+                current_state = sequence[i] - 1
+                next_state = sequence[i + 1] - 1
+                log_likelihood += np.log(
+                    self.transition_matrix[current_state, next_state]
+                )
+
+        return log_likelihood
+
+    def print_model(self):
+        """Print model parameters"""
+        print("Initial state distribution:")
+        for i in range(self.n_states):
+            print(f"State {i+1}: {self.initial_distribution[i]:.4f}")
+
+        print("\nTransition probability matrix:")
+        print("    | " + " ".join([f"  {i+1}  " for i in range(self.n_states)]))
+        print("----+" + "------" * self.n_states)
+        for i in range(self.n_states):
+            print(
+                f" {i+1}  | "
+                + " ".join(
+                    [f"{self.transition_matrix[i,j]:.4f}" for j in range(self.n_states)]
+                )
+            )
+
+        print("Initial counts:")
+        print(self.initial_counts.astype(int))
+        print("Transition counts:")
+        print(self.transition_counts.astype(int))
