@@ -91,7 +91,7 @@ DEFAULT_PARAMS_STDDEV_TENSOR = torch.tensor(
         0.31,
         0.32,
         0.14,
-        1,
+        0.27,
     ],
     dtype=torch.float,
 )
