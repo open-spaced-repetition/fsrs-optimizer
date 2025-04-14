@@ -7,6 +7,7 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 
 DECAY = -0.2
 FACTOR = 0.9 ** (1 / DECAY) - 1
+S_MIN = 0.001
 
 
 def power_forgetting_curve(t, s, decay=DECAY):
@@ -151,7 +152,7 @@ def simulate(
         hard_penalty = np.where(rating == 2, w[15], 1)
         easy_bonus = np.where(rating == 4, w[16], 1)
         return np.maximum(
-            0.01,
+            S_MIN,
             s
             * (
                 1
@@ -166,7 +167,7 @@ def simulate(
 
     def stability_after_failure(s, r, d):
         return np.maximum(
-            0.01,
+            S_MIN,
             np.minimum(
                 w[11]
                 * np.power(d, -w[12])
@@ -184,7 +185,7 @@ def simulate(
     ):
         if init_rating is not None:
             s = np.choose(init_rating - 1, w)
-            d = init_d(init_rating)
+            d = np.clip(init_d(init_rating), 1, 10)
             costs = state_rating_costs[0]
             max_consecutive = learning_step_count - np.choose(
                 init_rating - 1, [0, 0, 1, 1]

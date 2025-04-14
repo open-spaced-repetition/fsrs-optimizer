@@ -66,9 +66,6 @@ DEFAULT_PARAMETER = [
     0.2,
 ]
 
-S_MIN = 0.001
-
-
 DEFAULT_PARAMS_STDDEV_TENSOR = torch.tensor(
     [
         6.43,
@@ -264,7 +261,7 @@ class BatchDataset(Dataset):
         dataframe["seq_len"] = dataframe["tensor"].map(len)
         dataframe = dataframe[dataframe["seq_len"] <= max_seq_len]
         if sort_by_length:
-            dataframe = dataframe.sort_values(by="seq_len")
+            dataframe = dataframe.sort_values(by=["seq_len"], kind="stable")
         del dataframe["seq_len"]
         self.x_train = pad_sequence(
             dataframe["tensor"].to_list(), batch_first=True, padding_value=0
@@ -402,11 +399,16 @@ class Trainer:
                     delta_ts, stabilities, -self.model.w[20]
                 )
                 loss = (self.loss_fn(retentions, labels) * weights).sum()
-                penalty = torch.sum(
-                    torch.square(self.model.w - self.init_w_tensor)
-                    / torch.square(DEFAULT_PARAMS_STDDEV_TENSOR)
+                penalty = (
+                    torch.sum(
+                        torch.square(self.model.w - self.init_w_tensor)
+                        / torch.square(DEFAULT_PARAMS_STDDEV_TENSOR)
+                    )
+                    * self.gamma
+                    * real_batch_size
+                    / epoch_len
                 )
-                loss += penalty * self.gamma * real_batch_size / epoch_len
+                loss += penalty
                 loss.backward()
                 if self.float_delta_t:
                     for param in self.model.parameters():
