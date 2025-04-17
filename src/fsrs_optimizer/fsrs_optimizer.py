@@ -63,10 +63,8 @@ DEFAULT_PARAMETER = [
     0.7536,
     0.3332,
     0.1437,
+    0.2,
 ]
-
-S_MIN = 0.001
-
 
 DEFAULT_PARAMS_STDDEV_TENSOR = torch.tensor(
     [
@@ -90,6 +88,7 @@ DEFAULT_PARAMS_STDDEV_TENSOR = torch.tensor(
         0.31,
         0.32,
         0.14,
+        0.27,
     ],
     dtype=torch.float,
 )
@@ -164,7 +163,7 @@ class FSRS(nn.Module):
             new_d = self.init_d(X[:, 1])
             new_d = new_d.clamp(1, 10)
         else:
-            r = power_forgetting_curve(X[:, 0], state[:, 0])
+            r = power_forgetting_curve(X[:, 0], state[:, 0], -self.w[20])
             short_term = X[:, 0] < 1
             success = X[:, 1] > 1
             new_s = (
@@ -234,6 +233,7 @@ class ParameterClipper:
             w[17] = w[17].clamp(0, 2)
             w[18] = w[18].clamp(0, 2)
             w[19] = w[19].clamp(0, 0.8)
+            w[20] = w[20].clamp(0.1, 0.8)
             module.w.data = w
 
 
@@ -259,9 +259,11 @@ class BatchDataset(Dataset):
         if dataframe.empty:
             raise ValueError("Training data is inadequate.")
         dataframe["seq_len"] = dataframe["tensor"].map(len)
+        if dataframe["seq_len"].min() > max_seq_len:
+            raise ValueError("Training data is inadequate.")
         dataframe = dataframe[dataframe["seq_len"] <= max_seq_len]
         if sort_by_length:
-            dataframe = dataframe.sort_values(by="seq_len")
+            dataframe = dataframe.sort_values(by=["seq_len"], kind="stable")
         del dataframe["seq_len"]
         self.x_train = pad_sequence(
             dataframe["tensor"].to_list(), batch_first=True, padding_value=0
@@ -395,15 +397,22 @@ class Trainer:
                 real_batch_size = seq_lens.shape[0]
                 outputs, _ = self.model(sequences)
                 stabilities = outputs[seq_lens - 1, torch.arange(real_batch_size), 0]
-                retentions = power_forgetting_curve(delta_ts, stabilities)
-                loss = (self.loss_fn(retentions, labels) * weights).sum()
-                penalty = torch.sum(
-                    torch.square(self.model.w - self.init_w_tensor)
-                    / torch.square(DEFAULT_PARAMS_STDDEV_TENSOR)
+                retentions = power_forgetting_curve(
+                    delta_ts, stabilities, -self.model.w[20]
                 )
-                loss += penalty * self.gamma * real_batch_size / epoch_len
+                loss = (self.loss_fn(retentions, labels) * weights).sum()
+                penalty = (
+                    torch.sum(
+                        torch.square(self.model.w - self.init_w_tensor)
+                        / torch.square(DEFAULT_PARAMS_STDDEV_TENSOR)
+                    )
+                    * self.gamma
+                    * real_batch_size
+                    / epoch_len
+                )
+                loss += penalty
                 loss.backward()
-                if self.float_delta_t or not self.enable_short_term:
+                if self.float_delta_t:
                     for param in self.model.parameters():
                         param.grad[:4] = torch.zeros(4)
                 if not self.enable_short_term:
@@ -450,7 +459,9 @@ class Trainer:
                 real_batch_size = seq_lens.shape[0]
                 outputs, _ = self.model(sequences.transpose(0, 1))
                 stabilities = outputs[seq_lens - 1, torch.arange(real_batch_size), 0]
-                retentions = power_forgetting_curve(delta_ts, stabilities)
+                retentions = power_forgetting_curve(
+                    delta_ts, stabilities, -self.model.w[20]
+                )
                 loss = (self.loss_fn(retentions, labels) * weights).mean()
                 penalty = torch.sum(
                     torch.square(self.model.w - self.init_w_tensor)
@@ -572,7 +583,7 @@ class Optimizer:
         self.float_delta_t = float_delta_t
         self.enable_short_term = enable_short_term
         global S_MIN
-        S_MIN = 1e-6 if float_delta_t else 0.01
+        S_MIN = 1e-6 if float_delta_t else 0.001
 
     def anki_extract(
         self,
@@ -1617,7 +1628,9 @@ class Optimizer:
         self.dataset["stability"] = stabilities
         self.dataset["difficulty"] = difficulties
         self.dataset["p"] = power_forgetting_curve(
-            self.dataset["delta_t"], self.dataset["stability"]
+            self.dataset["delta_t"],
+            self.dataset["stability"],
+            -my_collection.model.w[20].detach().numpy(),
         )
         self.dataset["log_loss"] = self.dataset.apply(
             lambda row: -np.log(row["p"]) if row["y"] == 1 else -np.log(1 - row["p"]),
@@ -1637,7 +1650,9 @@ class Optimizer:
         self.dataset["stability"] = stabilities
         self.dataset["difficulty"] = difficulties
         self.dataset["p"] = power_forgetting_curve(
-            self.dataset["delta_t"], self.dataset["stability"]
+            self.dataset["delta_t"],
+            self.dataset["stability"],
+            -my_collection.model.w[20].detach().numpy(),
         )
         self.dataset["log_loss"] = self.dataset.apply(
             lambda row: -np.log(row["p"]) if row["y"] == 1 else -np.log(1 - row["p"]),
