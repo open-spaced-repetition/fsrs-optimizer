@@ -259,6 +259,8 @@ class BatchDataset(Dataset):
         if dataframe.empty:
             raise ValueError("Training data is inadequate.")
         dataframe["seq_len"] = dataframe["tensor"].map(len)
+        if dataframe["seq_len"].min() > max_seq_len:
+            raise ValueError("Training data is inadequate.")
         dataframe = dataframe[dataframe["seq_len"] <= max_seq_len]
         if sort_by_length:
             dataframe = dataframe.sort_values(by=["seq_len"], kind="stable")
