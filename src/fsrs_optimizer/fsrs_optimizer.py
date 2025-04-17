@@ -19,6 +19,7 @@ from torch.utils.data import Dataset
 from torch.nn.utils.rnn import pad_sequence
 from sklearn.model_selection import TimeSeriesSplit  # type: ignore
 from sklearn.metrics import (  # type: ignore
+    log_loss,
     root_mean_squared_error,
     mean_absolute_error,
     mean_absolute_percentage_error,
@@ -1706,6 +1707,7 @@ class Optimizer:
             if len(dataset["y"].unique()) == 2
             else np.nan
         )
+        metrics["LogLoss"] = log_loss(y_true=dataset["y"], y_pred=dataset["p"])
         metrics_all["all"] = metrics
         fig2 = plt.figure(figsize=(16, 12))
         for last_rating in (1, 2, 3, 4):
@@ -1732,6 +1734,7 @@ class Optimizer:
                 if len(calibration_data["y"].unique()) == 2
                 else np.nan
             )
+            metrics["LogLoss"] = log_loss(y_true=calibration_data["y"], y_pred=calibration_data["p"])
             metrics_all[last_rating] = metrics
 
         fig3 = plt.figure()
