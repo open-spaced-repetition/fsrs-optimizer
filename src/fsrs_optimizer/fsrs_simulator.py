@@ -1,19 +1,25 @@
 import math
 import numpy as np
 from matplotlib import pyplot as plt
-from tqdm import trange  # type: ignore
+from typing import Optional
+from concurrent.futures import ProcessPoolExecutor, as_completed
 
 
-DECAY = -0.5
+DECAY = -0.2
 FACTOR = 0.9 ** (1 / DECAY) - 1
+S_MIN = 0.001
 
 
-def power_forgetting_curve(t, s):
-    return (1 + FACTOR * t / s) ** DECAY
+def power_forgetting_curve(t, s, decay=DECAY):
+    factor = 0.9 ** (1 / decay) - 1
+    return (1 + factor * t / s) ** decay
 
 
-def next_interval(s, r, float_ivl: bool = False, fuzz: bool = False):
-    ivl = s / FACTOR * (r ** (1 / DECAY) - 1)
+def next_interval(
+    s, r, float_ivl: bool = False, fuzz: bool = False, decay: float = DECAY
+):
+    factor = 0.9 ** (1 / decay) - 1
+    ivl = s / factor * (r ** (1 / decay) - 1)
     if float_ivl:
         ivl = np.round(ivl, 6)
     else:
@@ -82,10 +88,29 @@ DEFAULT_LEARN_COSTS = np.array([33.79, 24.3, 13.68, 6.5])
 DEFAULT_REVIEW_COSTS = np.array([23.0, 11.68, 7.33, 5.6])
 DEFAULT_FIRST_RATING_PROB = np.array([0.24, 0.094, 0.495, 0.171])
 DEFAULT_REVIEW_RATING_PROB = np.array([0.224, 0.631, 0.145])
-DEFAULT_FIRST_RATING_OFFSETS = np.array([-0.72, -0.15, -0.01, 0.0])
-DEFAULT_FIRST_SESSION_LENS = np.array([2.02, 1.28, 0.81, 0.0])
-DEFAULT_FORGET_RATING_OFFSET = -0.28
-DEFAULT_FORGET_SESSION_LEN = 1.05
+DEFAULT_LEARNING_STEP_COUNT = 2
+DEFAULT_RELEARNING_STEP_COUNT = 1
+DEFAULT_LEARNING_STEP_TRANSITIONS = np.array(
+    [
+        [0.3687, 0.0628, 0.5108, 0.0577],
+        [0.0441, 0.4553, 0.4457, 0.0549],
+        [0.0518, 0.0470, 0.8462, 0.0550],
+    ],
+)
+DEFAULT_RELEARNING_STEP_TRANSITIONS = np.array(
+    [
+        [0.2157, 0.0643, 0.6595, 0.0605],
+        [0.0500, 0.4638, 0.4475, 0.0387],
+        [0.1056, 0.1434, 0.7266, 0.0244],
+    ],
+)
+DEFAULT_STATE_RATING_COSTS = np.array(
+    [
+        [12.75, 12.26, 8.0, 6.38],
+        [13.05, 11.74, 7.42, 5.6],
+        [10.56, 10.0, 7.37, 5.4],
+    ]
+)
 
 
 def simulate(
@@ -97,15 +122,13 @@ def simulate(
     learn_limit_perday=math.inf,
     review_limit_perday=math.inf,
     max_ivl=36500,
-    learn_costs=DEFAULT_LEARN_COSTS,
-    review_costs=DEFAULT_REVIEW_COSTS,
     first_rating_prob=DEFAULT_FIRST_RATING_PROB,
     review_rating_prob=DEFAULT_REVIEW_RATING_PROB,
-    first_rating_offset=DEFAULT_FIRST_RATING_OFFSETS,
-    first_session_len=DEFAULT_FIRST_SESSION_LENS,
-    forget_rating_offset=DEFAULT_FORGET_RATING_OFFSET,
-    forget_session_len=DEFAULT_FORGET_SESSION_LEN,
-    loss_aversion=2.5,
+    learning_step_count=DEFAULT_LEARNING_STEP_COUNT,
+    relearning_step_count=DEFAULT_RELEARNING_STEP_COUNT,
+    learning_step_transitions=DEFAULT_LEARNING_STEP_TRANSITIONS,
+    relearning_step_transitions=DEFAULT_RELEARNING_STEP_TRANSITIONS,
+    state_rating_costs=DEFAULT_STATE_RATING_COSTS,
     seed=42,
     fuzz=False,
 ):
@@ -129,7 +152,7 @@ def simulate(
         hard_penalty = np.where(rating == 2, w[15], 1)
         easy_bonus = np.where(rating == 4, w[16], 1)
         return np.maximum(
-            0.01,
+            S_MIN,
             s
             * (
                 1
@@ -144,7 +167,7 @@ def simulate(
 
     def stability_after_failure(s, r, d):
         return np.maximum(
-            0.01,
+            S_MIN,
             np.minimum(
                 w[11]
                 * np.power(d, -w[12])
@@ -154,23 +177,67 @@ def simulate(
             ),
         )
 
-    def stability_short_term(s, init_rating=None):
+    MAX_RELEARN_STEPS = 5
+
+    # learn_state: 1: Learning, 2: Review, 3: Relearning
+    def memory_state_short_term(
+        s: np.ndarray, d: np.ndarray, init_rating: Optional[np.ndarray] = None
+    ):
         if init_rating is not None:
-            rating_offset = np.choose(init_rating - 1, first_rating_offset)
-            session_len = np.choose(init_rating - 1, first_session_len)
+            s = np.choose(init_rating - 1, w)
+            d = np.clip(init_d(init_rating), 1, 10)
+            costs = state_rating_costs[0]
+            max_consecutive = learning_step_count - np.choose(
+                init_rating - 1, [0, 0, 1, 1]
+            )
+            cost = np.choose(init_rating - 1, costs).sum()
         else:
-            rating_offset = forget_rating_offset
-            session_len = forget_session_len
-        new_s = s * np.exp(w[17] * (rating_offset + session_len * w[18]))
-        return new_s
+            costs = state_rating_costs[2]
+            max_consecutive = relearning_step_count
+            cost = 0
+
+        def step(s, next_weights):
+            rating = np.random.choice([1, 2, 3, 4], p=next_weights)
+            sinc = (math.e ** (w[17] * (rating - 3 + w[18]))) * (s ** -w[19])
+            new_s = s * (sinc.clip(min=1) if rating >= 3 else sinc)
+
+            return (new_s, rating)
+
+        def loop(s, d, max_consecutive, init_rating):
+            i = 0
+            consecutive = 0
+            step_transitions = (
+                relearning_step_transitions
+                if init_rating is None
+                else learning_step_transitions
+            )
+            rating = init_rating or 1
+            cost = 0
+            while (
+                i < MAX_RELEARN_STEPS and consecutive < max_consecutive and rating < 4
+            ):
+                (s, rating) = step(s, step_transitions[rating - 1])
+                d = next_d(d, rating)
+                cost += costs[rating - 1]
+                i += 1
+                if rating > 2:
+                    consecutive += 1
+                elif rating == 1:
+                    consecutive = 0
+
+            return s, d, cost
+
+        if len(s) != 0:
+            new_s, new_d, cost = np.vectorize(loop, otypes=["float", "float", "float"])(
+                s, d, max_consecutive, init_rating
+            )
+        else:
+            new_s, new_d, cost = [], [], []
+
+        return new_s, new_d, cost
 
     def init_d(rating):
         return w[4] - np.exp(w[5] * (rating - 1)) + 1
-
-    def init_d_with_short_term(rating):
-        rating_offset = np.choose(rating - 1, first_rating_offset)
-        new_d = init_d(rating) - w[6] * rating_offset
-        return np.clip(new_d, 1, 10)
 
     def linear_damping(delta_d, old_d):
         return delta_d * (10 - old_d) / 9
@@ -184,7 +251,10 @@ def simulate(
     def mean_reversion(init, current):
         return w[7] * init + (1 - w[7]) * current
 
-    for today in trange(learn_span, position=1, leave=False):
+    for today in range(learn_span):
+        new_s = np.copy(card_table[col["stability"]])
+        new_d = np.copy(card_table[col["difficulty"]])
+
         has_learned = card_table[col["stability"]] > 1e-10
         card_table[col["delta_t"]][has_learned] = (
             today - card_table[col["last_date"]][has_learned]
@@ -192,6 +262,7 @@ def simulate(
         card_table[col["retrievability"]][has_learned] = power_forgetting_curve(
             card_table[col["delta_t"]][has_learned],
             card_table[col["stability"]][has_learned],
+            -w[20],
         )
         card_table[col["cost"]] = 0
         need_review = card_table[col["due"]] <= today
@@ -203,83 +274,92 @@ def simulate(
         )
         card_table[col["cost"]][need_review] = np.choose(
             card_table[col["rating"]][need_review].astype(int) - 1,
-            review_costs,
+            state_rating_costs[1],
         )
-        card_table[col["cost"]][need_review & forget] *= loss_aversion
-        true_review = (
-            need_review
-            & (np.cumsum(card_table[col["cost"]]) <= max_cost_perday)
-            & (np.cumsum(need_review) <= review_limit_perday)
-        )
+        true_review = need_review & (np.cumsum(need_review) <= review_limit_perday)
         card_table[col["last_date"]][true_review] = today
 
         card_table[col["lapses"]][true_review & forget] += 1
         card_table[col["reps"]][true_review & ~forget] += 1
 
-        card_table[col["stability"]][true_review & forget] = stability_after_failure(
+        new_s[true_review & forget] = stability_after_failure(
             card_table[col["stability"]][true_review & forget],
             card_table[col["retrievability"]][true_review & forget],
             card_table[col["difficulty"]][true_review & forget],
         )
-        card_table[col["stability"]][true_review & forget] = stability_short_term(
-            card_table[col["stability"]][true_review & forget]
+        new_d[true_review & forget] = next_d(
+            card_table[col["difficulty"]][true_review & forget],
+            card_table[col["rating"]][true_review & forget],
         )
-        card_table[col["stability"]][true_review & ~forget] = stability_after_success(
-            card_table[col["stability"]][true_review & ~forget],
+        (
+            card_table[col["stability"]][true_review & forget],
+            card_table[col["difficulty"]][true_review & forget],
+            costs,
+        ) = memory_state_short_term(
+            new_s[true_review & forget],
+            new_d[true_review & forget],
+        )
+        new_s[true_review & ~forget] = stability_after_success(
+            new_s[true_review & ~forget],
             card_table[col["retrievability"]][true_review & ~forget],
+            new_d[true_review & ~forget],
+            card_table[col["rating"]][true_review & ~forget],
+        )
+
+        new_d[true_review & ~forget] = next_d(
             card_table[col["difficulty"]][true_review & ~forget],
             card_table[col["rating"]][true_review & ~forget],
         )
 
-        card_table[col["difficulty"]][true_review] = next_d(
-            card_table[col["difficulty"]][true_review],
-            card_table[col["rating"]][true_review],
-        )
-        card_table[col["difficulty"]][true_review & forget] = np.clip(
-            card_table[col["difficulty"]][true_review & forget]
-            - (w[6] * forget_rating_offset),
-            1,
-            10,
-        )
+        card_table[col["cost"]][true_review & forget] = [
+            a + b for a, b in zip(card_table[col["cost"]][true_review & forget], costs)
+        ]
 
         need_learn = card_table[col["stability"]] == 1e-10
         card_table[col["cost"]][need_learn] = np.choose(
             card_table[col["rating"]][need_learn].astype(int) - 1,
-            learn_costs,
+            state_rating_costs[0],
         )
-        true_learn = (
-            need_learn
-            & (np.cumsum(card_table[col["cost"]]) <= max_cost_perday)
-            & (np.cumsum(need_learn) <= learn_limit_perday)
-        )
+        true_learn = need_learn & (np.cumsum(need_learn) <= learn_limit_perday)
         card_table[col["last_date"]][true_learn] = today
-        card_table[col["stability"]][true_learn] = np.choose(
+        new_s[true_learn] = np.choose(
             card_table[col["rating"]][true_learn].astype(int) - 1, w[:4]
         )
-        card_table[col["stability"]][true_learn] = stability_short_term(
-            card_table[col["stability"]][true_learn],
+        (
+            new_s[true_learn],
+            new_d[true_learn],
+            costs,
+        ) = memory_state_short_term(
+            new_s[true_learn],
+            new_d[true_learn],
             init_rating=card_table[col["rating"]][true_learn].astype(int),
         )
-        card_table[col["difficulty"]][true_learn] = init_d_with_short_term(
-            card_table[col["rating"]][true_learn].astype(int)
-        )
 
-        card_table[col["ivl"]][true_review | true_learn] = np.clip(
+        card_table[col["cost"]][true_learn] = [
+            a + b for a, b in zip(card_table[col["cost"]][true_learn], costs)
+        ]
+
+        below_cost_limit = np.cumsum(card_table[col["cost"]]) <= max_cost_perday
+        reviewed = (true_review | true_learn) & below_cost_limit
+
+        card_table[col["stability"]][reviewed] = new_s[reviewed]
+        card_table[col["difficulty"]][reviewed] = new_d[reviewed]
+
+        card_table[col["ivl"]][reviewed] = np.clip(
             next_interval(
-                card_table[col["stability"]][true_review | true_learn],
+                card_table[col["stability"]][reviewed],
                 request_retention,
                 fuzz=fuzz,
+                decay=-w[20],
             ),
             1,
             max_ivl,
         )
-        card_table[col["due"]][true_review | true_learn] = (
-            today + card_table[col["ivl"]][true_review | true_learn]
-        )
+        card_table[col["due"]][reviewed] = today + card_table[col["ivl"]][reviewed]
 
         revlogs[today] = {
-            "card_id": np.where(true_review | true_learn)[0],
-            "rating": card_table[col["rating"]][true_review | true_learn],
+            "card_id": np.where(reviewed)[0],
+            "rating": card_table[col["rating"]][reviewed],
         }
 
         has_learned = card_table[col["stability"]] > 1e-10
@@ -291,10 +371,10 @@ def simulate(
             card_table[col["stability"]][has_learned],
         )
 
-        review_cnt_per_day[today] = np.sum(true_review)
-        learn_cnt_per_day[today] = np.sum(true_learn)
+        review_cnt_per_day[today] = np.sum(true_review & reviewed)
+        learn_cnt_per_day[today] = np.sum(true_learn & reviewed)
         memorized_cnt_per_day[today] = card_table[col["retrievability"]].sum()
-        cost_per_day[today] = card_table[col["cost"]][true_review | true_learn].sum()
+        cost_per_day[today] = card_table[col["cost"]][reviewed].sum()
     return (
         card_table,
         review_cnt_per_day,
@@ -309,6 +389,17 @@ def optimal_retention(**kwargs):
     return brent(**kwargs)
 
 
+def run_simulation(args):
+    workload_only, kwargs = args
+
+    (_, _, _, memorized_cnt_per_day, cost_per_day, _) = simulate(**kwargs)
+
+    if workload_only:
+        return np.mean(cost_per_day)
+    else:
+        return np.sum(cost_per_day) / memorized_cnt_per_day[-1]
+
+
 def sample(
     r,
     w,
@@ -318,15 +409,11 @@ def sample(
     learn_limit_perday=math.inf,
     review_limit_perday=math.inf,
     max_ivl=36500,
-    learn_costs=DEFAULT_LEARN_COSTS,
-    review_costs=DEFAULT_REVIEW_COSTS,
     first_rating_prob=DEFAULT_FIRST_RATING_PROB,
     review_rating_prob=DEFAULT_REVIEW_RATING_PROB,
-    first_rating_offset=DEFAULT_FIRST_RATING_OFFSETS,
-    first_session_len=DEFAULT_FIRST_SESSION_LENS,
-    forget_rating_offset=DEFAULT_FORGET_RATING_OFFSET,
-    forget_session_len=DEFAULT_FORGET_SESSION_LEN,
-    loss_aversion=2.5,
+    learning_step_transitions=DEFAULT_LEARNING_STEP_TRANSITIONS,
+    relearning_step_transitions=DEFAULT_RELEARNING_STEP_TRANSITIONS,
+    state_rating_costs=DEFAULT_STATE_RATING_COSTS,
     workload_only=False,
 ):
     results = []
@@ -344,31 +431,29 @@ def sample(
 
     SAMPLE_SIZE = best_sample_size(learn_span)
 
-    for i in range(SAMPLE_SIZE):
-        _, _, _, memorized_cnt_per_day, cost_per_day, _ = simulate(
-            w,
-            r,
-            deck_size,
-            learn_span,
-            max_cost_perday,
-            learn_limit_perday,
-            review_limit_perday,
-            max_ivl,
-            learn_costs,
-            review_costs,
-            first_rating_prob,
-            review_rating_prob,
-            first_rating_offset,
-            first_session_len,
-            forget_rating_offset,
-            forget_session_len,
-            loss_aversion,
-            seed=42 + i,
-        )
-        if workload_only:
-            results.append(cost_per_day.sum())
-        else:
-            results.append(cost_per_day.sum() / memorized_cnt_per_day[-1])
+    with ProcessPoolExecutor() as executor:
+        futures = []
+        for i in range(SAMPLE_SIZE):
+            kwargs = {
+                "w": w,
+                "request_retention": r,
+                "deck_size": deck_size,
+                "learn_span": learn_span,
+                "max_cost_perday": max_cost_perday,
+                "learn_limit_perday": learn_limit_perday,
+                "review_limit_perday": review_limit_perday,
+                "max_ivl": max_ivl,
+                "first_rating_prob": first_rating_prob,
+                "review_rating_prob": review_rating_prob,
+                "learning_step_transitions": learning_step_transitions,
+                "relearning_step_transitions": relearning_step_transitions,
+                "state_rating_costs": state_rating_costs,
+                "seed": 42 + i,
+            }
+            futures.append(executor.submit(run_simulation, (workload_only, kwargs)))
+
+        for future in as_completed(futures):
+            results.append(future.result())
     return np.mean(results)
 
 
@@ -496,7 +581,6 @@ def workload_graph(default_params, sampling_size=30):
         default_params["deck_size"] / default_params["learn_span"]
     )
     default_params["review_limit_perday"] = math.inf
-    default_params["loss_aversion"] = 1
     workload = [sample(r=r, workload_only=True, **default_params) for r in R]
 
     # this is for testing
@@ -663,25 +747,26 @@ def workload_graph(default_params, sampling_size=30):
 if __name__ == "__main__":
     default_params = {
         "w": [
-            0.4197,
-            1.1869,
-            3.0412,
-            15.2441,
-            7.1434,
-            0.6477,
-            1.0007,
-            0.0674,
-            1.6597,
-            0.1712,
-            1.1178,
-            2.0225,
-            0.0904,
-            0.3025,
-            2.1214,
-            0.2498,
-            2.9466,
-            0.4891,
-            0.6468,
+            0.2172,
+            1.1771,
+            3.2602,
+            16.1507,
+            7.0114,
+            0.57,
+            2.0966,
+            0.0069,
+            1.5261,
+            0.112,
+            1.0178,
+            1.849,
+            0.1133,
+            0.3127,
+            2.2934,
+            0.2191,
+            3.0004,
+            0.7536,
+            0.3332,
+            0.1437,
         ],
         "deck_size": 20000,
         "learn_span": 365,
@@ -726,4 +811,4 @@ if __name__ == "__main__":
     ax.set_title("Memorized Count per Day")
     ax.grid(True)
     plt.show()
-    workload_graph(default_params, sampling_size=300).savefig("workload.png")
+    workload_graph(default_params, sampling_size=30).savefig("workload.png")

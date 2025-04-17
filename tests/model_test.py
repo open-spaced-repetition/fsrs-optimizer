@@ -11,15 +11,42 @@ class Test_Model:
         state = torch.stack([stability, difficulty]).unsqueeze(0)
         s_recall = model.stability_after_success(state, retention, rating)
         assert torch.allclose(
-            s_recall, torch.tensor([25.7761, 14.1219, 60.4044, 208.9760]), atol=1e-4
+            s_recall,
+            torch.tensor(
+                [
+                    25.578495025634766,
+                    13.550500869750977,
+                    59.86878967285156,
+                    207.70382690429688,
+                ]
+            ),
+            atol=1e-4,
         )
         s_forget = model.stability_after_failure(state, retention)
         assert torch.allclose(
-            s_forget, torch.tensor([1.7029, 1.9799, 2.3760, 2.8885]), atol=1e-4
+            s_forget,
+            torch.tensor(
+                [
+                    1.7469292879104614,
+                    2.0312795639038086,
+                    2.4401676654815674,
+                    2.9707436561584473,
+                ]
+            ),
+            atol=1e-4,
         )
         s_short_term = model.stability_short_term(state, rating)
         assert torch.allclose(
-            s_short_term, torch.tensor([2.5051, 4.1992, 7.0389, 11.7988]), atol=1e-4
+            s_short_term,
+            torch.tensor(
+                [
+                    1.1298232078552246,
+                    2.4004619121551514,
+                    5.100105285644531,
+                    10.835862159729004,
+                ]
+            ),
+            atol=1e-4,
         )
 
     def test_next_difficulty(self):
@@ -31,7 +58,14 @@ class Test_Model:
         d_recall = model.next_d(state, rating)
         assert torch.allclose(
             d_recall,
-            torch.tensor([6.6070, 5.7994, 4.9918, 4.1842]),
+            torch.tensor(
+                [
+                    7.2961106300354,
+                    6.139369487762451,
+                    4.98262882232666,
+                    3.82588791847229,
+                ]
+            ),
             atol=1e-4,
         )
 
@@ -41,7 +75,16 @@ class Test_Model:
         retention = power_forgetting_curve(delta_t, stability)
         assert torch.allclose(
             retention,
-            torch.tensor([1.0, 0.946059, 0.9299294, 0.9221679, 0.90000004, 0.79394597]),
+            torch.tensor(
+                [
+                    1.0,
+                    0.9421982765197754,
+                    0.9268093109130859,
+                    0.91965252161026,
+                    0.9,
+                    0.8178008198738098,
+                ]
+            ),
             atol=1e-4,
         )
 
@@ -65,12 +108,30 @@ class Test_Model:
         difficulty = state[:, 1]
         assert torch.allclose(
             stability,
-            torch.tensor([0.2619, 1.7074, 5.8691, 25.0124, 0.2859, 2.1482]),
+            torch.tensor(
+                [
+                    0.16648849844932556,
+                    1.6992956399917603,
+                    6.414825439453125,
+                    28.05109977722168,
+                    0.16896963119506836,
+                    2.0530757904052734,
+                ]
+            ),
             atol=1e-4,
         )
         assert torch.allclose(
             difficulty,
-            torch.tensor([8.0827, 7.0405, 5.2729, 2.1301, 8.0827, 7.0405]),
+            torch.tensor(
+                [
+                    8.362964630126953,
+                    7.086328506469727,
+                    4.868056774139404,
+                    1.0,
+                    8.362964630126953,
+                    7.086328506469727,
+                ]
+            ),
             atol=1e-4,
         )
 
@@ -107,33 +168,35 @@ class Test_Model:
         real_batch_size = inputs.shape[1]
         outputs, _ = model.forward(inputs)
         stabilities = outputs[seq_lens - 1, torch.arange(real_batch_size), 0]
-        retentions = power_forgetting_curve(delta_ts, stabilities)
+        retentions = power_forgetting_curve(delta_ts, stabilities, -model.w[20])
         loss = loss_fn(retentions, labels).sum()
-        assert round(loss.item(), 4) == 4.4467
+        assert torch.allclose(loss, torch.tensor(4.514678), atol=1e-4)
         loss.backward()
         assert torch.allclose(
             model.w.grad,
             torch.tensor(
                 [
-                    -0.0583,
-                    -0.0068,
-                    -0.0026,
-                    0.0105,
-                    -0.0513,
-                    1.3643,
-                    0.0837,
-                    -0.9502,
-                    0.5345,
-                    -2.8929,
-                    0.5142,
-                    -0.0131,
-                    0.0419,
-                    -0.1183,
-                    -0.0009,
-                    -0.1445,
-                    0.2024,
-                    0.2141,
-                    0.0323,
+                    -0.09797614,
+                    -0.0072790897,
+                    -0.0013130545,
+                    0.005998563,
+                    0.0407578,
+                    -0.059734516,
+                    0.030936655,
+                    -1.0551243,
+                    0.5905802,
+                    -3.1485205,
+                    0.5726496,
+                    -0.020666558,
+                    0.055198837,
+                    -0.1750127,
+                    -0.0013422092,
+                    -0.15273236,
+                    0.21408938,
+                    0.11237624,
+                    -0.005392518,
+                    -0.43270105,
+                    0.24273443,
                 ]
             ),
             atol=1e-4,
@@ -143,25 +206,27 @@ class Test_Model:
             model.w,
             torch.tensor(
                 [
-                    0.44255,
-                    1.22385,
-                    3.2129998,
-                    15.65105,
-                    7.2349,
-                    0.4945,
-                    1.4204,
-                    0.0446,
-                    1.5057501,
-                    0.1592,
-                    0.97925,
-                    1.9794999,
-                    0.07000001,
-                    0.33605,
-                    2.3097994,
-                    0.2715,
-                    2.9498,
-                    0.47655,
-                    0.62210006,
+                    0.2572,
+                    1.2170999,
+                    3.3001997,
+                    16.1107,
+                    6.9714003,
+                    0.61,
+                    2.0566,
+                    0.0469,
+                    1.4861001,
+                    0.15200001,
+                    0.97779995,
+                    1.8889999,
+                    0.07330001,
+                    0.3527,
+                    2.3333998,
+                    0.2591,
+                    2.9604,
+                    0.7136,
+                    0.37319994,
+                    0.1837,
+                    0.16000001,
                 ]
             ),
             atol=1e-4,
@@ -174,31 +239,33 @@ class Test_Model:
             / 1000
             * 2
         )
-        assert round(penalty.item(), 4) == 0.6469
+        assert torch.allclose(penalty, torch.tensor(0.67711174), atol=1e-4)
         penalty.backward()
         assert torch.allclose(
             model.w.grad,
             torch.tensor(
                 [
-                    0.0018749383,
-                    0.00090389,
-                    0.00026177685,
-                    -0.00010645759,
-                    0.27080965,
-                    -1.0448978,
-                    -0.18249036,
+                    0.0019813816,
+                    0.00087788026,
+                    0.00026506305,
+                    -0.00010561578,
+                    -0.25213888,
+                    1.0448985,
+                    -0.22755535,
                     5.688889,
-                    -0.5119995,
-                    2.528395,
-                    -0.7086509,
-                    1.1237301,
-                    -12.799997,
-                    4.179591,
-                    0.25213587,
+                    -0.5385926,
+                    2.5283954,
+                    -0.75225013,
+                    0.9102214,
+                    -10.113578,
+                    3.1999993,
+                    0.2521374,
                     1.3107198,
                     -0.07721739,
+                    -0.85244584,
+                    0.79999864,
+                    4.179591,
                     -1.1237309,
-                    -0.5385926,
                 ]
             ),
             atol=1e-5,
@@ -230,33 +297,35 @@ class Test_Model:
         inputs = torch.stack([t_histories, r_histories], dim=2)
         outputs, _ = model.forward(inputs)
         stabilities = outputs[seq_lens - 1, torch.arange(real_batch_size), 0]
-        retentions = power_forgetting_curve(delta_ts, stabilities)
+        retentions = power_forgetting_curve(delta_ts, stabilities, -model.w[20])
         loss = loss_fn(retentions, labels).sum()
-        assert round(loss.item(), 6) == 4.176347
+        assert torch.allclose(loss, torch.tensor(4.2499204), atol=1e-4)
         loss.backward()
         assert torch.allclose(
             model.w.grad,
             torch.tensor(
                 [
-                    -0.0401341,
-                    -0.0061790533,
-                    -0.00288913,
-                    0.01216853,
-                    -0.05624995,
-                    1.147413,
-                    0.068084724,
-                    -0.6906936,
-                    0.48760873,
-                    -2.5428302,
-                    0.49044546,
-                    -0.011574259,
-                    0.037729632,
-                    -0.09633919,
-                    -0.0009513022,
-                    -0.12789416,
-                    0.19088513,
-                    0.2574597,
-                    0.049311582,
+                    -0.05351858,
+                    -0.0059409104,
+                    -0.0011449483,
+                    0.005621137,
+                    0.021848494,
+                    0.023732044,
+                    0.021317776,
+                    -0.6712053,
+                    0.58890355,
+                    -2.8758395,
+                    0.60074204,
+                    -0.018340506,
+                    0.045839258,
+                    -0.14551935,
+                    -0.0013418762,
+                    -0.11314997,
+                    0.20784476,
+                    0.112954974,
+                    0.01292,
+                    -0.37279338,
+                    0.44497335,
                 ]
             ),
             atol=1e-4,
@@ -266,25 +335,27 @@ class Test_Model:
             model.w,
             torch.tensor(
                 [
-                    0.48150504,
-                    1.2636971,
-                    3.2530522,
-                    15.611003,
-                    7.2749534,
-                    0.45482785,
-                    1.3808222,
-                    0.083782874,
-                    1.4658877,
-                    0.19898315,
-                    0.9393105,
-                    2.0193,
-                    0.030164223,
-                    0.37562984,
-                    2.3498251,
-                    0.3112984,
-                    2.909878,
-                    0.43652722,
-                    0.5825156,
+                    0.2949936,
+                    1.2566863,
+                    3.3399637,
+                    16.07079,
+                    6.9337125,
+                    0.62391204,
+                    2.017639,
+                    0.08549303,
+                    1.4461032,
+                    0.19186467,
+                    0.93776166,
+                    1.9288048,
+                    0.03366305,
+                    0.3923405,
+                    2.373399,
+                    0.29835668,
+                    2.9204354,
+                    0.6735949,
+                    0.35604826,
+                    0.22343501,
+                    0.121036425,
                 ]
             ),
             atol=1e-4,
