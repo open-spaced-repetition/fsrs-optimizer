@@ -205,15 +205,18 @@ def simulate(
         )
 
         # Calculate new eases
-        review_eases = np.choose(
-            rating - 1,
-            [
-                np.maximum(ease - 0.2, 1.3),
-                np.maximum(ease - 0.15, 1.3),
-                np.maximum(ease, 1.3),
-                np.maximum(ease + 0.15, 1.3),
-            ],
+        review_eases = (
+            np.choose(
+                rating - 1,
+                [
+                    ease - 0.2,
+                    ease - 0.15,
+                    ease,
+                    ease + 0.15,
+                ],
+            ),
         )
+        review_eases = np.maximum(review_eases, 1.3)
 
         # Combine new card and review card results
         intervals = np.where(is_new_card, new_card_intervals, review_intervals)
@@ -431,19 +434,18 @@ def simulate(
             )
             card_table[col["due"]][reviewed] = today + card_table[col["ivl"]][reviewed]
         else:  # anki scheduler
-            reviewed_indices = np.where(reviewed)[0]
-            last_dates = card_table[col["last_date"]][reviewed_indices]
-            dues = card_table[col["due"]][reviewed_indices]
-            eases = card_table[col["ease"]][reviewed_indices]
-            ivls = card_table[col["delta_t"]][reviewed_indices]
-            ratings = card_table[col["rating"]][reviewed_indices].astype(int)
+            last_dates = card_table[col["last_date"]][reviewed]
+            dues = card_table[col["due"]][reviewed]
+            eases = card_table[col["ease"]][reviewed]
+            ivls = card_table[col["delta_t"]][reviewed]
+            ratings = card_table[col["rating"]][reviewed].astype(int)
 
             delta_ts, new_eases = anki_sm2_scheduler(
                 dues - last_dates, ivls, eases, ratings
             )
-            card_table[col["ivl"]][reviewed_indices] = delta_ts
-            card_table[col["due"]][reviewed_indices] = today + delta_ts
-            card_table[col["ease"]][reviewed_indices] = new_eases
+            card_table[col["ivl"]][reviewed] = delta_ts
+            card_table[col["due"]][reviewed] = today + delta_ts
+            card_table[col["ease"]][reviewed] = new_eases
 
         revlogs[today] = {
             "card_id": np.where(reviewed)[0],
