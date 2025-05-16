@@ -205,16 +205,14 @@ def simulate(
         )
 
         # Calculate new eases
-        review_eases = (
-            np.choose(
-                rating - 1,
-                [
-                    ease - 0.2,
-                    ease - 0.15,
-                    ease,
-                    ease + 0.15,
-                ],
-            ),
+        review_eases = np.choose(
+            rating - 1,
+            [
+                ease - 0.2,
+                ease - 0.15,
+                ease,
+                ease + 0.15,
+            ],
         )
         review_eases = np.maximum(review_eases, 1.3)
 
