@@ -81,6 +81,7 @@ columns = [
     "cost",
     "rand",
     "rating",
+    "ease",
 ]
 col = {key: i for i, key in enumerate(columns)}
 
@@ -131,6 +132,7 @@ def simulate(
     state_rating_costs=DEFAULT_STATE_RATING_COSTS,
     seed=42,
     fuzz=False,
+    scheduler_name="fsrs",
 ):
     np.random.seed(seed)
     card_table = np.zeros((len(columns), deck_size))
@@ -141,12 +143,83 @@ def simulate(
         [1, 2, 3, 4], deck_size, p=first_rating_prob
     )
     card_table[col["rating"]] = card_table[col["rating"]].astype(int)
+    card_table[col["ease"]] = 0
 
     revlogs = {}
     review_cnt_per_day = np.zeros(learn_span)
     learn_cnt_per_day = np.zeros(learn_span)
     memorized_cnt_per_day = np.zeros(learn_span)
     cost_per_day = np.zeros(learn_span)
+
+    # Anki scheduler constants
+    GRADUATING_IVL = 1
+    EASY_IVL = 4
+    NEW_IVL = 0
+    HARD_IVL = 1.2
+    INTERVAL_MODIFIER = 1.0
+    EASY_BONUS = 1.3
+    MIN_IVL = 1
+
+    def anki_sm2_scheduler(interval, real_interval, ease, rating):
+        # Handle new cards (ease == 0)
+        is_new_card = ease == 0
+        new_card_intervals = np.where(rating == 4, EASY_IVL, GRADUATING_IVL)
+        new_card_eases = np.full_like(ease, 2.5)
+
+        # Handle review cards
+        delay = real_interval - interval
+
+        # Calculate intervals for each rating
+        again_interval = np.minimum(
+            np.maximum(
+                np.round(interval * NEW_IVL * INTERVAL_MODIFIER + 0.01),
+                MIN_IVL,
+            ),
+            max_ivl,
+        )
+        hard_interval = np.minimum(
+            np.maximum(
+                np.round(interval * HARD_IVL * INTERVAL_MODIFIER + 0.01),
+                np.maximum(interval + 1, MIN_IVL),
+            ),
+            max_ivl,
+        )
+        good_interval = np.minimum(
+            np.maximum(
+                np.round((interval + delay / 2) * ease * INTERVAL_MODIFIER + 0.01),
+                np.maximum(hard_interval + 1, MIN_IVL),
+            ),
+            max_ivl,
+        )
+        easy_interval = np.minimum(
+            np.maximum(
+                np.round(real_interval * ease * INTERVAL_MODIFIER * EASY_BONUS + 0.01),
+                np.maximum(good_interval + 1, MIN_IVL),
+            ),
+            max_ivl,
+        )
+
+        # Select intervals based on rating
+        review_intervals = np.choose(
+            rating - 1, [again_interval, hard_interval, good_interval, easy_interval]
+        )
+
+        # Calculate new eases
+        review_eases = np.choose(
+            rating - 1,
+            [
+                np.maximum(ease - 0.2, 1.3),
+                np.maximum(ease - 0.15, 1.3),
+                np.maximum(ease, 1.3),
+                np.maximum(ease + 0.15, 1.3),
+            ],
+        )
+
+        # Combine new card and review card results
+        intervals = np.where(is_new_card, new_card_intervals, review_intervals)
+        eases = np.where(is_new_card, new_card_eases, review_eases)
+
+        return intervals, eases
 
     def stability_after_success(s, r, d, rating):
         hard_penalty = np.where(rating == 2, w[15], 1)
@@ -345,17 +418,32 @@ def simulate(
         card_table[col["stability"]][reviewed] = new_s[reviewed]
         card_table[col["difficulty"]][reviewed] = new_d[reviewed]
 
-        card_table[col["ivl"]][reviewed] = np.clip(
-            next_interval(
-                card_table[col["stability"]][reviewed],
-                request_retention,
-                fuzz=fuzz,
-                decay=-w[20],
-            ),
-            1,
-            max_ivl,
-        )
-        card_table[col["due"]][reviewed] = today + card_table[col["ivl"]][reviewed]
+        if scheduler_name == "fsrs":
+            card_table[col["ivl"]][reviewed] = np.clip(
+                next_interval(
+                    card_table[col["stability"]][reviewed],
+                    request_retention,
+                    fuzz=fuzz,
+                    decay=-w[20],
+                ),
+                1,
+                max_ivl,
+            )
+            card_table[col["due"]][reviewed] = today + card_table[col["ivl"]][reviewed]
+        else:  # anki scheduler
+            reviewed_indices = np.where(reviewed)[0]
+            last_dates = card_table[col["last_date"]][reviewed_indices]
+            dues = card_table[col["due"]][reviewed_indices]
+            eases = card_table[col["ease"]][reviewed_indices]
+            ivls = card_table[col["delta_t"]][reviewed_indices]
+            ratings = card_table[col["rating"]][reviewed_indices].astype(int)
+
+            delta_ts, new_eases = anki_sm2_scheduler(
+                dues - last_dates, ivls, eases, ratings
+            )
+            card_table[col["ivl"]][reviewed_indices] = delta_ts
+            card_table[col["due"]][reviewed_indices] = today + delta_ts
+            card_table[col["ease"]][reviewed_indices] = new_eases
 
         revlogs[today] = {
             "card_id": np.where(reviewed)[0],
@@ -767,6 +855,7 @@ if __name__ == "__main__":
             0.7536,
             0.3332,
             0.1437,
+            0.2,
         ],
         "deck_size": 20000,
         "learn_span": 365,
@@ -775,40 +864,58 @@ if __name__ == "__main__":
         "review_limit_perday": math.inf,
         "max_ivl": 36500,
     }
-    (_, review_cnt_per_day, learn_cnt_per_day, memorized_cnt_per_day, _, _) = simulate(
-        w=default_params["w"],
-        max_cost_perday=math.inf,
-        learn_limit_perday=10,
-        review_limit_perday=50,
-    )
 
-    def moving_average(data, window_size=365 // 20):
-        weights = np.ones(window_size) / window_size
-        return np.convolve(data, weights, mode="valid")
+    schedulers = ["fsrs", "anki"]
+    for scheduler_name in schedulers:
+        (_, review_cnt_per_day, learn_cnt_per_day, memorized_cnt_per_day, _, _) = (
+            simulate(
+                w=default_params["w"],
+                max_cost_perday=math.inf,
+                learn_limit_perday=10,
+                review_limit_perday=50,
+                scheduler_name=scheduler_name,
+            )
+        )
 
-    fig1 = plt.figure()
-    ax = fig1.gca()
-    ax.plot(
-        moving_average(review_cnt_per_day),
-    )
-    ax.set_title("Review Count per Day")
-    ax.grid(True)
-    fig2 = plt.figure()
-    ax = fig2.gca()
-    ax.plot(
-        moving_average(learn_cnt_per_day),
-    )
-    ax.set_title("Learn Count per Day")
-    ax.grid(True)
-    fig3 = plt.figure()
-    ax = fig3.gca()
-    ax.plot(np.cumsum(learn_cnt_per_day))
-    ax.set_title("Cumulative Learn Count")
-    ax.grid(True)
-    fig4 = plt.figure()
-    ax = fig4.gca()
-    ax.plot(memorized_cnt_per_day)
-    ax.set_title("Memorized Count per Day")
-    ax.grid(True)
+        def moving_average(data, window_size=365 // 20):
+            weights = np.ones(window_size) / window_size
+            return np.convolve(data, weights, mode="valid")
+
+        plt.figure(1)
+        plt.plot(
+            moving_average(review_cnt_per_day),
+            label=scheduler_name,
+        )
+        plt.title("Review Count per Day")
+        plt.legend()
+        plt.grid(True)
+
+        plt.figure(2)
+        plt.plot(
+            moving_average(learn_cnt_per_day),
+            label=scheduler_name,
+        )
+        plt.title("Learn Count per Day")
+        plt.legend()
+        plt.grid(True)
+
+        plt.figure(3)
+        plt.plot(
+            np.cumsum(learn_cnt_per_day),
+            label=scheduler_name,
+        )
+        plt.title("Cumulative Learn Count")
+        plt.legend()
+        plt.grid(True)
+
+        plt.figure(4)
+        plt.plot(
+            memorized_cnt_per_day,
+            label=scheduler_name,
+        )
+        plt.title("Memorized Count per Day")
+        plt.legend()
+        plt.grid(True)
+
     plt.show()
     workload_graph(default_params, sampling_size=30).savefig("workload.png")
