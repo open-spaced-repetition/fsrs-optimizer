@@ -186,7 +186,9 @@ def simulate(
         )
         good_interval = np.minimum(
             np.maximum(
-                np.round((scheduled_interval + delay / 2) * ease * INTERVAL_MODIFIER + 0.01),
+                np.round(
+                    (scheduled_interval + delay / 2) * ease * INTERVAL_MODIFIER + 0.01
+                ),
                 np.maximum(hard_interval + 1, MIN_IVL),
             ),
             max_ivl,
@@ -866,14 +868,19 @@ if __name__ == "__main__":
 
     schedulers = ["fsrs", "anki"]
     for scheduler_name in schedulers:
-        (_, review_cnt_per_day, learn_cnt_per_day, memorized_cnt_per_day, _, _) = (
-            simulate(
-                w=default_params["w"],
-                max_cost_perday=math.inf,
-                learn_limit_perday=10,
-                review_limit_perday=50,
-                scheduler_name=scheduler_name,
-            )
+        (
+            _,
+            review_cnt_per_day,
+            learn_cnt_per_day,
+            memorized_cnt_per_day,
+            _,
+            revlogs,
+        ) = simulate(
+            w=default_params["w"],
+            max_cost_perday=math.inf,
+            learn_limit_perday=10,
+            review_limit_perday=50,
+            scheduler_name=scheduler_name,
         )
 
         def moving_average(data, window_size=365 // 20):
@@ -913,6 +920,19 @@ if __name__ == "__main__":
             label=scheduler_name,
         )
         plt.title("Memorized Count per Day")
+        plt.legend()
+        plt.grid(True)
+
+        plt.figure(5)
+        plt.plot(
+            [
+                sum(rating > 1 for rating in day["rating"]) / len(day["rating"])
+                for _, day in sorted(revlogs.items(), key=lambda a: a[0])
+            ],
+            label=scheduler_name,
+        )
+        plt.ylim(0, 1)
+        plt.title("True retention per day")
         plt.legend()
         plt.grid(True)
 
