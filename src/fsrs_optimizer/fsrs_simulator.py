@@ -160,33 +160,33 @@ def simulate(
     EASY_BONUS = 1.3
     MIN_IVL = 1
 
-    def anki_sm2_scheduler(interval, real_interval, ease, rating):
+    def anki_sm2_scheduler(scheduled_interval, real_interval, ease, rating):
         # Handle new cards (ease == 0)
         is_new_card = ease == 0
         new_card_intervals = np.where(rating == 4, EASY_IVL, GRADUATING_IVL)
         new_card_eases = np.full_like(ease, 2.5)
 
         # Handle review cards
-        delay = real_interval - interval
+        delay = real_interval - scheduled_interval
 
         # Calculate intervals for each rating
         again_interval = np.minimum(
             np.maximum(
-                np.round(interval * NEW_IVL * INTERVAL_MODIFIER + 0.01),
+                np.round(scheduled_interval * NEW_IVL * INTERVAL_MODIFIER + 0.01),
                 MIN_IVL,
             ),
             max_ivl,
         )
         hard_interval = np.minimum(
             np.maximum(
-                np.round(interval * HARD_IVL * INTERVAL_MODIFIER + 0.01),
-                np.maximum(interval + 1, MIN_IVL),
+                np.round(scheduled_interval * HARD_IVL * INTERVAL_MODIFIER + 0.01),
+                np.maximum(scheduled_interval + 1, MIN_IVL),
             ),
             max_ivl,
         )
         good_interval = np.minimum(
             np.maximum(
-                np.round((interval + delay / 2) * ease * INTERVAL_MODIFIER + 0.01),
+                np.round((scheduled_interval + delay / 2) * ease * INTERVAL_MODIFIER + 0.01),
                 np.maximum(hard_interval + 1, MIN_IVL),
             ),
             max_ivl,
@@ -432,14 +432,13 @@ def simulate(
             )
             card_table[col["due"]][reviewed] = today + card_table[col["ivl"]][reviewed]
         else:  # anki scheduler
-            last_dates = card_table[col["last_date"]][reviewed]
-            dues = card_table[col["due"]][reviewed]
+            scheduled_intervals = card_table[col["ivl"]][reviewed]
             eases = card_table[col["ease"]][reviewed]
-            ivls = card_table[col["delta_t"]][reviewed]
+            real_intervals = card_table[col["delta_t"]][reviewed]
             ratings = card_table[col["rating"]][reviewed].astype(int)
 
             delta_ts, new_eases = anki_sm2_scheduler(
-                dues - last_dates, ivls, eases, ratings
+                scheduled_intervals, real_intervals, eases, ratings
             )
             card_table[col["ivl"]][reviewed] = delta_ts
             card_table[col["due"]][reviewed] = today + delta_ts
