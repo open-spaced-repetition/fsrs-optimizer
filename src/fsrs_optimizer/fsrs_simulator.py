@@ -2,6 +2,7 @@ import math
 import numpy as np
 from matplotlib import pyplot as plt
 from typing import Optional
+from enum import Enum
 from concurrent.futures import ProcessPoolExecutor, as_completed
 
 
@@ -478,15 +479,25 @@ def optimal_retention(**kwargs):
     return brent(**kwargs)
 
 
-def run_simulation(args):
-    workload_only, kwargs = args
+class CMRRTarget(str, Enum):
+    WORKLOAD_ONLY = "workload_only"
+    MEMORIZED_PER_WORKLOAD = "memorized_per_workload"
+    MEMORIZED_STABILITY_PER_WORKLOAD = "memorized_stability_per_workload"
 
-    (_, _, _, memorized_cnt_per_day, cost_per_day, _) = simulate(**kwargs)
 
-    if workload_only:
-        return np.mean(cost_per_day)
-    else:
-        return np.sum(cost_per_day) / memorized_cnt_per_day[-1]
+# Use the enum in your function
+def run_simulation(target: CMRRTarget, kwargs):
+    (card_table, _, _, memorized_cnt_per_day, cost_per_day, _) = simulate(**kwargs)
+
+    match target:
+        case CMRRTarget.WORKLOAD_ONLY:
+            return np.mean(cost_per_day)
+        case CMRRTarget.MEMORIZED_PER_WORKLOAD:
+            return np.sum(cost_per_day) / memorized_cnt_per_day[-1]
+        case CMRRTarget.MEMORIZED_STABILITY_PER_WORKLOAD:
+            return np.sum(cost_per_day) / (
+                card_table[col["stability"]] * card_table[col["retrievability"]]
+            )
 
 
 def sample(
@@ -503,7 +514,7 @@ def sample(
     learning_step_transitions=DEFAULT_LEARNING_STEP_TRANSITIONS,
     relearning_step_transitions=DEFAULT_RELEARNING_STEP_TRANSITIONS,
     state_rating_costs=DEFAULT_STATE_RATING_COSTS,
-    workload_only=False,
+    target=CMRRTarget.MEMORIZED_PER_WORKLOAD,
 ):
     results = []
 
@@ -539,7 +550,7 @@ def sample(
                 "state_rating_costs": state_rating_costs,
                 "seed": 42 + i,
             }
-            futures.append(executor.submit(run_simulation, (workload_only, kwargs)))
+            futures.append(executor.submit(run_simulation, target, kwargs))
 
         for future in as_completed(futures):
             results.append(future.result())
