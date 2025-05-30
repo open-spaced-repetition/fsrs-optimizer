@@ -495,7 +495,7 @@ def run_simulation(target: CMRRTarget, kwargs):
         case CMRRTarget.MEMORIZED_PER_WORKLOAD:
             return np.sum(cost_per_day) / memorized_cnt_per_day[-1]
         case CMRRTarget.MEMORIZED_STABILITY_PER_WORKLOAD:
-            return np.sum(cost_per_day) / (
+            return np.sum(cost_per_day) / np.sum(
                 card_table[col["stability"]] * card_table[col["retrievability"]]
             )
 
@@ -681,7 +681,7 @@ def workload_graph(default_params, sampling_size=30):
         default_params["deck_size"] / default_params["learn_span"]
     )
     default_params["review_limit_perday"] = math.inf
-    workload = [sample(r=r, workload_only=True, **default_params) for r in R]
+    workload = [sample(r=r, target=CMRRTarget.WORKLOAD_ONLY, **default_params) for r in R]
 
     # this is for testing
     # workload = [min(x, 2.3 * min(workload)) for x in workload]
