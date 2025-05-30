@@ -2,7 +2,6 @@ import math
 import numpy as np
 from matplotlib import pyplot as plt
 from typing import Optional
-from enum import Enum
 from concurrent.futures import ProcessPoolExecutor, as_completed
 
 
@@ -479,25 +478,24 @@ def optimal_retention(**kwargs):
     return brent(**kwargs)
 
 
-class CMRRTarget(str, Enum):
-    WORKLOAD_ONLY = "workload_only"
-    MEMORIZED_PER_WORKLOAD = "memorized_per_workload"
-    MEMORIZED_STABILITY_PER_WORKLOAD = "memorized_stability_per_workload"
+CMRR_TARGET_WORKLOAD_ONLY = True
+CMRR_TARGET_MEMORIZED_PER_WORKLOAD = False
+CMRR_TARGET_MEMORIZED_STABILITY_PER_WORKLOAD = "memorized_stability_per_workload"
 
 
-# Use the enum in your function
-def run_simulation(target: CMRRTarget, kwargs):
+def run_simulation(args):
+    target, kwargs = args
+
     (card_table, _, _, memorized_cnt_per_day, cost_per_day, _) = simulate(**kwargs)
 
-    match target:
-        case CMRRTarget.WORKLOAD_ONLY:
-            return np.mean(cost_per_day)
-        case CMRRTarget.MEMORIZED_PER_WORKLOAD:
-            return np.sum(cost_per_day) / memorized_cnt_per_day[-1]
-        case CMRRTarget.MEMORIZED_STABILITY_PER_WORKLOAD:
-            return np.sum(cost_per_day) / np.sum(
-                card_table[col["stability"]] * card_table[col["retrievability"]]
-            )
+    if target == CMRR_TARGET_WORKLOAD_ONLY:
+        return np.mean(cost_per_day)
+    if target == CMRR_TARGET_MEMORIZED_PER_WORKLOAD:
+        return np.sum(cost_per_day) / memorized_cnt_per_day[-1]
+    if target == CMRR_TARGET_MEMORIZED_STABILITY_PER_WORKLOAD:
+        return np.sum(cost_per_day) / np.sum(
+            card_table[col["stability"]] * card_table[col["retrievability"]]
+        )
 
 
 def sample(
@@ -514,7 +512,7 @@ def sample(
     learning_step_transitions=DEFAULT_LEARNING_STEP_TRANSITIONS,
     relearning_step_transitions=DEFAULT_RELEARNING_STEP_TRANSITIONS,
     state_rating_costs=DEFAULT_STATE_RATING_COSTS,
-    target=CMRRTarget.MEMORIZED_PER_WORKLOAD,
+    workload_only=CMRR_TARGET_MEMORIZED_PER_WORKLOAD,
 ):
     results = []
 
@@ -550,7 +548,7 @@ def sample(
                 "state_rating_costs": state_rating_costs,
                 "seed": 42 + i,
             }
-            futures.append(executor.submit(run_simulation, target, kwargs))
+            futures.append(executor.submit(run_simulation, (workload_only, kwargs)))
 
         for future in as_completed(futures):
             results.append(future.result())
@@ -681,7 +679,7 @@ def workload_graph(default_params, sampling_size=30):
         default_params["deck_size"] / default_params["learn_span"]
     )
     default_params["review_limit_perday"] = math.inf
-    workload = [sample(r=r, target=CMRRTarget.WORKLOAD_ONLY, **default_params) for r in R]
+    workload = [sample(r=r, workload_only=True, **default_params) for r in R]
 
     # this is for testing
     # workload = [min(x, 2.3 * min(workload)) for x in workload]
