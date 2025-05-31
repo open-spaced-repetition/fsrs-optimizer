@@ -494,7 +494,7 @@ def run_simulation(args):
         return np.sum(cost_per_day) / memorized_cnt_per_day[-1]
     if target == CMRR_TARGET_MEMORIZED_STABILITY_PER_WORKLOAD:
         return np.sum(cost_per_day) / np.sum(
-            card_table[col["stability"]] * card_table[col["retrievability"]]
+            np.max(card_table[col["stability"]], 0) * card_table[col["retrievability"]]
         )
 
 
