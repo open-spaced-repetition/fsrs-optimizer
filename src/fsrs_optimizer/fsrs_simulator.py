@@ -478,15 +478,24 @@ def optimal_retention(**kwargs):
     return brent(**kwargs)
 
 
+CMRR_TARGET_WORKLOAD_ONLY = True
+CMRR_TARGET_MEMORIZED_PER_WORKLOAD = False
+CMRR_TARGET_MEMORIZED_STABILITY_PER_WORKLOAD = "memorized_stability_per_workload"
+
+
 def run_simulation(args):
-    workload_only, kwargs = args
+    target, kwargs = args
 
-    (_, _, _, memorized_cnt_per_day, cost_per_day, _) = simulate(**kwargs)
+    (card_table, _, _, memorized_cnt_per_day, cost_per_day, _) = simulate(**kwargs)
 
-    if workload_only:
+    if target == CMRR_TARGET_WORKLOAD_ONLY:
         return np.mean(cost_per_day)
-    else:
+    if target == CMRR_TARGET_MEMORIZED_PER_WORKLOAD:
         return np.sum(cost_per_day) / memorized_cnt_per_day[-1]
+    if target == CMRR_TARGET_MEMORIZED_STABILITY_PER_WORKLOAD:
+        return np.sum(cost_per_day) / np.sum(
+            np.max(card_table[col["stability"]], 0) * card_table[col["retrievability"]]
+        )
 
 
 def sample(
@@ -503,7 +512,7 @@ def sample(
     learning_step_transitions=DEFAULT_LEARNING_STEP_TRANSITIONS,
     relearning_step_transitions=DEFAULT_RELEARNING_STEP_TRANSITIONS,
     state_rating_costs=DEFAULT_STATE_RATING_COSTS,
-    workload_only=False,
+    workload_only=CMRR_TARGET_MEMORIZED_PER_WORKLOAD,
 ):
     results = []
 
