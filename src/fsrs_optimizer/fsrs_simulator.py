@@ -5,7 +5,7 @@ from typing import Optional
 from concurrent.futures import ProcessPoolExecutor, as_completed
 
 
-DECAY = -0.2
+DECAY = -0.1542
 FACTOR = 0.9 ** (1 / DECAY) - 1
 S_MIN = 0.001
 

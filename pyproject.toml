@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "FSRS-Optimizer"
-version = "6.1.1"
+version = "6.1.2"
 readme = "README.md"
 dependencies = [
     "matplotlib>=3.7.0",
