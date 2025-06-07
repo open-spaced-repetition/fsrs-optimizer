@@ -503,11 +503,13 @@ def run_simulation(args):
     if target.startswith(CMRR_TARGET_MEMORIZED_PER_WORKLOAD_FUTURE):
         _, future_days = target.split("_")
         reviewed = card_table[:, card_table[col["stability"]] > 1e-9]
-        # from the last review
         return np.sum(
             reviewed[col["cost_total"]]
             / power_forgetting_curve(
-                int(future_days), reviewed[col["stability"]], -kwargs["w"][20]
+                # future days from the cards last review
+                int(future_days),
+                reviewed[col["stability"]],
+                -kwargs["w"][20],
             )
         )
 
