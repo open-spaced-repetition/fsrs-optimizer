@@ -479,11 +479,13 @@ def optimal_retention(**kwargs):
 CMRR_TARGET_WORKLOAD_ONLY = True
 CMRR_TARGET_MEMORIZED_PER_WORKLOAD = False
 CMRR_TARGET_MEMORIZED_PER_WORKLOAD_PER_CARD = "card"
+CMRR_TARGET_MEMORIZED_PER_WORKLOAD_FUTURE = "future_"
 CMRR_TARGET_MEMORIZED_STABILITY_PER_WORKLOAD = "memorized_stability_per_workload"
 
 
 def run_simulation(args):
     target, kwargs = args
+    target : bool | str
 
     (card_table, _, _, memorized_cnt_per_day, cost_per_day, _) = simulate(**kwargs)
 
@@ -498,6 +500,11 @@ def run_simulation(args):
     if target == CMRR_TARGET_MEMORIZED_PER_WORKLOAD_PER_CARD:
         reviewed = card_table[:, card_table[col["stability"]] > 1e-9]
         return np.sum(reviewed[col["cost_total"]] / reviewed[col["retrievability"]])
+    if target.startswith(CMRR_TARGET_MEMORIZED_PER_WORKLOAD_FUTURE):
+        _, future_days = target.split("_")
+        reviewed = card_table[:, card_table[col["stability"]] > 1e-9]
+        # from the last review
+        return np.sum(reviewed[col["cost_total"]] / power_forgetting_curve(int(future_days), reviewed[col["stability"]], -kwargs["w"][20]))
 
 
 def sample(
@@ -681,7 +688,7 @@ def workload_graph(default_params, sampling_size=30):
         default_params["deck_size"] / default_params["learn_span"]
     )
     default_params["review_limit_perday"] = math.inf
-    workload = [sample(r=r, workload_only=CMRR_TARGET_MEMORIZED_PER_WORKLOAD_PER_CARD, **default_params) for r in R]
+    workload = [sample(r=r, workload_only=True, **default_params) for r in R]
 
     # this is for testing
     # workload = [min(x, 2.3 * min(workload)) for x in workload]
@@ -881,7 +888,7 @@ if __name__ == "__main__":
         optimal_retention(
             deck_size=1000,
             w=default_params["w"],
-            workload_only=CMRR_TARGET_MEMORIZED_PER_WORKLOAD_PER_CARD,
+            workload_only=CMRR_TARGET_MEMORIZED_PER_WORKLOAD_FUTURE + "365",
         )
     )
 
