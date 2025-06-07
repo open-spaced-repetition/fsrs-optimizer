@@ -118,7 +118,7 @@ DEFAULT_STATE_RATING_COSTS = np.array(
 def simulate(
     w,
     request_retention=0.9,
-    deck_size=1000,
+    deck_size=10000,
     learn_span=365,
     max_cost_perday=1800,
     learn_limit_perday=math.inf,
@@ -485,7 +485,7 @@ CMRR_TARGET_MEMORIZED_STABILITY_PER_WORKLOAD = "memorized_stability_per_workload
 
 def run_simulation(args):
     target, kwargs = args
-    target : bool | str
+    target: bool | str
 
     (card_table, _, _, memorized_cnt_per_day, cost_per_day, _) = simulate(**kwargs)
 
@@ -504,7 +504,12 @@ def run_simulation(args):
         _, future_days = target.split("_")
         reviewed = card_table[:, card_table[col["stability"]] > 1e-9]
         # from the last review
-        return np.sum(reviewed[col["cost_total"]] / power_forgetting_curve(int(future_days), reviewed[col["stability"]], -kwargs["w"][20]))
+        return np.sum(
+            reviewed[col["cost_total"]]
+            / power_forgetting_curve(
+                int(future_days), reviewed[col["stability"]], -kwargs["w"][20]
+            )
+        )
 
 
 def sample(
@@ -883,14 +888,6 @@ if __name__ == "__main__":
         "review_limit_perday": math.inf,
         "max_ivl": 36500,
     }
-
-    print(
-        optimal_retention(
-            deck_size=1000,
-            w=default_params["w"],
-            workload_only=CMRR_TARGET_MEMORIZED_PER_WORKLOAD_FUTURE + "365",
-        )
-    )
 
     schedulers = ["fsrs", "anki"]
     for scheduler_name in schedulers:
