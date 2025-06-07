@@ -79,6 +79,7 @@ columns = [
     "due",
     "ivl",
     "cost",
+    "cost_total",
     "rand",
     "rating",
     "ease",
@@ -117,7 +118,7 @@ DEFAULT_STATE_RATING_COSTS = np.array(
 def simulate(
     w,
     request_retention=0.9,
-    deck_size=10000,
+    deck_size=1000,
     learn_span=365,
     max_cost_perday=1800,
     learn_limit_perday=math.inf,
@@ -387,9 +388,7 @@ def simulate(
             card_table[col["rating"]][true_review & ~forget],
         )
 
-        card_table[col["cost"]][true_review & forget] = [
-            a + b for a, b in zip(card_table[col["cost"]][true_review & forget], costs)
-        ]
+        card_table[col["cost"]][true_review & forget] += costs
 
         need_learn = card_table[col["stability"]] == 1e-10
         card_table[col["cost"]][need_learn] = np.choose(
@@ -411,9 +410,7 @@ def simulate(
             init_rating=card_table[col["rating"]][true_learn].astype(int),
         )
 
-        card_table[col["cost"]][true_learn] = [
-            a + b for a, b in zip(card_table[col["cost"]][true_learn], costs)
-        ]
+        card_table[col["cost"]][true_learn] += costs
 
         below_cost_limit = np.cumsum(card_table[col["cost"]]) <= max_cost_perday
         reviewed = (true_review | true_learn) & below_cost_limit
@@ -464,6 +461,7 @@ def simulate(
         learn_cnt_per_day[today] = np.sum(true_learn & reviewed)
         memorized_cnt_per_day[today] = card_table[col["retrievability"]].sum()
         cost_per_day[today] = card_table[col["cost"]][reviewed].sum()
+        card_table[col["cost_total"]][reviewed] += card_table[col["cost"]][reviewed]
     return (
         card_table,
         review_cnt_per_day,
@@ -480,6 +478,7 @@ def optimal_retention(**kwargs):
 
 CMRR_TARGET_WORKLOAD_ONLY = True
 CMRR_TARGET_MEMORIZED_PER_WORKLOAD = False
+CMRR_TARGET_MEMORIZED_PER_WORKLOAD_PER_CARD = "card"
 CMRR_TARGET_MEMORIZED_STABILITY_PER_WORKLOAD = "memorized_stability_per_workload"
 
 
@@ -496,6 +495,9 @@ def run_simulation(args):
         return np.sum(cost_per_day) / np.sum(
             np.max(card_table[col["stability"]], 0) * card_table[col["retrievability"]]
         )
+    if target == CMRR_TARGET_MEMORIZED_PER_WORKLOAD_PER_CARD:
+        reviewed = card_table[:, card_table[col["stability"]] > 1e-9]
+        return np.sum(reviewed[col["cost_total"]] / reviewed[col["retrievability"]])
 
 
 def sample(
@@ -679,7 +681,7 @@ def workload_graph(default_params, sampling_size=30):
         default_params["deck_size"] / default_params["learn_span"]
     )
     default_params["review_limit_perday"] = math.inf
-    workload = [sample(r=r, workload_only=True, **default_params) for r in R]
+    workload = [sample(r=r, workload_only=CMRR_TARGET_MEMORIZED_PER_WORKLOAD_PER_CARD, **default_params) for r in R]
 
     # this is for testing
     # workload = [min(x, 2.3 * min(workload)) for x in workload]
@@ -874,6 +876,14 @@ if __name__ == "__main__":
         "review_limit_perday": math.inf,
         "max_ivl": 36500,
     }
+
+    print(
+        optimal_retention(
+            deck_size=1000,
+            w=default_params["w"],
+            workload_only=CMRR_TARGET_MEMORIZED_PER_WORKLOAD_PER_CARD,
+        )
+    )
 
     schedulers = ["fsrs", "anki"]
     for scheduler_name in schedulers:
