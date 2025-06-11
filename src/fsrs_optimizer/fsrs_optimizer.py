@@ -44,27 +44,27 @@ Review = 2
 Relearning = 3
 
 DEFAULT_PARAMETER = [
-    0.212,
-    1.2931,
-    2.3065,
-    8.2956,
-    6.4133,
-    0.8334,
-    3.0194,
-    0.001,
-    1.8722,
-    0.1666,
-    0.796,
-    1.4835,
-    0.0614,
-    0.2629,
-    1.6483,
-    0.6014,
-    1.8729,
-    0.5425,
-    0.0912,
-    0.0658,
-    0.1542,
+    0.212,  # w[0] initial stability for again
+    1.2931, # w[1] initial stability for hard
+    2.3065, # w[2] initial stability for good
+    8.2956, # w[3] initial stability for easy
+    6.4133, # w[4] initial difficulty
+    0.8334, # w[5] initial difficulty rating offset
+    3.0194, # w[6] next difficulty rating offset
+    0.001, # w[7] next difficulty reversion
+    1.8722, # w[8] stability after success
+    0.1666, # w[9] stability after success S decay
+    0.796, # w[10] stability after success R bonus
+    1.4835, # w[11] stability after failure
+    0.0614, # w[12] stability after failure
+    0.2629, # w[13] stability after failure
+    1.6483, # w[14] stability after failure
+    0.6014, # w[15] stability after success
+    1.8729, # w[16] stability after success
+    0.5425, # w[17] short term stability
+    0.0912, # w[18] short term stability
+    0.0658, # w[19] short term stability
+    0.1542, # w[20] forgetting curve decay
 ]
 
 DEFAULT_PARAMS_STDDEV_TENSOR = torch.tensor(
