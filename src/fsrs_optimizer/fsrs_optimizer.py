@@ -45,26 +45,26 @@ Relearning = 3
 
 DEFAULT_PARAMETER = [
     0.212,  # w[0] initial stability for again
-    1.2931, # w[1] initial stability for hard
-    2.3065, # w[2] initial stability for good
-    8.2956, # w[3] initial stability for easy
-    6.4133, # w[4] initial difficulty
-    0.8334, # w[5] initial difficulty rating offset
-    3.0194, # w[6] next difficulty rating offset
-    0.001, # w[7] next difficulty reversion
-    1.8722, # w[8] stability after success
-    0.1666, # w[9] stability after success S decay
-    0.796, # w[10] stability after success R bonus
-    1.4835, # w[11] stability after failure
-    0.0614, # w[12] stability after failure
-    0.2629, # w[13] stability after failure
-    1.6483, # w[14] stability after failure
-    0.6014, # w[15] stability after success
-    1.8729, # w[16] stability after success
-    0.5425, # w[17] short term stability
-    0.0912, # w[18] short term stability
-    0.0658, # w[19] short term stability
-    0.1542, # w[20] forgetting curve decay
+    1.2931,  # w[1] initial stability for hard
+    2.3065,  # w[2] initial stability for good
+    8.2956,  # w[3] initial stability for easy
+    6.4133,  # w[4] initial difficulty
+    0.8334,  # w[5] initial difficulty rating offset
+    3.0194,  # w[6] next difficulty rating offset
+    0.001,  # w[7] next difficulty reversion
+    1.8722,  # w[8] stability after success
+    0.1666,  # w[9] stability after success S decay
+    0.796,  # w[10] stability after success R bonus
+    1.4835,  # w[11] stability after failure
+    0.0614,  # w[12] stability after failure
+    0.2629,  # w[13] stability after failure
+    1.6483,  # w[14] stability after failure
+    0.6014,  # w[15] stability after success
+    1.8729,  # w[16] stability after success
+    0.5425,  # w[17] short term stability
+    0.0912,  # w[18] short term stability
+    0.0658,  # w[19] short term stability
+    0.1542,  # w[20] forgetting curve decay
 ]
 
 DEFAULT_PARAMS_STDDEV_TENSOR = torch.tensor(
@@ -430,7 +430,7 @@ class Trainer:
                     )
                     for name, param in self.model.named_parameters():
                         tqdm.write(
-                            f"{name}: {list(map(lambda x: round(float(x), 4),param))}"
+                            f"{name}: {list(map(lambda x: round(float(x), 4), param))}"
                         )
         if verbose:
             pbar.close()
@@ -1576,7 +1576,7 @@ class Optimizer:
         ax = fig1.gca()
         ax.plot(
             moving_average(review_cnt_per_day),
-            label=f"R={self.optimal_retention*100:.0f}%",
+            label=f"R={self.optimal_retention * 100:.0f}%",
         )
         ax.set_title("Review Count per Day")
         ax.legend()
@@ -1585,7 +1585,7 @@ class Optimizer:
         ax = fig2.gca()
         ax.plot(
             moving_average(learn_cnt_per_day),
-            label=f"R={self.optimal_retention*100:.0f}%",
+            label=f"R={self.optimal_retention * 100:.0f}%",
         )
         ax.set_title("Learn Count per Day")
         ax.legend()
@@ -1593,21 +1593,21 @@ class Optimizer:
         fig3 = plt.figure()
         ax = fig3.gca()
         ax.plot(
-            np.cumsum(learn_cnt_per_day), label=f"R={self.optimal_retention*100:.0f}%"
+            np.cumsum(learn_cnt_per_day), label=f"R={self.optimal_retention * 100:.0f}%"
         )
         ax.set_title("Cumulative Learn Count")
         ax.legend()
         ax.grid(True)
         fig4 = plt.figure()
         ax = fig4.gca()
-        ax.plot(memorized_cnt_per_day, label=f"R={self.optimal_retention*100:.0f}%")
+        ax.plot(memorized_cnt_per_day, label=f"R={self.optimal_retention * 100:.0f}%")
         ax.set_title("Memorized Count per Day")
         ax.legend()
         ax.grid(True)
 
         fig5 = plt.figure()
         ax = fig5.gca()
-        ax.plot(cost_per_day, label=f"R={self.optimal_retention*100:.0f}%")
+        ax.plot(cost_per_day, label=f"R={self.optimal_retention * 100:.0f}%")
         ax.set_title("Cost per Day")
         ax.legend()
         ax.grid(True)
@@ -2291,9 +2291,9 @@ def load_brier(predictions, real, bins=20):
 
         assert not np.isnan(x_low_cred)
         assert not np.isnan(x_high_cred)
-        assert (
-            x_low_cred <= p_hat <= x_high_cred
-        ), f"{x_low_cred}, {p_hat}, {k / n}, {x_high_cred}"
+        assert x_low_cred <= p_hat <= x_high_cred, (
+            f"{x_low_cred}, {p_hat}, {k / n}, {x_high_cred}"
+        )
         return x_low_cred, x_high_cred
 
     counts = np.zeros(bins)
@@ -2335,9 +2335,9 @@ def load_brier(predictions, real, bins=20):
     for n in range(len(real_means)):
         # check that the mean is within the bounds, unless they are NaNs
         if not np.isnan(real_means_lower[n]):
-            assert (
-                real_means_lower[n] <= real_means[n] <= real_means_upper[n]
-            ), f"{real_means_lower[n]:4f}, {real_means[n]:4f}, {real_means_upper[n]:4f}"
+            assert real_means_lower[n] <= real_means[n] <= real_means_upper[n], (
+                f"{real_means_lower[n]:4f}, {real_means[n]:4f}, {real_means_upper[n]:4f}"
+            )
 
     return {
         "reliability": sum(counts * (real_means - prediction_means) ** 2) / size,
@@ -2737,16 +2737,19 @@ class FirstOrderMarkovChain:
         """Print model parameters"""
         print("Initial state distribution:")
         for i in range(self.n_states):
-            print(f"State {i+1}: {self.initial_distribution[i]:.4f}")
+            print(f"State {i + 1}: {self.initial_distribution[i]:.4f}")
 
         print("\nTransition probability matrix:")
-        print("    | " + " ".join([f"  {i+1}  " for i in range(self.n_states)]))
+        print("    | " + " ".join([f"  {i + 1}  " for i in range(self.n_states)]))
         print("----+" + "------" * self.n_states)
         for i in range(self.n_states):
             print(
-                f" {i+1}  | "
+                f" {i + 1}  | "
                 + " ".join(
-                    [f"{self.transition_matrix[i,j]:.4f}" for j in range(self.n_states)]
+                    [
+                        f"{self.transition_matrix[i, j]:.4f}"
+                        for j in range(self.n_states)
+                    ]
                 )
             )
 
