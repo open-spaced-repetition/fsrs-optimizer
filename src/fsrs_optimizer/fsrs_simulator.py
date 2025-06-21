@@ -79,6 +79,7 @@ columns = [
     "due",
     "ivl",
     "cost",
+    "cost_total",
     "rand",
     "rating",
     "ease",
@@ -387,9 +388,7 @@ def simulate(
             card_table[col["rating"]][true_review & ~forget],
         )
 
-        card_table[col["cost"]][true_review & forget] = [
-            a + b for a, b in zip(card_table[col["cost"]][true_review & forget], costs)
-        ]
+        card_table[col["cost"]][true_review & forget] += costs
 
         need_learn = card_table[col["stability"]] == 1e-10
         card_table[col["cost"]][need_learn] = np.choose(
@@ -411,9 +410,7 @@ def simulate(
             init_rating=card_table[col["rating"]][true_learn].astype(int),
         )
 
-        card_table[col["cost"]][true_learn] = [
-            a + b for a, b in zip(card_table[col["cost"]][true_learn], costs)
-        ]
+        card_table[col["cost"]][true_learn] += costs
 
         below_cost_limit = np.cumsum(card_table[col["cost"]]) <= max_cost_perday
         reviewed = (true_review | true_learn) & below_cost_limit
@@ -464,6 +461,7 @@ def simulate(
         learn_cnt_per_day[today] = np.sum(true_learn & reviewed)
         memorized_cnt_per_day[today] = card_table[col["retrievability"]].sum()
         cost_per_day[today] = card_table[col["cost"]][reviewed].sum()
+        card_table[col["cost_total"]][reviewed] += card_table[col["cost"]][reviewed]
     return (
         card_table,
         review_cnt_per_day,
@@ -480,11 +478,14 @@ def optimal_retention(**kwargs):
 
 CMRR_TARGET_WORKLOAD_ONLY = True
 CMRR_TARGET_MEMORIZED_PER_WORKLOAD = False
+CMRR_TARGET_MEMORIZED_PER_WORKLOAD_PER_CARD = "card"
+CMRR_TARGET_MEMORIZED_PER_WORKLOAD_FUTURE = "future_"
 CMRR_TARGET_MEMORIZED_STABILITY_PER_WORKLOAD = "memorized_stability_per_workload"
 
 
 def run_simulation(args):
     target, kwargs = args
+    target: bool | str
 
     (card_table, _, _, memorized_cnt_per_day, cost_per_day, _) = simulate(**kwargs)
 
@@ -495,6 +496,21 @@ def run_simulation(args):
     if target == CMRR_TARGET_MEMORIZED_STABILITY_PER_WORKLOAD:
         return np.sum(cost_per_day) / np.sum(
             np.max(card_table[col["stability"]], 0) * card_table[col["retrievability"]]
+        )
+    if target == CMRR_TARGET_MEMORIZED_PER_WORKLOAD_PER_CARD:
+        reviewed = card_table[:, card_table[col["stability"]] > 1e-9]
+        return np.sum(reviewed[col["cost_total"]] / reviewed[col["retrievability"]])
+    if target.startswith(CMRR_TARGET_MEMORIZED_PER_WORKLOAD_FUTURE):
+        _, future_days = target.split("_")
+        reviewed = card_table[:, card_table[col["stability"]] > 1e-9]
+        return np.sum(
+            reviewed[col["cost_total"]]
+            / power_forgetting_curve(
+                # future days from the cards last review
+                int(future_days),
+                reviewed[col["stability"]],
+                -kwargs["w"][20],
+            )
         )
 
 
