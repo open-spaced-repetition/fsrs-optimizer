@@ -953,7 +953,9 @@ class Optimizer:
             .agg({"y": ["mean", "count"]})
             .reset_index()
         )
-        self.dataset_for_initialization.to_csv("dataset_for_initialization.tsv", sep="\t", index=None)
+        self.dataset_for_initialization.to_csv(
+            "dataset_for_initialization.tsv", sep="\t", index=None
+        )
         del df["first_rating"]
 
         if not analysis:
