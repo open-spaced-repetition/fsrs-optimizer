@@ -947,13 +947,13 @@ class Optimizer:
         df.to_csv("revlog_history.tsv", sep="\t", index=False)
         tqdm.write("Trainset saved.")
 
-        self.S0_dataset_group = (
+        self.dataset_for_initialization = (
             df[df["i"] == 2]
             .groupby(by=["first_rating", "delta_t"], group_keys=False)
             .agg({"y": ["mean", "count"]})
             .reset_index()
         )
-        self.S0_dataset_group.to_csv("stability_for_pretrain.tsv", sep="\t", index=None)
+        self.dataset_for_initialization.to_csv("dataset_for_initialization.tsv", sep="\t", index=None)
         del df["first_rating"]
 
         if not analysis:
@@ -1074,7 +1074,7 @@ class Optimizer:
         https://github.com/open-spaced-repetition/fsrs4anki/wiki/The-Algorithm
         """
 
-    def pretrain(self, dataset=None, verbose=True):
+    def initialize_parameters(self, dataset=None, verbose=True):
         if dataset is None:
             self.dataset = pd.read_csv(
                 "./revlog_history.tsv",
@@ -1088,7 +1088,7 @@ class Optimizer:
             self.dataset["first_rating"] = self.dataset["r_history"].map(
                 lambda x: x[0] if len(x) > 0 else ""
             )
-            self.S0_dataset_group = (
+            self.dataset_for_initialization = (
                 self.dataset[self.dataset["i"] == 2]
                 .groupby(by=["first_rating", "delta_t"], group_keys=False)
                 .agg({"y": ["mean", "count"]})
@@ -1106,8 +1106,8 @@ class Optimizer:
         r_s0_default = {str(i): DEFAULT_PARAMETER[i - 1] for i in range(1, 5)}
 
         for first_rating in ("1", "2", "3", "4"):
-            group = self.S0_dataset_group[
-                self.S0_dataset_group["first_rating"] == first_rating
+            group = self.dataset_for_initialization[
+                self.dataset_for_initialization["first_rating"] == first_rating
             ]
             if group.empty:
                 if verbose:
@@ -1191,7 +1191,7 @@ class Optimizer:
         w2 = 0.54
 
         if len(rating_stability) == 0:
-            raise Exception("Not enough data for pretraining!")
+            raise Exception("Not enough data for parameter initialization!")
         elif len(rating_stability) == 1:
             rating = list(rating_stability.keys())[0]
             factor = rating_stability[rating] / r_s0_default[str(rating)]
@@ -1269,7 +1269,7 @@ class Optimizer:
 
         self.init_w[0:4] = list(map(lambda x: max(min(100, x), S_MIN), init_s0))
         if verbose:
-            tqdm.write(f"Pretrain finished!")
+            tqdm.write(f"Parameter initialization finished!")
         return plots
 
     def train(
