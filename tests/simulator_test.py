@@ -1,6 +1,6 @@
 from src.fsrs_optimizer import *
 
-FSRS_RS_MEMORIZED = 5361.807
+FSRS_RS_MEMORIZED = 3370.383
 
 
 class Test_Simulator:

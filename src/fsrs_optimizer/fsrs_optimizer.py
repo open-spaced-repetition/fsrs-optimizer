@@ -693,7 +693,7 @@ class Optimizer:
         state_rating_costs = (
             df_tmp[df_tmp["review_state"] != 4]
             .groupby(["review_state", "review_rating"])["review_duration"]
-            .median()
+            .mean()
             .unstack(fill_value=0)
         ) / 1000
         state_rating_counts = (
