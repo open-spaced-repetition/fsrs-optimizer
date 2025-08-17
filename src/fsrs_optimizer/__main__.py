@@ -6,6 +6,7 @@ import pytz
 import os
 import functools
 from pathlib import Path
+from typing import Optional
 
 import matplotlib.pyplot as plt
 
@@ -44,7 +45,7 @@ def process(filepath, filter_out_flags: list[int]):
         }
 
     # Prompts the user with the key and then falls back on the last answer given.
-    def remembered_fallback_prompt(key: str, pretty: str = None):
+    def remembered_fallback_prompt(key: str, pretty: Optional[str] = None):
         if pretty is None:
             pretty = key
         remembered_fallbacks[key] = prompt(
