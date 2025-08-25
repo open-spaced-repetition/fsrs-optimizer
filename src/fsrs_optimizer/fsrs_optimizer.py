@@ -1707,7 +1707,9 @@ class Optimizer:
             if len(dataset["y"].unique()) == 2
             else np.nan
         )
-        metrics["LogLoss"] = log_loss(y_true=dataset["y"], y_pred=dataset["p"])
+        metrics["LogLoss"] = log_loss(
+            y_true=dataset["y"], y_pred=dataset["p"], labels=[0, 1]
+        )
         metrics_all["all"] = metrics
         fig2 = plt.figure(figsize=(16, 12))
         for last_rating in (1, 2, 3, 4):
@@ -1735,7 +1737,9 @@ class Optimizer:
                 else np.nan
             )
             metrics["LogLoss"] = log_loss(
-                y_true=calibration_data["y"], y_pred=calibration_data["p"]
+                y_true=calibration_data["y"],
+                y_pred=calibration_data["p"],
+                labels=[0, 1],
             )
             metrics_all[last_rating] = metrics
 
