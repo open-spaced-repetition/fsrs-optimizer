@@ -1707,7 +1707,9 @@ class Optimizer:
             if len(dataset["y"].unique()) == 2
             else np.nan
         )
-        metrics["LogLoss"] = log_loss(y_true=dataset["y"], y_pred=dataset["p"])
+        metrics["LogLoss"] = log_loss(
+            y_true=dataset["y"], y_pred=dataset["p"], labels=[0, 1]
+        )
         metrics_all["all"] = metrics
         fig2 = plt.figure(figsize=(16, 12))
         for last_rating in (1, 2, 3, 4):
@@ -1735,7 +1737,9 @@ class Optimizer:
                 else np.nan
             )
             metrics["LogLoss"] = log_loss(
-                y_true=calibration_data["y"], y_pred=calibration_data["p"]
+                y_true=calibration_data["y"],
+                y_pred=calibration_data["p"],
+                labels=[0, 1],
             )
             metrics_all[last_rating] = metrics
 
@@ -2291,9 +2295,9 @@ def load_brier(predictions, real, bins=20):
 
         assert not np.isnan(x_low_cred)
         assert not np.isnan(x_high_cred)
-        assert x_low_cred <= p_hat <= x_high_cred, (
-            f"{x_low_cred}, {p_hat}, {k / n}, {x_high_cred}"
-        )
+        assert (
+            x_low_cred <= p_hat <= x_high_cred
+        ), f"{x_low_cred}, {p_hat}, {k / n}, {x_high_cred}"
         return x_low_cred, x_high_cred
 
     counts = np.zeros(bins)
@@ -2335,9 +2339,9 @@ def load_brier(predictions, real, bins=20):
     for n in range(len(real_means)):
         # check that the mean is within the bounds, unless they are NaNs
         if not np.isnan(real_means_lower[n]):
-            assert real_means_lower[n] <= real_means[n] <= real_means_upper[n], (
-                f"{real_means_lower[n]:4f}, {real_means[n]:4f}, {real_means_upper[n]:4f}"
-            )
+            assert (
+                real_means_lower[n] <= real_means[n] <= real_means_upper[n]
+            ), f"{real_means_lower[n]:4f}, {real_means[n]:4f}, {real_means_upper[n]:4f}"
 
     return {
         "reliability": sum(counts * (real_means - prediction_means) ** 2) / size,
