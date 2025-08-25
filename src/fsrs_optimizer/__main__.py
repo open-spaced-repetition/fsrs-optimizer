@@ -112,9 +112,9 @@ def process(filepath, filter_out_flags: list[int]):
     filename = os.path.splitext(os.path.basename(filepath))[0]
 
     optimizer.define_model()
-    figures = optimizer.pretrain(verbose=save_graphs)
+    figures = optimizer.initialize_parameters(verbose=save_graphs)
     for i, f in enumerate(figures):
-        f.savefig(f"pretrain_{i}.png")
+        f.savefig(f"parameter_init_{i}.png")
         plt.close(f)
     figures = optimizer.train(verbose=save_graphs, recency_weight=True)
     for i, f in enumerate(figures):
