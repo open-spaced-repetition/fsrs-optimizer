@@ -184,7 +184,7 @@ class FSRS(nn.Module):
                     self.stability_after_failure(state, r),
                 )
             )
-            new_d = self.next_d(state, X[:, 1])
+            new_d = torch.where(short_term, state[:, 1], self.next_d(state, X[:, 1]))
             new_d = new_d.clamp(1, 10)
         new_s = new_s.clamp(S_MIN, 36500)
         return torch.stack([new_s, new_d], dim=1)
