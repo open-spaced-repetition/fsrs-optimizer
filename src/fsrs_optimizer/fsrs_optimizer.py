@@ -233,7 +233,7 @@ class ParameterClipper:
             w[16] = w[16].clamp(1, 6)
             w[17] = w[17].clamp(0, 2)
             w[18] = w[18].clamp(0, 2)
-            w[19] = w[19].clamp(0, 0.8)
+            w[19] = w[19].clamp(0.01, 0.8)
             w[20] = w[20].clamp(0.1, 0.8)
             module.w.data = w
 
@@ -693,7 +693,7 @@ class Optimizer:
         state_rating_costs = (
             df_tmp[df_tmp["review_state"] != 4]
             .groupby(["review_state", "review_rating"])["review_duration"]
-            .median()
+            .mean()
             .unstack(fill_value=0)
         ) / 1000
         state_rating_counts = (
@@ -1718,7 +1718,9 @@ class Optimizer:
             if len(dataset["y"].unique()) == 2
             else np.nan
         )
-        metrics["LogLoss"] = log_loss(y_true=dataset["y"], y_pred=dataset["p"])
+        metrics["LogLoss"] = log_loss(
+            y_true=dataset["y"], y_pred=dataset["p"], labels=[0, 1]
+        )
         metrics_all["all"] = metrics
         fig2 = plt.figure(figsize=(16, 12))
         for last_rating in (1, 2, 3, 4):
@@ -1746,7 +1748,9 @@ class Optimizer:
                 else np.nan
             )
             metrics["LogLoss"] = log_loss(
-                y_true=calibration_data["y"], y_pred=calibration_data["p"]
+                y_true=calibration_data["y"],
+                y_pred=calibration_data["p"],
+                labels=[0, 1],
             )
             metrics_all[last_rating] = metrics
 

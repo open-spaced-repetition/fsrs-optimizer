@@ -1,5 +1,5 @@
 [build-system]
-requires      = ["setuptools>=61.0.0", "wheel"]
+requires      = ["setuptools", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -7,17 +7,17 @@ name = "FSRS-Optimizer"
 version = "6.2.0"
 readme = "README.md"
 dependencies = [
-    "matplotlib>=3.7.0",
-    "numpy>=1.22.4",
-    "pandas>=1.5.3",
-    "pytz>=2022.7.1",
-    "scikit_learn>=1.4.0",
-    "torch>=1.13.1",
-    "tqdm>=4.64.1",
-    "statsmodels>=0.13.5",
-    "scipy<1.14.1"
+    "matplotlib",
+    "numpy",
+    "pandas",
+    "pytz",
+    "scikit_learn",
+    "torch",
+    "tqdm",
+    "statsmodels",
+    "scipy"
 ]
-requires-python = ">=3.9,<3.13"
+requires-python = ">=3.10,<3.14"
 
 [project.urls]
 Homepage = "https://github.com/open-spaced-repetition/fsrs-optimizer"

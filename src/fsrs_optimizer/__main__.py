@@ -6,6 +6,7 @@ import pytz
 import os
 import functools
 from pathlib import Path
+from typing import Optional
 
 import matplotlib.pyplot as plt
 
@@ -44,7 +45,7 @@ def process(filepath, filter_out_flags: list[int]):
         }
 
     # Prompts the user with the key and then falls back on the last answer given.
-    def remembered_fallback_prompt(key: str, pretty: str = None):
+    def remembered_fallback_prompt(key: str, pretty: Optional[str] = None):
         if pretty is None:
             pretty = key
         remembered_fallbacks[key] = prompt(
@@ -150,8 +151,8 @@ def process(filepath, filter_out_flags: list[int]):
             f.write(profile)
 
     loss_before, loss_after = optimizer.evaluate()
-    print(f"Loss before training: {loss_before:.4f}")
-    print(f"Loss after training: {loss_after:.4f}")
+    print(f"Weighted loss before training: {loss_before:.4f}")
+    print(f"Weighted loss after training: {loss_after:.4f}")
     metrics, figures = optimizer.calibration_graph(verbose=False)
     for partition in metrics:
         print(f"Last rating = {partition}")
