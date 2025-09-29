@@ -1076,6 +1076,15 @@ class Optimizer:
         https://github.com/open-spaced-repetition/fsrs4anki/wiki/The-Algorithm
         """
 
+    def pretrain(self, dataset=None, verbose=True):
+        warnings.warn(
+            "The 'pretrain' method is deprecated and will be removed in a future version. "
+            "Please use 'initialize_parameters' instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        self.initialize_parameters(dataset, verbose)
+
     def initialize_parameters(self, dataset=None, verbose=True):
         if dataset is None:
             self.dataset = pd.read_csv(
