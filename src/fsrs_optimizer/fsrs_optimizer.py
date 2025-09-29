@@ -1083,7 +1083,7 @@ class Optimizer:
             DeprecationWarning,
             stacklevel=2,
         )
-        self.initialize_parameters(dataset, verbose)
+        return self.initialize_parameters(dataset, verbose)
 
     def initialize_parameters(self, dataset=None, verbose=True):
         if dataset is None:
