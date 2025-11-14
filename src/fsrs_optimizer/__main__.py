@@ -58,7 +58,7 @@ def process(filepath, filter_out_flags: list[int]):
     def remembered_fallback_prompt(key: str, pretty: Optional[str] = None):
         if pretty is None:
             pretty = key
-        remembered_fallbacks[key] = prompt(
+        remembered_fallbacks[key] = prompt(  # type: ignore[assignment]
             f"input {pretty}", remembered_fallbacks.get(key, None)
         )
 
