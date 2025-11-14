@@ -5,7 +5,7 @@ import pandas as pd
 import numpy as np
 import os
 import math
-from typing import List, Optional, Tuple, Union
+from typing import List, Optional, Tuple, Union, Any, Dict
 from datetime import timedelta, datetime
 from collections import defaultdict
 import statsmodels.api as sm  # type: ignore
@@ -2396,16 +2396,16 @@ def plot_brier(predictions, real, bins=20, ax=None, title=None):
     e_90 = np.quantile(np.abs(observation - p), 0.9)
     e_max = np.max(np.abs(observation - p))
     brier = load_brier(predictions, real, bins=bins)
-    brier_detail = brier["detail"]  # type: ignore[index]
-    bin_prediction_means = brier_detail["bin_prediction_means"]
+    brier_detail: Dict[str, Any] = brier["detail"]  # type: ignore[index, assignment]
+    bin_prediction_means = brier_detail["bin_prediction_means"]  # type: ignore[index]
 
-    bin_real_means = brier_detail["bin_real_means"]
-    bin_real_means_upper_bounds = brier_detail["bin_real_means_upper_bounds"]
-    bin_real_means_lower_bounds = brier_detail["bin_real_means_lower_bounds"]
+    bin_real_means = brier_detail["bin_real_means"]  # type: ignore[index]
+    bin_real_means_upper_bounds = brier_detail["bin_real_means_upper_bounds"]  # type: ignore[index]
+    bin_real_means_lower_bounds = brier_detail["bin_real_means_lower_bounds"]  # type: ignore[index]
     bin_real_means_errors_upper = bin_real_means_upper_bounds - bin_real_means
     bin_real_means_errors_lower = bin_real_means - bin_real_means_lower_bounds
 
-    bin_counts = brier_detail["bin_counts"]
+    bin_counts = brier_detail["bin_counts"]  # type: ignore[index]
     mask = bin_counts > 0
     r2 = r2_score(
         bin_real_means[mask],
@@ -2459,7 +2459,7 @@ def plot_brier(predictions, real, bins=20, ax=None, title=None):
     )
     # ax.plot(p, observation, label="Lowess Smoothing", color="red")
     ax.plot((0, 1), (0, 1), label="Perfect Calibration", color="#ff7f0e")
-    bin_count = brier["detail"]["bin_count"]
+    bin_count = brier_detail["bin_count"]  # type: ignore[index]
     counts = np.array(bin_counts)
     bins = np.log((np.arange(bin_count)) + 1) / np.log(bin_count + 1)
     widths = np.diff(bins)
