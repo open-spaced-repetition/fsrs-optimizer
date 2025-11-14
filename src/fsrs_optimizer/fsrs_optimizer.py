@@ -506,7 +506,9 @@ class Trainer:
 
 
 class Collection:
-    def __init__(self, w: Union[List[float], Tensor], float_delta_t: bool = False) -> None:
+    def __init__(
+        self, w: Union[List[float], Tensor], float_delta_t: bool = False
+    ) -> None:
         if isinstance(w, Tensor):
             w = w.tolist()
         self.model = FSRS(w, float_delta_t)
@@ -768,7 +770,10 @@ class Optimizer:
             "same_day_ratings"
         ]
         result = model.fit(learning_step_rating_sequences)
-        assert result.transition_matrix is not None and result.transition_counts is not None
+        assert (
+            result.transition_matrix is not None
+            and result.transition_counts is not None
+        )
         learning_transition_matrix, learning_transition_counts = (
             result.transition_matrix[:3],  # type: ignore[index]
             result.transition_counts[:3],  # type: ignore[index]
@@ -793,7 +798,10 @@ class Optimizer:
             (df1["first_state"] == Review) & (df1["first_rating"] == 1)
         ]["same_day_ratings"]
         result = model.fit(relearning_step_rating_sequences)
-        assert result.transition_matrix is not None and result.transition_counts is not None
+        assert (
+            result.transition_matrix is not None
+            and result.transition_counts is not None
+        )
         relearning_transition_matrix, relearning_transition_counts = (
             result.transition_matrix[:3],  # type: ignore[index]
             result.transition_counts[:3],  # type: ignore[index]
@@ -893,7 +901,19 @@ class Optimizer:
 
         t_history_list = df.groupby("card_id", group_keys=False)["delta_t"].apply(
             lambda x: cum_concat(
-                [[max(0.0, float(round(float(i), 6) if self.float_delta_t else float(int(i))))] for i in x]  # type: ignore[no-matching-overload]
+                [
+                    [
+                        max(
+                            0.0,
+                            float(
+                                round(float(i), 6)
+                                if self.float_delta_t
+                                else float(int(i))
+                            ),
+                        )
+                    ]
+                    for i in x
+                ]  # type: ignore[no-matching-overload]
             )
         )
         df["t_history"] = [
@@ -1295,7 +1315,9 @@ class Optimizer:
             # This should not happen, but initialize to avoid type error
             init_s0 = [1.0, 1.0, 1.0, 1.0]
 
-        self.init_w[0:4] = list(map(lambda x: max(float(min(100, x)), float(S_MIN)), init_s0))  # type: ignore[no-matching-overload]
+        self.init_w[0:4] = list(
+            map(lambda x: max(float(min(100, x)), float(S_MIN)), init_s0)
+        )  # type: ignore[no-matching-overload]
         if verbose:
             tqdm.write(f"Parameter initialization finished!")
         return plots
@@ -1342,7 +1364,9 @@ class Optimizer:
                 )
                 trained_w = trainer.train(verbose=verbose)
                 w.append(trained_w)
-                self.w = trained_w.tolist() if isinstance(trained_w, Tensor) else trained_w
+                self.w = (
+                    trained_w.tolist() if isinstance(trained_w, Tensor) else trained_w
+                )
                 self.evaluate()
                 metrics, figures = self.calibration_graph(self.dataset.iloc[test_index])
                 for j, f in enumerate(figures):
@@ -2325,9 +2349,9 @@ def load_brier(predictions, real, bins=20):
 
         assert not np.isnan(x_low_cred)
         assert not np.isnan(x_high_cred)
-        assert (
-            x_low_cred <= p_hat <= x_high_cred
-        ), f"{x_low_cred}, {p_hat}, {k / n}, {x_high_cred}"
+        assert x_low_cred <= p_hat <= x_high_cred, (
+            f"{x_low_cred}, {p_hat}, {k / n}, {x_high_cred}"
+        )
         return x_low_cred, x_high_cred
 
     counts = np.zeros(bins)
@@ -2369,9 +2393,9 @@ def load_brier(predictions, real, bins=20):
     for n in range(len(real_means)):
         # check that the mean is within the bounds, unless they are NaNs
         if not np.isnan(real_means_lower[n]):
-            assert (
-                real_means_lower[n] <= real_means[n] <= real_means_upper[n]
-            ), f"{real_means_lower[n]:4f}, {real_means[n]:4f}, {real_means_upper[n]:4f}"
+            assert real_means_lower[n] <= real_means[n] <= real_means_upper[n], (
+                f"{real_means_lower[n]:4f}, {real_means[n]:4f}, {real_means_upper[n]:4f}"
+            )
 
     return {
         "reliability": sum(counts * (real_means - prediction_means) ** 2) / size,
@@ -2722,7 +2746,9 @@ class FirstOrderMarkovChain:
         """
         if self.transition_matrix is None or self.initial_distribution is None:
             raise ValueError("Model not yet fitted, please call the fit method first")
-        assert self.transition_matrix is not None and self.initial_distribution is not None
+        assert (
+            self.transition_matrix is not None and self.initial_distribution is not None
+        )
 
         sequence = []
 
@@ -2751,7 +2777,9 @@ class FirstOrderMarkovChain:
         """
         if self.transition_matrix is None or self.initial_distribution is None:
             raise ValueError("Model not yet fitted, please call the fit method first")
-        assert self.transition_matrix is not None and self.initial_distribution is not None
+        assert (
+            self.transition_matrix is not None and self.initial_distribution is not None
+        )
 
         log_likelihood: float = 0.0
 
@@ -2767,9 +2795,9 @@ class FirstOrderMarkovChain:
             for i in range(len(sequence) - 1):
                 current_state = sequence[i] - 1
                 next_state = sequence[i + 1] - 1
-                log_val = float(np.log(
-                    self.transition_matrix[current_state, next_state]
-                ))
+                log_val = float(
+                    np.log(self.transition_matrix[current_state, next_state])
+                )
                 log_likelihood = log_likelihood + log_val  # type: ignore[assignment]
 
         return log_likelihood
@@ -2778,7 +2806,9 @@ class FirstOrderMarkovChain:
         """Print model parameters"""
         if self.initial_distribution is None or self.transition_matrix is None:
             raise ValueError("Model not yet fitted, please call the fit method first")
-        assert self.initial_distribution is not None and self.transition_matrix is not None
+        assert (
+            self.initial_distribution is not None and self.transition_matrix is not None
+        )
         print("Initial state distribution:")
         for i in range(self.n_states):
             print(f"State {i + 1}: {self.initial_distribution[i]:.4f}")

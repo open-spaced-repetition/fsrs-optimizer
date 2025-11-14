@@ -105,10 +105,22 @@ def process(filepath, filter_out_flags: list[int]):
         # copy the file to the current directory and rename it as revlog.csv
         shutil.copyfile(f"{filepath}", "revlog.csv")
     # Ensure types are correct for create_time_series
-    timezone = str(remembered_fallbacks["timezone"]) if remembered_fallbacks["timezone"] is not None else "UTC"
-    revlog_start_date = str(remembered_fallbacks["revlog_start_date"]) if remembered_fallbacks["revlog_start_date"] is not None else "2006-10-05"
-    next_day = int(remembered_fallbacks["next_day"]) if remembered_fallbacks["next_day"] is not None else 4
-    
+    timezone = (
+        str(remembered_fallbacks["timezone"])
+        if remembered_fallbacks["timezone"] is not None
+        else "UTC"
+    )
+    revlog_start_date = (
+        str(remembered_fallbacks["revlog_start_date"])
+        if remembered_fallbacks["revlog_start_date"] is not None
+        else "2006-10-05"
+    )
+    next_day = (
+        int(remembered_fallbacks["next_day"])
+        if remembered_fallbacks["next_day"] is not None
+        else 4
+    )
+
     analysis = optimizer.create_time_series(
         timezone,
         revlog_start_date,
