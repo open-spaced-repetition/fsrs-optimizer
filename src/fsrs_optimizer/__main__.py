@@ -27,6 +27,7 @@ def prompt(msg: str, fallback):
 
 class RememberedFallbacksDict(TypedDict, total=False):
     """Type definition for remembered fallbacks configuration dictionary."""
+
     timezone: Optional[str]
     next_day: int | str  # Can be int or str from JSON
     revlog_start_date: str
@@ -85,7 +86,9 @@ def process(filepath, filter_out_flags: list[int]):
             "enable_short_term", "enable short-term component in FSRS model? (y/n)"
         )
 
-        graphs_input = prompt("Save graphs? (y/n)", remembered_fallbacks.get("preview", "n"))
+        graphs_input = prompt(
+            "Save graphs? (y/n)", remembered_fallbacks.get("preview", "n")
+        )
     else:
         graphs_input = remembered_fallbacks.get("preview", "n")
 
