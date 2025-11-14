@@ -1168,7 +1168,7 @@ class Optimizer:
             stability = float(params[0])  # type: ignore[index]
             rating_stability[int(first_rating)] = stability
             rating_count[int(first_rating)] = sum(count)
-            predict_recall = power_forgetting_curve(delta_t, *params)
+            predict_recall = power_forgetting_curve(delta_t, *params)  # type: ignore[misc]
             rmse = root_mean_squared_error(recall, predict_recall, sample_weight=count)
 
             if verbose:
@@ -2417,6 +2417,8 @@ def plot_brier(predictions, real, bins=20, ax=None, title=None):
         bin_prediction_means[mask],
         sample_weight=bin_counts[mask],
     )
+    if ax is None:
+        ax = plt.gca()
     ax.set_xlim([0, 1])
     ax.set_ylim([0, 1])
     ax.grid(True)
