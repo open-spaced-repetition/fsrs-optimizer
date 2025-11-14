@@ -1876,8 +1876,8 @@ class Optimizer:
         for group_key in ("last_s_bin", "last_d_bin", "last_r_bin"):
             for last_rating in (1, 3):
                 analysis_group = (
-                    analysis_df[analysis_df["last_rating"] == last_rating]
-                    .groupby(
+                    analysis_df[analysis_df["last_rating"] == last_rating]  # type: ignore[index]
+                    .groupby(  # type: ignore[attr-defined]
                         by=["last_s_bin", "last_d_bin", "last_r_bin", "delta_t"],
                         group_keys=True,
                         as_index=False,
@@ -2795,6 +2795,7 @@ class FirstOrderMarkovChain:
                 )
             )
 
+        assert self.initial_counts is not None and self.transition_counts is not None
         print("Initial counts:")
         print(self.initial_counts.astype(int))
         print("Transition counts:")
