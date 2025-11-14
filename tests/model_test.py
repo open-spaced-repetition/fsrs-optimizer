@@ -127,6 +127,7 @@ class Test_Model:
         loss = loss_fn(retentions, labels).sum()
         assert torch.allclose(loss, torch.tensor(4.047898), atol=1e-4)
         loss.backward()
+        assert model.w.grad is not None
         assert torch.allclose(
             model.w.grad,
             torch.tensor(
@@ -196,6 +197,7 @@ class Test_Model:
         )
         assert torch.allclose(penalty, torch.tensor(0.6771115), atol=1e-4)
         penalty.backward()
+        assert model.w.grad is not None
         assert torch.allclose(
             model.w.grad,
             torch.tensor(
@@ -256,6 +258,7 @@ class Test_Model:
         loss = loss_fn(retentions, labels).sum()
         assert torch.allclose(loss, torch.tensor(3.76888), atol=1e-4)
         loss.backward()
+        assert model.w.grad is not None
         assert torch.allclose(
             model.w.grad,
             torch.tensor(

@@ -1295,7 +1295,7 @@ class Optimizer:
             # This should not happen, but initialize to avoid type error
             init_s0 = [1.0, 1.0, 1.0, 1.0]
 
-        self.init_w[0:4] = list(map(lambda x: max(min(100, x), S_MIN), init_s0))
+        self.init_w[0:4] = list(map(lambda x: max(float(min(100, x)), float(S_MIN)), init_s0))  # type: ignore[no-matching-overload]
         if verbose:
             tqdm.write(f"Parameter initialization finished!")
         return plots

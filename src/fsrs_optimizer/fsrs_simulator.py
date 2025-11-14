@@ -342,7 +342,7 @@ def simulate(
         )
         card_table[col["cost"]] = 0
         need_review = card_table[col["due"]] <= today
-        card_table[col["rand"]][need_review] = np.random.rand(np.sum(need_review))
+        card_table[col["rand"]][need_review] = np.random.rand(int(np.sum(need_review)))  # type: ignore[no-matching-overload]
         forget = card_table[col["rand"]] > card_table[col["retrievability"]]
         card_table[col["rating"]][need_review & forget] = 1
         card_table[col["rating"]][need_review & ~forget] = np.random.choice(
@@ -581,6 +581,7 @@ def brent(tol=0.01, maxiter=20, **kwargs):
         if np.abs(x - xmid) < (tol2 - 0.5 * (b - a)):
             break
 
+        rat: float = 0.0  # Initialize rat before use
         if np.abs(deltax) <= tol1:
             if x >= xmid:
                 deltax = a - x  # do a golden section step
