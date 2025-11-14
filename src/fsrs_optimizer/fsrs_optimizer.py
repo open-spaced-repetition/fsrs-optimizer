@@ -580,7 +580,7 @@ def fit_stability(delta_t, retention, size):
         return loss
 
     res = minimize(loss, x0=1, bounds=[(S_MIN, 36500)])
-    assert res.x is not None, "Optimization failed"
+    assert res.x is not None, "Optimization failed"  # type: ignore[attr-defined]
     return float(res.x[0])  # type: ignore[index]
 
 
@@ -670,7 +670,7 @@ class Optimizer:
             df[df["is_learn_start"]].groupby("card_id")["sequence_group"].last()
         )
         df["last_learn_start"] = (
-            df["card_id"].map(last_learn_start).fillna(0).astype(int)
+            df["card_id"].map(last_learn_start).fillna(0).astype(int)  # type: ignore[arg-type]
         )
         df["mask"] = df["last_learn_start"] <= df["sequence_group"]
         df = df[df["mask"] == True].copy()
@@ -768,9 +768,10 @@ class Optimizer:
             "same_day_ratings"
         ]
         result = model.fit(learning_step_rating_sequences)
+        assert result.transition_matrix is not None and result.transition_counts is not None
         learning_transition_matrix, learning_transition_counts = (
-            result.transition_matrix[:3],
-            result.transition_counts[:3],
+            result.transition_matrix[:3],  # type: ignore[index]
+            result.transition_counts[:3],  # type: ignore[index]
         )
         self.learning_step_transitions = learning_transition_matrix.round(2).tolist()
         for i, (rating_probs, default_rating_probs, transition_counts) in enumerate(
@@ -792,9 +793,10 @@ class Optimizer:
             (df1["first_state"] == Review) & (df1["first_rating"] == 1)
         ]["same_day_ratings"]
         result = model.fit(relearning_step_rating_sequences)
+        assert result.transition_matrix is not None and result.transition_counts is not None
         relearning_transition_matrix, relearning_transition_counts = (
-            result.transition_matrix[:3],
-            result.transition_counts[:3],
+            result.transition_matrix[:3],  # type: ignore[index]
+            result.transition_counts[:3],  # type: ignore[index]
         )
         self.relearning_step_transitions = relearning_transition_matrix.round(
             2
@@ -1163,7 +1165,7 @@ class Optimizer:
                 bounds=((S_MIN, 100),),
                 options={"maxiter": int(sum(count))},
             )
-            assert res.x is not None, "Optimization failed"
+            assert res.x is not None, "Optimization failed"  # type: ignore[attr-defined]
             params = res.x  # type: ignore[assignment]
             stability = float(params[0])  # type: ignore[index]
             rating_stability[int(first_rating)] = stability
@@ -1177,7 +1179,7 @@ class Optimizer:
                 ax.plot(delta_t, recall, label="Exact")
                 ax.plot(
                     np.linspace(0, 30),
-                    power_forgetting_curve(np.linspace(0, 30), *params),
+                    power_forgetting_curve(np.linspace(0, 30), *params),  # type: ignore[misc]
                     label=f"Weighted fit (RMSE: {rmse:.4f})",
                 )
                 count_percent = np.array([x / sum(count) for x in count])
@@ -2419,8 +2421,8 @@ def plot_brier(predictions, real, bins=20, ax=None, title=None):
     )
     if ax is None:
         ax = plt.gca()
-    ax.set_xlim([0, 1])
-    ax.set_ylim([0, 1])
+    ax.set_xlim((0, 1))
+    ax.set_ylim((0, 1))
     ax.grid(True)
     try:
         fit_wls = sm.WLS(
@@ -2708,7 +2710,7 @@ class FirstOrderMarkovChain:
 
         return self
 
-    def generate_sequence(self, length):
+    def generate_sequence(self, length: int):
         """
         Generate a new sequence
 
@@ -2720,6 +2722,7 @@ class FirstOrderMarkovChain:
         """
         if self.transition_matrix is None or self.initial_distribution is None:
             raise ValueError("Model not yet fitted, please call the fit method first")
+        assert self.transition_matrix is not None and self.initial_distribution is not None
 
         sequence = []
 
@@ -2736,7 +2739,7 @@ class FirstOrderMarkovChain:
 
         return sequence
 
-    def log_likelihood(self, sequences):
+    def log_likelihood(self, sequences: List[List[int]]):
         """
         Calculate the log-likelihood of sequences
 
@@ -2748,6 +2751,7 @@ class FirstOrderMarkovChain:
         """
         if self.transition_matrix is None or self.initial_distribution is None:
             raise ValueError("Model not yet fitted, please call the fit method first")
+        assert self.transition_matrix is not None and self.initial_distribution is not None
 
         log_likelihood = 0.0
 
@@ -2770,6 +2774,9 @@ class FirstOrderMarkovChain:
 
     def print_model(self):
         """Print model parameters"""
+        if self.initial_distribution is None or self.transition_matrix is None:
+            raise ValueError("Model not yet fitted, please call the fit method first")
+        assert self.initial_distribution is not None and self.transition_matrix is not None
         print("Initial state distribution:")
         for i in range(self.n_states):
             print(f"State {i + 1}: {self.initial_distribution[i]:.4f}")
