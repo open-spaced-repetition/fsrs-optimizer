@@ -893,7 +893,7 @@ class Optimizer:
 
         t_history_list = df.groupby("card_id", group_keys=False)["delta_t"].apply(
             lambda x: cum_concat(
-                [[max(0.0, float(round(i, 6) if self.float_delta_t else float(int(i))))] for i in x]  # type: ignore[misc]
+                [[max(0.0, float(round(float(i), 6) if self.float_delta_t else float(int(i))))] for i in x]  # type: ignore[misc]
             )
         )
         df["t_history"] = [
