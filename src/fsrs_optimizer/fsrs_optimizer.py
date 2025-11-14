@@ -581,7 +581,7 @@ def fit_stability(delta_t, retention, size):
 
     res = minimize(loss, x0=1, bounds=[(S_MIN, 36500)])
     assert res.x is not None, "Optimization failed"
-    return res.x[0]
+    return float(res.x[0])  # type: ignore[index]
 
 
 class Optimizer:
@@ -1164,8 +1164,8 @@ class Optimizer:
                 options={"maxiter": int(sum(count))},
             )
             assert res.x is not None, "Optimization failed"
-            params = res.x
-            stability = params[0]
+            params = res.x  # type: ignore[assignment]
+            stability = float(params[0])  # type: ignore[index]
             rating_stability[int(first_rating)] = stability
             rating_count[int(first_rating)] = sum(count)
             predict_recall = power_forgetting_curve(delta_t, *params)
