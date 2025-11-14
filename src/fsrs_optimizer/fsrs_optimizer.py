@@ -557,7 +557,7 @@ def remove_outliers(group: pd.DataFrame) -> pd.DataFrame:
                 group.drop(group[group["delta_t"] == delta_t].index, inplace=True)  # type: ignore[arg-type]
                 has_been_removed += count
         else:
-            group.drop(group[group["delta_t"] == delta_t].index, inplace=True)
+            group.drop(group[group["delta_t"] == delta_t].index, inplace=True)  # type: ignore[arg-type]
             has_been_removed += count
     return group
 
@@ -893,7 +893,7 @@ class Optimizer:
 
         t_history_list = df.groupby("card_id", group_keys=False)["delta_t"].apply(
             lambda x: cum_concat(
-                [[max(0.0, round(i, 6) if self.float_delta_t else float(int(i)))] for i in x]
+                [[max(0.0, float(round(i, 6) if self.float_delta_t else float(int(i))))] for i in x]  # type: ignore[misc]
             )
         )
         df["t_history"] = [
