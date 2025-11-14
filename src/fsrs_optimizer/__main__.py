@@ -78,6 +78,9 @@ def process(filepath, filter_out_flags: list[int]):
     else:
         graphs_input = remembered_fallbacks["preview"]
 
+    # Ensure graphs_input is a string
+    graphs_input = str(graphs_input) if graphs_input is not None else "n"
+
     if graphs_input.lower() != "y":
         remembered_fallbacks["preview"] = "n"
     else:
@@ -101,10 +104,27 @@ def process(filepath, filter_out_flags: list[int]):
     else:
         # copy the file to the current directory and rename it as revlog.csv
         shutil.copyfile(f"{filepath}", "revlog.csv")
+    # Ensure types are correct for create_time_series
+    timezone = (
+        str(remembered_fallbacks["timezone"])
+        if remembered_fallbacks["timezone"] is not None
+        else "UTC"
+    )
+    revlog_start_date = (
+        str(remembered_fallbacks["revlog_start_date"])
+        if remembered_fallbacks["revlog_start_date"] is not None
+        else "2006-10-05"
+    )
+    next_day = (
+        int(remembered_fallbacks["next_day"])
+        if remembered_fallbacks["next_day"] is not None
+        else 4
+    )
+
     analysis = optimizer.create_time_series(
-        remembered_fallbacks["timezone"],
-        remembered_fallbacks["revlog_start_date"],
-        remembered_fallbacks["next_day"],
+        timezone,
+        revlog_start_date,
+        next_day,
         save_graphs,
     )
     print(analysis)

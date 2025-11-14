@@ -1,4 +1,4 @@
-from src.fsrs_optimizer import *
+from fsrs_optimizer import *
 
 
 class Test_Model:

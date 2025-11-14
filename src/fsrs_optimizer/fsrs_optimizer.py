@@ -5,7 +5,7 @@ import pandas as pd
 import numpy as np
 import os
 import math
-from typing import List, Optional, Tuple
+from typing import List, Optional, Tuple, Union
 from datetime import timedelta, datetime
 from collections import defaultdict
 import statsmodels.api as sm  # type: ignore
@@ -145,7 +145,7 @@ class FSRS(nn.Module):
     def next_d(self, state: Tensor, rating: Tensor) -> Tensor:
         delta_d = -self.w[6] * (rating - 3)
         new_d = state[:, 1] + self.linear_damping(delta_d, state[:, 1])
-        new_d = self.mean_reversion(self.init_d(4), new_d)
+        new_d = self.mean_reversion(self.init_d(torch.tensor([4.0])), new_d)
         return new_d
 
     def step(self, X: Tensor, state: Tensor) -> Tensor:
@@ -254,7 +254,7 @@ class BatchDataset(Dataset):
         dataframe: pd.DataFrame,
         batch_size: int = 0,
         sort_by_length: bool = True,
-        max_seq_len: int = math.inf,
+        max_seq_len: Union[int, float] = math.inf,
         device: str = "cpu",
     ):
         if dataframe.empty:
@@ -281,15 +281,17 @@ class BatchDataset(Dataset):
         length = len(dataframe)
         batch_num, remainder = divmod(length, max(1, batch_size))
         self.batch_num = batch_num + 1 if remainder > 0 else batch_num
-        self.batches = [None] * self.batch_num
+        self.batches: List[Optional[Tuple[Tensor, Tensor, Tensor, Tensor, Tensor]]] = [
+            None
+        ] * self.batch_num
         if batch_size > 0:
             for i in range(self.batch_num):
                 start_index = i * batch_size
                 end_index = min((i + 1) * batch_size, length)
                 sequences = self.x_train[start_index:end_index]
                 seq_lens = self.seq_len[start_index:end_index]
-                max_seq_len = max(seq_lens)
-                sequences_truncated = sequences[:, :max_seq_len]
+                max_seq_len_val = int(max(seq_lens).item())
+                sequences_truncated = sequences[:, :max_seq_len_val]
                 self.batches[i] = (
                     sequences_truncated.transpose(0, 1).to(device),
                     self.t_train[start_index:end_index].to(device),
@@ -298,8 +300,11 @@ class BatchDataset(Dataset):
                     self.weights[start_index:end_index].to(device),
                 )
 
-    def __getitem__(self, idx):
-        return self.batches[idx]
+    def __getitem__(self, index: int) -> Tuple[Tensor, Tensor, Tensor, Tensor, Tensor]:
+        batch = self.batches[index]
+        if batch is None:
+            raise ValueError(f"Batch {index} is not initialized")
+        return batch
 
     def __len__(self):
         return self.batch_num
@@ -370,8 +375,10 @@ class Trainer:
         )
         self.train_data_loader = BatchLoader(self.train_set)
 
-        self.test_set = (
-            []
+        self.test_set: Union[BatchDataset, List[None]] = (
+            BatchDataset(
+                pd.DataFrame(), batch_size=self.batch_size, max_seq_len=self.max_seq_len
+            )
             if test_set is None
             else BatchDataset(
                 test_set, batch_size=self.batch_size, max_seq_len=self.max_seq_len
@@ -381,7 +388,9 @@ class Trainer:
     def train(self, verbose: bool = True):
         self.verbose = verbose
         best_loss = np.inf
+        best_w: Optional[Tensor] = None
         epoch_len = len(self.train_set.y_train)
+        pbar: Optional[tqdm] = None
         if verbose:
             pbar = tqdm(desc="train", colour="red", total=epoch_len * self.n_epoch)
         print_len = max(self.batch_nums * self.n_epoch // 10, 1)
@@ -415,14 +424,16 @@ class Trainer:
                 loss.backward()
                 if self.float_delta_t:
                     for param in self.model.parameters():
-                        param.grad[:4] = torch.zeros(4)
+                        if param.grad is not None:
+                            param.grad[:4] = torch.zeros(4)
                 if not self.enable_short_term:
                     for param in self.model.parameters():
-                        param.grad[17:19] = torch.zeros(2)
+                        if param.grad is not None:
+                            param.grad[17:19] = torch.zeros(2)
                 self.optimizer.step()
                 self.scheduler.step()
                 self.model.apply(self.clipper)
-                if verbose:
+                if verbose and pbar is not None:
                     pbar.update(real_batch_size)
                 if verbose and (k * self.batch_nums + i + 1) % print_len == 0:
                     tqdm.write(
@@ -432,7 +443,7 @@ class Trainer:
                         tqdm.write(
                             f"{name}: {list(map(lambda x: round(float(x), 4), param))}"
                         )
-        if verbose:
+        if verbose and pbar is not None:
             pbar.close()
 
         weighted_loss, w = self.eval()
@@ -440,6 +451,8 @@ class Trainer:
             best_loss = weighted_loss
             best_w = w
 
+        if best_w is None:
+            raise RuntimeError("No valid weights found during training")
         return best_w
 
     def eval(self):
@@ -473,12 +486,7 @@ class Trainer:
             self.avg_train_losses.append(losses[0])
             self.avg_eval_losses.append(losses[1])
 
-            w = list(
-                map(
-                    lambda x: round(float(x), 4),
-                    dict(self.model.named_parameters())["w"].data,
-                )
-            )
+            w = dict(self.model.named_parameters())["w"].data.clone()
 
             weighted_loss = (
                 losses[0] * len(self.train_set) + losses[1] * len(self.test_set)
@@ -2306,9 +2314,9 @@ def load_brier(predictions, real, bins=20):
 
         assert not np.isnan(x_low_cred)
         assert not np.isnan(x_high_cred)
-        assert x_low_cred <= p_hat <= x_high_cred, (
-            f"{x_low_cred}, {p_hat}, {k / n}, {x_high_cred}"
-        )
+        assert (
+            x_low_cred <= p_hat <= x_high_cred
+        ), f"{x_low_cred}, {p_hat}, {k / n}, {x_high_cred}"
         return x_low_cred, x_high_cred
 
     counts = np.zeros(bins)
@@ -2350,9 +2358,9 @@ def load_brier(predictions, real, bins=20):
     for n in range(len(real_means)):
         # check that the mean is within the bounds, unless they are NaNs
         if not np.isnan(real_means_lower[n]):
-            assert real_means_lower[n] <= real_means[n] <= real_means_upper[n], (
-                f"{real_means_lower[n]:4f}, {real_means[n]:4f}, {real_means_upper[n]:4f}"
-            )
+            assert (
+                real_means_lower[n] <= real_means[n] <= real_means_upper[n]
+            ), f"{real_means_lower[n]:4f}, {real_means[n]:4f}, {real_means_upper[n]:4f}"
 
     return {
         "reliability": sum(counts * (real_means - prediction_means) ** 2) / size,
@@ -2630,7 +2638,7 @@ def wrap_short_term_ratings(r_history, t_history):
 
 
 class FirstOrderMarkovChain:
-    def __init__(self, n_states=4):
+    def __init__(self, n_states: int = 4):
         """
         Initialize a first-order Markov chain model
 
@@ -2638,10 +2646,10 @@ class FirstOrderMarkovChain:
         n_states: Number of states, default is 4 (corresponding to states 1,2,3,4)
         """
         self.n_states = n_states
-        self.transition_matrix = None
-        self.initial_distribution = None
-        self.transition_counts = None
-        self.initial_counts = None
+        self.transition_matrix: Optional[np.ndarray] = None
+        self.initial_distribution: Optional[np.ndarray] = None
+        self.transition_counts: Optional[np.ndarray] = None
+        self.initial_counts: Optional[np.ndarray] = None
 
     def fit(self, sequences, smoothing=1.0):
         """
