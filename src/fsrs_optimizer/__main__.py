@@ -6,7 +6,7 @@ import pytz
 import os
 import functools
 from pathlib import Path
-from typing import Optional
+from typing import Optional, TypedDict
 
 import matplotlib.pyplot as plt
 
@@ -25,6 +25,16 @@ def prompt(msg: str, fallback):
     return response
 
 
+class RememberedFallbacksDict(TypedDict, total=False):
+    """Type definition for remembered fallbacks configuration dictionary."""
+    timezone: Optional[str]
+    next_day: int | str  # Can be int or str from JSON
+    revlog_start_date: str
+    preview: str
+    filter_out_suspended_cards: str
+    enable_short_term: str
+
+
 def process(filepath, filter_out_flags: list[int]):
     suffix = filepath.split("/")[-1].replace(".", "_").replace("@", "_")
     proj_dir = Path(f"{suffix}")
@@ -33,9 +43,9 @@ def process(filepath, filter_out_flags: list[int]):
 
     try:  # Try and remember the last values inputted.
         with open(config_save, "r") as f:
-            remembered_fallbacks = json.load(f)
+            remembered_fallbacks: RememberedFallbacksDict = json.load(f)  # type: ignore[assignment]
     except FileNotFoundError:
-        remembered_fallbacks = {  # Defaults to this if not there
+        remembered_fallbacks: RememberedFallbacksDict = {  # Defaults to this if not there
             "timezone": None,  # Timezone starts with no default
             "next_day": 4,
             "revlog_start_date": "2006-10-05",
