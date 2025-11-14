@@ -2760,15 +2760,17 @@ class FirstOrderMarkovChain:
                 continue
 
             # Log probability of initial state
-            log_likelihood += float(np.log(self.initial_distribution[sequence[0] - 1]))
+            log_val: float = float(np.log(self.initial_distribution[sequence[0] - 1]))
+            log_likelihood = log_likelihood + log_val  # type: ignore[assignment]
 
             # Log probability of transitions
             for i in range(len(sequence) - 1):
                 current_state = sequence[i] - 1
                 next_state = sequence[i + 1] - 1
-                log_likelihood += float(np.log(
+                log_val = float(np.log(
                     self.transition_matrix[current_state, next_state]
                 ))
+                log_likelihood = log_likelihood + log_val  # type: ignore[assignment]
 
         return log_likelihood
 
