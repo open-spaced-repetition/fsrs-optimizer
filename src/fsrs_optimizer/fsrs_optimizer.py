@@ -238,7 +238,7 @@ class ParameterClipper:
             module.w.data = w
 
 
-def lineToTensor(line: str) -> Tensor:
+def lineToTensor(line: Tuple[str, str]) -> Tensor:
     ivl = line[0].split(",")
     response = line[1].split(",")
     tensor = torch.zeros(len(response), 2)
@@ -262,7 +262,7 @@ class BatchDataset(Dataset):
         dataframe["seq_len"] = dataframe["tensor"].map(len)
         if dataframe["seq_len"].min() > max_seq_len:
             raise ValueError("Training data is inadequate.")
-        dataframe = dataframe[dataframe["seq_len"] <= max_seq_len]
+        dataframe = dataframe[dataframe["seq_len"] <= max_seq_len]  # type: ignore[assignment]
         if sort_by_length:
             dataframe = dataframe.sort_values(by=["seq_len"], kind="stable")
         del dataframe["seq_len"]
@@ -375,7 +375,7 @@ class Trainer:
         )
         self.train_data_loader = BatchLoader(self.train_set)
 
-        self.test_set: Union[BatchDataset, List[None]] = (
+        self.test_set: BatchDataset = (
             BatchDataset(
                 pd.DataFrame(), batch_size=self.batch_size, max_seq_len=self.max_seq_len
             )
@@ -506,7 +506,9 @@ class Trainer:
 
 
 class Collection:
-    def __init__(self, w: List[float], float_delta_t: bool = False) -> None:
+    def __init__(self, w: Union[List[float], Tensor], float_delta_t: bool = False) -> None:
+        if isinstance(w, Tensor):
+            w = w.tolist()
         self.model = FSRS(w, float_delta_t)
         self.model.eval()
 
@@ -552,7 +554,7 @@ def remove_outliers(group: pd.DataFrame) -> pd.DataFrame:
         delta_t = grouped_group.loc[i, "delta_t"].values[0]
         if has_been_removed + count >= max(total * 0.05, 20):
             if count < 6 or delta_t > (100 if group.name[0] != "4" else 365):
-                group.drop(group[group["delta_t"] == delta_t].index, inplace=True)
+                group.drop(group[group["delta_t"] == delta_t].index, inplace=True)  # type: ignore[arg-type]
                 has_been_removed += count
         else:
             group.drop(group[group["delta_t"] == delta_t].index, inplace=True)
@@ -854,7 +856,7 @@ class Optimizer:
         df["review_date"] = (
             df["review_date"].dt.tz_localize("UTC").dt.tz_convert(timezone)
         )
-        df.drop(df[df["review_date"].dt.year < 2006].index, inplace=True)
+        df.drop(df[df["review_date"].dt.year < 2006].index, inplace=True)  # type: ignore[arg-type]
         df["real_days"] = df["review_date"] - timedelta(hours=int(next_day_starts_at))
         df["real_days"] = pd.DatetimeIndex(
             df["real_days"].dt.floor(
@@ -881,7 +883,7 @@ class Optimizer:
                 lambda x: x if x != New else Learning
             )
             self.extract_simulation_config(df)
-            df.drop(columns=["review_duration", "review_state"], inplace=True)
+            df.drop(columns=["review_duration", "review_state"], inplace=True)  # type: ignore[arg-type]
 
         def cum_concat(x):
             return list(accumulate(x))
@@ -1285,6 +1287,9 @@ class Optimizer:
             init_s0 = [
                 item[1] for item in sorted(rating_stability.items(), key=lambda x: x[0])
             ]
+        else:
+            # This should not happen, but initialize to avoid type error
+            init_s0 = [1.0, 1.0, 1.0, 1.0]
 
         self.init_w[0:4] = list(map(lambda x: max(min(100, x), S_MIN), init_s0))
         if verbose:
@@ -1331,8 +1336,9 @@ class Optimizer:
                     float_delta_t=self.float_delta_t,
                     enable_short_term=self.enable_short_term,
                 )
-                w.append(trainer.train(verbose=verbose))
-                self.w = w[-1]
+                trained_w = trainer.train(verbose=verbose)
+                w.append(trained_w)
+                self.w = trained_w.tolist() if isinstance(trained_w, Tensor) else trained_w
                 self.evaluate()
                 metrics, figures = self.calibration_graph(self.dataset.iloc[test_index])
                 for j, f in enumerate(figures):
@@ -1523,8 +1529,8 @@ class Optimizer:
             {"stability": "mean", "difficulty": "mean", "review_time": "count"}
         )
         prediction.reset_index(inplace=True)
-        prediction.sort_values(by=["r_history"], inplace=True)
-        prediction.rename(columns={"review_time": "count"}, inplace=True)
+        prediction.sort_values(by=["r_history"], inplace=True)  # type: ignore[arg-type]
+        prediction.rename(columns={"review_time": "count"}, inplace=True)  # type: ignore[arg-type]
         prediction.to_csv("./prediction.tsv", sep="\t", index=None)
         prediction["difficulty"] = prediction["difficulty"].map(lambda x: int(round(x)))
         self.difficulty_distribution = (
@@ -1690,7 +1696,7 @@ class Optimizer:
             tmp["difficulty"] = tmp["difficulty"].map(lambda x: round(x, 2))
             tmp["p"] = tmp["p"].map(lambda x: round(x, 2))
             tmp["log_loss"] = tmp["log_loss"].map(lambda x: round(x, 2))
-            tmp.rename(columns={"p": "retrievability"}, inplace=True)
+            tmp.rename(columns={"p": "retrievability"}, inplace=True)  # type: ignore[arg-type]
             tmp[
                 [
                     "review_time",
@@ -1760,7 +1766,7 @@ class Optimizer:
                 y_pred=calibration_data["p"],
                 labels=[0, 1],
             )
-            metrics_all[last_rating] = metrics
+            metrics_all[str(last_rating)] = metrics
 
         fig3 = plt.figure()
         self.calibration_helper(
@@ -1981,7 +1987,7 @@ class Optimizer:
         )
         tqdm.write(f"Loss of SM-2: {self.dataset['log_loss'].mean():.4f}")
         dataset = self.dataset[["sm2_p", "p", "y"]].copy()
-        dataset.rename(columns={"sm2_p": "R (SM2)", "p": "R (FSRS)"}, inplace=True)
+        dataset.rename(columns={"sm2_p": "R (SM2)", "p": "R (FSRS)"}, inplace=True)  # type: ignore[arg-type]
         fig1 = plt.figure()
         plot_brier(
             dataset["R (SM2)"],
@@ -2194,6 +2200,7 @@ def load_brier(predictions, real, bins=20):
                             p = -p
                         tmp2 = np.abs(tmp2)
                         dx_temp = deltax
+                        rat = cg * deltax  # Initialize rat before using it
                         deltax = rat
                         # check parabolic fit
                         if (
