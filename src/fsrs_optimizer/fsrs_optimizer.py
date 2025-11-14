@@ -580,6 +580,7 @@ def fit_stability(delta_t, retention, size):
         return loss
 
     res = minimize(loss, x0=1, bounds=[(S_MIN, 36500)])
+    assert res.x is not None, "Optimization failed"
     return res.x[0]
 
 
@@ -890,7 +891,7 @@ class Optimizer:
 
         t_history_list = df.groupby("card_id", group_keys=False)["delta_t"].apply(
             lambda x: cum_concat(
-                [[max(0, round(i, 6) if self.float_delta_t else int(i))] for i in x]
+                [[max(0.0, round(i, 6) if self.float_delta_t else float(int(i)))] for i in x]
             )
         )
         df["t_history"] = [
@@ -1115,7 +1116,7 @@ class Optimizer:
                 .agg({"y": ["mean", "count"]})
                 .reset_index()
             )
-        self.dataset = self.dataset[
+        self.dataset = self.dataset[  # type: ignore[assignment]
             (self.dataset["i"] > 1) & (self.dataset["delta_t"] > 0)
         ]
         if self.dataset.empty:
@@ -1162,6 +1163,7 @@ class Optimizer:
                 bounds=((S_MIN, 100),),
                 options={"maxiter": int(sum(count))},
             )
+            assert res.x is not None, "Optimization failed"
             params = res.x
             stability = params[0]
             rating_stability[int(first_rating)] = stability
