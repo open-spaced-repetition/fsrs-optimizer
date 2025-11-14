@@ -937,9 +937,9 @@ class Optimizer:
         df["y"] = df["review_rating"].map(lambda x: {1: 0, 2: 1, 3: 1, 4: 1}[x])  # type: ignore[arg-type]
 
         if not self.float_delta_t:
-            df[df["i"] == 2] = (
-                df[df["i"] == 2]
-                .groupby(by=["first_rating"], as_index=False, group_keys=False)
+            df[df["i"] == 2] = (  # type: ignore[assignment]
+                df[df["i"] == 2]  # type: ignore[index]
+                .groupby(by=["first_rating"], as_index=False, group_keys=False)  # type: ignore[attr-defined]
                 .apply(remove_outliers)
             )
             df.dropna(inplace=True)
@@ -961,8 +961,8 @@ class Optimizer:
         tqdm.write("Trainset saved.")
 
         self.dataset_for_initialization = (
-            df[df["i"] == 2]
-            .groupby(by=["first_rating", "delta_t"], group_keys=False)
+            df[df["i"] == 2]  # type: ignore[index]
+            .groupby(by=["first_rating", "delta_t"], group_keys=False)  # type: ignore[attr-defined]
             .agg({"y": ["mean", "count"]})
             .reset_index()
         )
@@ -2753,22 +2753,22 @@ class FirstOrderMarkovChain:
             raise ValueError("Model not yet fitted, please call the fit method first")
         assert self.transition_matrix is not None and self.initial_distribution is not None
 
-        log_likelihood = 0.0
+        log_likelihood: float = 0.0
 
         for sequence in sequences:
             if len(sequence) == 0:
                 continue
 
             # Log probability of initial state
-            log_likelihood += np.log(self.initial_distribution[sequence[0] - 1])
+            log_likelihood += float(np.log(self.initial_distribution[sequence[0] - 1]))
 
             # Log probability of transitions
             for i in range(len(sequence) - 1):
                 current_state = sequence[i] - 1
                 next_state = sequence[i + 1] - 1
-                log_likelihood += np.log(
+                log_likelihood += float(np.log(
                     self.transition_matrix[current_state, next_state]
-                )
+                ))
 
         return log_likelihood
 
