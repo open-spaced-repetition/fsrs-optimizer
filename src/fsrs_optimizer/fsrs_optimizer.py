@@ -930,8 +930,8 @@ class Optimizer:
             & (df["delta_t"] != 0)
         ].copy()
         df["i"] = df.groupby("card_id").cumcount() + 1
-        df["first_rating"] = df["r_history"].map(lambda x: x[0] if len(x) > 0 else "")
-        df["y"] = df["review_rating"].map(lambda x: {1: 0, 2: 1, 3: 1, 4: 1}[x])
+        df["first_rating"] = df["r_history"].map(lambda x: x[0] if len(x) > 0 else "")  # type: ignore[arg-type]
+        df["y"] = df["review_rating"].map(lambda x: {1: 0, 2: 1, 3: 1, 4: 1}[x])  # type: ignore[arg-type]
 
         if not self.float_delta_t:
             df[df["i"] == 2] = (
@@ -1531,8 +1531,8 @@ class Optimizer:
         prediction.reset_index(inplace=True)
         prediction.sort_values(by=["r_history"], inplace=True)  # type: ignore[arg-type]
         prediction.rename(columns={"review_time": "count"}, inplace=True)  # type: ignore[arg-type]
-        prediction.to_csv("./prediction.tsv", sep="\t", index=None)
-        prediction["difficulty"] = prediction["difficulty"].map(lambda x: int(round(x)))
+        prediction.to_csv("./prediction.tsv", sep="\t", index=False)  # type: ignore[arg-type]
+        prediction["difficulty"] = prediction["difficulty"].map(lambda x: int(round(x)))  # type: ignore[arg-type]
         self.difficulty_distribution = (
             prediction.groupby(by=["difficulty"])["count"].sum()
             / prediction["count"].sum()
@@ -1758,7 +1758,7 @@ class Optimizer:
                     y_true=calibration_data["y"],
                     y_score=calibration_data["p"],
                 )
-                if len(calibration_data["y"].unique()) == 2
+                if len(calibration_data["y"].unique()) == 2  # type: ignore[attr-defined]
                 else np.nan
             )
             metrics["LogLoss"] = log_loss(
@@ -1840,12 +1840,12 @@ class Optimizer:
 
     def formula_analysis(self):
         analysis_df = self.dataset[self.dataset["i"] > 2].copy()
-        analysis_df["tensor"] = analysis_df["tensor"].map(lambda x: x[:-1])
+        analysis_df["tensor"] = analysis_df["tensor"].map(lambda x: x[:-1])  # type: ignore[arg-type]
         my_collection = Collection(self.w, self.float_delta_t)
         stabilities, difficulties = my_collection.batch_predict(analysis_df)
         analysis_df["last_s"] = stabilities
         analysis_df["last_d"] = difficulties
-        analysis_df["last_delta_t"] = analysis_df["t_history"].map(
+        analysis_df["last_delta_t"] = analysis_df["t_history"].map(  # type: ignore[arg-type]
             lambda x: (
                 int(x.split(",")[-1])
                 if not self.float_delta_t
@@ -1855,12 +1855,12 @@ class Optimizer:
         analysis_df["last_r"] = power_forgetting_curve(
             analysis_df["delta_t"], analysis_df["last_s"]
         )
-        analysis_df["last_s_bin"] = analysis_df["last_s"].map(
+        analysis_df["last_s_bin"] = analysis_df["last_s"].map(  # type: ignore[arg-type]
             lambda x: math.pow(1.2, math.floor(math.log(x, 1.2)))
         )
-        analysis_df["last_d_bin"] = analysis_df["last_d"].map(lambda x: round(x))
+        analysis_df["last_d_bin"] = analysis_df["last_d"].map(lambda x: round(x))  # type: ignore[arg-type]
         bins = 20
-        analysis_df["last_r_bin"] = analysis_df["last_r"].map(
+        analysis_df["last_r_bin"] = analysis_df["last_r"].map(  # type: ignore[arg-type]
             lambda x: (
                 np.log(
                     np.minimum(np.floor(np.exp(np.log(bins + 1) * x) - 1), bins - 1) + 1
@@ -1905,7 +1905,7 @@ class Optimizer:
                     tmp["total_count"] = total_count
                     return tmp
 
-                analysis_group = analysis_group.groupby(
+                analysis_group = analysis_group.groupby(  # type: ignore[attr-defined]
                     by=[group_key], group_keys=False
                 ).apply(cal_stability)
                 analysis_group.dropna(inplace=True)
@@ -1950,10 +1950,10 @@ class Optimizer:
 
     def bw_matrix(self):
         B_W_Metric_raw = self.dataset[["difficulty", "stability", "p", "y"]].copy()
-        B_W_Metric_raw["s_bin"] = B_W_Metric_raw["stability"].map(
+        B_W_Metric_raw["s_bin"] = B_W_Metric_raw["stability"].map(  # type: ignore[arg-type]
             lambda x: round(math.pow(1.4, math.floor(math.log(x, 1.4))), 2)
         )
-        B_W_Metric_raw["d_bin"] = B_W_Metric_raw["difficulty"].map(
+        B_W_Metric_raw["d_bin"] = B_W_Metric_raw["difficulty"].map(  # type: ignore[arg-type]
             lambda x: int(round(x))
         )
         B_W_Metric = (
@@ -1966,7 +1966,7 @@ class Optimizer:
         n = len(self.dataset)
         bins = len(B_W_Metric)
         B_W_Metric_pivot = B_W_Metric[
-            B_W_Metric_count["p"] > max(50, n / (3 * bins))
+            B_W_Metric_count["p"] > max(50.0, n / (3 * bins))
         ].pivot(index="s_bin", columns="d_bin", values="B-W")
         return (
             B_W_Metric_pivot.apply(pd.to_numeric)
@@ -2394,15 +2394,16 @@ def plot_brier(predictions, real, bins=20, ax=None, title=None):
     e_90 = np.quantile(np.abs(observation - p), 0.9)
     e_max = np.max(np.abs(observation - p))
     brier = load_brier(predictions, real, bins=bins)
-    bin_prediction_means = brier["detail"]["bin_prediction_means"]
+    brier_detail = brier["detail"]  # type: ignore[index]
+    bin_prediction_means = brier_detail["bin_prediction_means"]
 
-    bin_real_means = brier["detail"]["bin_real_means"]
-    bin_real_means_upper_bounds = brier["detail"]["bin_real_means_upper_bounds"]
-    bin_real_means_lower_bounds = brier["detail"]["bin_real_means_lower_bounds"]
+    bin_real_means = brier_detail["bin_real_means"]
+    bin_real_means_upper_bounds = brier_detail["bin_real_means_upper_bounds"]
+    bin_real_means_lower_bounds = brier_detail["bin_real_means_lower_bounds"]
     bin_real_means_errors_upper = bin_real_means_upper_bounds - bin_real_means
     bin_real_means_errors_lower = bin_real_means - bin_real_means_lower_bounds
 
-    bin_counts = brier["detail"]["bin_counts"]
+    bin_counts = brier_detail["bin_counts"]
     mask = bin_counts > 0
     r2 = r2_score(
         bin_real_means[mask],
