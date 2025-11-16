@@ -5,7 +5,7 @@ import pandas as pd
 import numpy as np
 import os
 import math
-from typing import List, Optional, Tuple
+from typing import List, Optional, Tuple, Union, Any, Dict
 from datetime import timedelta, datetime
 from collections import defaultdict
 import statsmodels.api as sm  # type: ignore
@@ -145,7 +145,7 @@ class FSRS(nn.Module):
     def next_d(self, state: Tensor, rating: Tensor) -> Tensor:
         delta_d = -self.w[6] * (rating - 3)
         new_d = state[:, 1] + self.linear_damping(delta_d, state[:, 1])
-        new_d = self.mean_reversion(self.init_d(4), new_d)
+        new_d = self.mean_reversion(self.init_d(torch.tensor([4.0])), new_d)
         return new_d
 
     def step(self, X: Tensor, state: Tensor) -> Tensor:
@@ -238,7 +238,7 @@ class ParameterClipper:
             module.w.data = w
 
 
-def lineToTensor(line: str) -> Tensor:
+def lineToTensor(line: Tuple[str, str]) -> Tensor:
     ivl = line[0].split(",")
     response = line[1].split(",")
     tensor = torch.zeros(len(response), 2)
@@ -254,7 +254,7 @@ class BatchDataset(Dataset):
         dataframe: pd.DataFrame,
         batch_size: int = 0,
         sort_by_length: bool = True,
-        max_seq_len: int = math.inf,
+        max_seq_len: Union[int, float] = math.inf,
         device: str = "cpu",
     ):
         if dataframe.empty:
@@ -262,7 +262,7 @@ class BatchDataset(Dataset):
         dataframe["seq_len"] = dataframe["tensor"].map(len)
         if dataframe["seq_len"].min() > max_seq_len:
             raise ValueError("Training data is inadequate.")
-        dataframe = dataframe[dataframe["seq_len"] <= max_seq_len]
+        dataframe = dataframe[dataframe["seq_len"] <= max_seq_len]  # type: ignore[assignment]
         if sort_by_length:
             dataframe = dataframe.sort_values(by=["seq_len"], kind="stable")
         del dataframe["seq_len"]
@@ -281,15 +281,17 @@ class BatchDataset(Dataset):
         length = len(dataframe)
         batch_num, remainder = divmod(length, max(1, batch_size))
         self.batch_num = batch_num + 1 if remainder > 0 else batch_num
-        self.batches = [None] * self.batch_num
+        self.batches: List[Optional[Tuple[Tensor, Tensor, Tensor, Tensor, Tensor]]] = [
+            None
+        ] * self.batch_num
         if batch_size > 0:
             for i in range(self.batch_num):
                 start_index = i * batch_size
                 end_index = min((i + 1) * batch_size, length)
                 sequences = self.x_train[start_index:end_index]
                 seq_lens = self.seq_len[start_index:end_index]
-                max_seq_len = max(seq_lens)
-                sequences_truncated = sequences[:, :max_seq_len]
+                max_seq_len_val = int(max(seq_lens).item())
+                sequences_truncated = sequences[:, :max_seq_len_val]
                 self.batches[i] = (
                     sequences_truncated.transpose(0, 1).to(device),
                     self.t_train[start_index:end_index].to(device),
@@ -298,8 +300,11 @@ class BatchDataset(Dataset):
                     self.weights[start_index:end_index].to(device),
                 )
 
-    def __getitem__(self, idx):
-        return self.batches[idx]
+    def __getitem__(self, index: int) -> Tuple[Tensor, Tensor, Tensor, Tensor, Tensor]:
+        batch = self.batches[index]
+        if batch is None:
+            raise ValueError(f"Batch {index} is not initialized")
+        return batch
 
     def __len__(self):
         return self.batch_num
@@ -370,8 +375,10 @@ class Trainer:
         )
         self.train_data_loader = BatchLoader(self.train_set)
 
-        self.test_set = (
-            []
+        self.test_set: BatchDataset = (
+            BatchDataset(
+                pd.DataFrame(), batch_size=self.batch_size, max_seq_len=self.max_seq_len
+            )
             if test_set is None
             else BatchDataset(
                 test_set, batch_size=self.batch_size, max_seq_len=self.max_seq_len
@@ -381,7 +388,9 @@ class Trainer:
     def train(self, verbose: bool = True):
         self.verbose = verbose
         best_loss = np.inf
+        best_w: Optional[Tensor] = None
         epoch_len = len(self.train_set.y_train)
+        pbar: Optional[tqdm] = None
         if verbose:
             pbar = tqdm(desc="train", colour="red", total=epoch_len * self.n_epoch)
         print_len = max(self.batch_nums * self.n_epoch // 10, 1)
@@ -415,14 +424,16 @@ class Trainer:
                 loss.backward()
                 if self.float_delta_t:
                     for param in self.model.parameters():
-                        param.grad[:4] = torch.zeros(4)
+                        if param.grad is not None:
+                            param.grad[:4] = torch.zeros(4)
                 if not self.enable_short_term:
                     for param in self.model.parameters():
-                        param.grad[17:19] = torch.zeros(2)
+                        if param.grad is not None:
+                            param.grad[17:19] = torch.zeros(2)
                 self.optimizer.step()
                 self.scheduler.step()
                 self.model.apply(self.clipper)
-                if verbose:
+                if verbose and pbar is not None:
                     pbar.update(real_batch_size)
                 if verbose and (k * self.batch_nums + i + 1) % print_len == 0:
                     tqdm.write(
@@ -432,7 +443,7 @@ class Trainer:
                         tqdm.write(
                             f"{name}: {list(map(lambda x: round(float(x), 4), param))}"
                         )
-        if verbose:
+        if verbose and pbar is not None:
             pbar.close()
 
         weighted_loss, w = self.eval()
@@ -440,6 +451,8 @@ class Trainer:
             best_loss = weighted_loss
             best_w = w
 
+        if best_w is None:
+            raise RuntimeError("No valid weights found during training")
         return best_w
 
     def eval(self):
@@ -473,12 +486,7 @@ class Trainer:
             self.avg_train_losses.append(losses[0])
             self.avg_eval_losses.append(losses[1])
 
-            w = list(
-                map(
-                    lambda x: round(float(x), 4),
-                    dict(self.model.named_parameters())["w"].data,
-                )
-            )
+            w = dict(self.model.named_parameters())["w"].data.clone()
 
             weighted_loss = (
                 losses[0] * len(self.train_set) + losses[1] * len(self.test_set)
@@ -498,7 +506,11 @@ class Trainer:
 
 
 class Collection:
-    def __init__(self, w: List[float], float_delta_t: bool = False) -> None:
+    def __init__(
+        self, w: Union[List[float], Tensor], float_delta_t: bool = False
+    ) -> None:
+        if isinstance(w, Tensor):
+            w = w.tolist()
         self.model = FSRS(w, float_delta_t)
         self.model.eval()
 
@@ -544,10 +556,10 @@ def remove_outliers(group: pd.DataFrame) -> pd.DataFrame:
         delta_t = grouped_group.loc[i, "delta_t"].values[0]
         if has_been_removed + count >= max(total * 0.05, 20):
             if count < 6 or delta_t > (100 if group.name[0] != "4" else 365):
-                group.drop(group[group["delta_t"] == delta_t].index, inplace=True)
+                group.drop(group[group["delta_t"] == delta_t].index, inplace=True)  # type: ignore[arg-type]
                 has_been_removed += count
         else:
-            group.drop(group[group["delta_t"] == delta_t].index, inplace=True)
+            group.drop(group[group["delta_t"] == delta_t].index, inplace=True)  # type: ignore[arg-type]
             has_been_removed += count
     return group
 
@@ -570,7 +582,8 @@ def fit_stability(delta_t, retention, size):
         return loss
 
     res = minimize(loss, x0=1, bounds=[(S_MIN, 36500)])
-    return res.x[0]
+    assert res.x is not None, "Optimization failed"  # type: ignore[attr-defined]
+    return float(res.x[0])  # type: ignore[index]
 
 
 class Optimizer:
@@ -659,7 +672,7 @@ class Optimizer:
             df[df["is_learn_start"]].groupby("card_id")["sequence_group"].last()
         )
         df["last_learn_start"] = (
-            df["card_id"].map(last_learn_start).fillna(0).astype(int)
+            df["card_id"].map(last_learn_start).fillna(0).astype(int)  # type: ignore[arg-type]
         )
         df["mask"] = df["last_learn_start"] <= df["sequence_group"]
         df = df[df["mask"] == True].copy()
@@ -757,9 +770,13 @@ class Optimizer:
             "same_day_ratings"
         ]
         result = model.fit(learning_step_rating_sequences)
+        assert (
+            result.transition_matrix is not None
+            and result.transition_counts is not None
+        )
         learning_transition_matrix, learning_transition_counts = (
-            result.transition_matrix[:3],
-            result.transition_counts[:3],
+            result.transition_matrix[:3],  # type: ignore[index]
+            result.transition_counts[:3],  # type: ignore[index]
         )
         self.learning_step_transitions = learning_transition_matrix.round(2).tolist()
         for i, (rating_probs, default_rating_probs, transition_counts) in enumerate(
@@ -781,9 +798,13 @@ class Optimizer:
             (df1["first_state"] == Review) & (df1["first_rating"] == 1)
         ]["same_day_ratings"]
         result = model.fit(relearning_step_rating_sequences)
+        assert (
+            result.transition_matrix is not None
+            and result.transition_counts is not None
+        )
         relearning_transition_matrix, relearning_transition_counts = (
-            result.transition_matrix[:3],
-            result.transition_counts[:3],
+            result.transition_matrix[:3],  # type: ignore[index]
+            result.transition_counts[:3],  # type: ignore[index]
         )
         self.relearning_step_transitions = relearning_transition_matrix.round(
             2
@@ -846,7 +867,7 @@ class Optimizer:
         df["review_date"] = (
             df["review_date"].dt.tz_localize("UTC").dt.tz_convert(timezone)
         )
-        df.drop(df[df["review_date"].dt.year < 2006].index, inplace=True)
+        df.drop(df[df["review_date"].dt.year < 2006].index, inplace=True)  # type: ignore[arg-type]
         df["real_days"] = df["review_date"] - timedelta(hours=int(next_day_starts_at))
         df["real_days"] = pd.DatetimeIndex(
             df["real_days"].dt.floor(
@@ -873,14 +894,26 @@ class Optimizer:
                 lambda x: x if x != New else Learning
             )
             self.extract_simulation_config(df)
-            df.drop(columns=["review_duration", "review_state"], inplace=True)
+            df.drop(columns=["review_duration", "review_state"], inplace=True)  # type: ignore[arg-type]
 
         def cum_concat(x):
             return list(accumulate(x))
 
         t_history_list = df.groupby("card_id", group_keys=False)["delta_t"].apply(
             lambda x: cum_concat(
-                [[max(0, round(i, 6) if self.float_delta_t else int(i))] for i in x]
+                [
+                    [
+                        max(
+                            0.0,
+                            float(
+                                round(float(i), 6)
+                                if self.float_delta_t
+                                else float(int(i))
+                            ),
+                        )
+                    ]
+                    for i in x
+                ]  # type: ignore[no-matching-overload]
             )
         )
         df["t_history"] = [
@@ -920,13 +953,13 @@ class Optimizer:
             & (df["delta_t"] != 0)
         ].copy()
         df["i"] = df.groupby("card_id").cumcount() + 1
-        df["first_rating"] = df["r_history"].map(lambda x: x[0] if len(x) > 0 else "")
-        df["y"] = df["review_rating"].map(lambda x: {1: 0, 2: 1, 3: 1, 4: 1}[x])
+        df["first_rating"] = df["r_history"].map(lambda x: x[0] if len(x) > 0 else "")  # type: ignore[arg-type]
+        df["y"] = df["review_rating"].map(lambda x: {1: 0, 2: 1, 3: 1, 4: 1}[x])  # type: ignore[arg-type]
 
         if not self.float_delta_t:
-            df[df["i"] == 2] = (
-                df[df["i"] == 2]
-                .groupby(by=["first_rating"], as_index=False, group_keys=False)
+            df[df["i"] == 2] = (  # type: ignore[assignment]
+                df[df["i"] == 2]  # type: ignore[index]
+                .groupby(by=["first_rating"], as_index=False, group_keys=False)  # type: ignore[attr-defined]
                 .apply(remove_outliers)
             )
             df.dropna(inplace=True)
@@ -948,8 +981,8 @@ class Optimizer:
         tqdm.write("Trainset saved.")
 
         self.dataset_for_initialization = (
-            df[df["i"] == 2]
-            .groupby(by=["first_rating", "delta_t"], group_keys=False)
+            df[df["i"] == 2]  # type: ignore[index]
+            .groupby(by=["first_rating", "delta_t"], group_keys=False)  # type: ignore[attr-defined]
             .agg({"y": ["mean", "count"]})
             .reset_index()
         )
@@ -1105,7 +1138,7 @@ class Optimizer:
                 .agg({"y": ["mean", "count"]})
                 .reset_index()
             )
-        self.dataset = self.dataset[
+        self.dataset = self.dataset[  # type: ignore[assignment]
             (self.dataset["i"] > 1) & (self.dataset["delta_t"] > 0)
         ]
         if self.dataset.empty:
@@ -1152,11 +1185,12 @@ class Optimizer:
                 bounds=((S_MIN, 100),),
                 options={"maxiter": int(sum(count))},
             )
-            params = res.x
-            stability = params[0]
+            assert res.x is not None, "Optimization failed"  # type: ignore[attr-defined]
+            params = res.x  # type: ignore[assignment]
+            stability = float(params[0])  # type: ignore[index]
             rating_stability[int(first_rating)] = stability
             rating_count[int(first_rating)] = sum(count)
-            predict_recall = power_forgetting_curve(delta_t, *params)
+            predict_recall = power_forgetting_curve(delta_t, *params)  # type: ignore[misc]
             rmse = root_mean_squared_error(recall, predict_recall, sample_weight=count)
 
             if verbose:
@@ -1165,7 +1199,7 @@ class Optimizer:
                 ax.plot(delta_t, recall, label="Exact")
                 ax.plot(
                     np.linspace(0, 30),
-                    power_forgetting_curve(np.linspace(0, 30), *params),
+                    power_forgetting_curve(np.linspace(0, 30), *params),  # type: ignore[misc]
                     label=f"Weighted fit (RMSE: {rmse:.4f})",
                 )
                 count_percent = np.array([x / sum(count) for x in count])
@@ -1277,8 +1311,13 @@ class Optimizer:
             init_s0 = [
                 item[1] for item in sorted(rating_stability.items(), key=lambda x: x[0])
             ]
+        else:
+            # This should not happen, but initialize to avoid type error
+            init_s0 = [1.0, 1.0, 1.0, 1.0]
 
-        self.init_w[0:4] = list(map(lambda x: max(min(100, x), S_MIN), init_s0))
+        self.init_w[0:4] = list(
+            map(lambda x: max(float(min(100, x)), float(S_MIN)), init_s0)
+        )  # type: ignore[no-matching-overload]
         if verbose:
             tqdm.write(f"Parameter initialization finished!")
         return plots
@@ -1323,8 +1362,11 @@ class Optimizer:
                     float_delta_t=self.float_delta_t,
                     enable_short_term=self.enable_short_term,
                 )
-                w.append(trainer.train(verbose=verbose))
-                self.w = w[-1]
+                trained_w = trainer.train(verbose=verbose)
+                w.append(trained_w)
+                self.w = (
+                    trained_w.tolist() if isinstance(trained_w, Tensor) else trained_w
+                )
                 self.evaluate()
                 metrics, figures = self.calibration_graph(self.dataset.iloc[test_index])
                 for j, f in enumerate(figures):
@@ -1515,10 +1557,10 @@ class Optimizer:
             {"stability": "mean", "difficulty": "mean", "review_time": "count"}
         )
         prediction.reset_index(inplace=True)
-        prediction.sort_values(by=["r_history"], inplace=True)
-        prediction.rename(columns={"review_time": "count"}, inplace=True)
-        prediction.to_csv("./prediction.tsv", sep="\t", index=None)
-        prediction["difficulty"] = prediction["difficulty"].map(lambda x: int(round(x)))
+        prediction.sort_values(by=["r_history"], inplace=True)  # type: ignore[arg-type]
+        prediction.rename(columns={"review_time": "count"}, inplace=True)  # type: ignore[arg-type]
+        prediction.to_csv("./prediction.tsv", sep="\t", index=False)  # type: ignore[arg-type]
+        prediction["difficulty"] = prediction["difficulty"].map(lambda x: int(round(x)))  # type: ignore[arg-type]
         self.difficulty_distribution = (
             prediction.groupby(by=["difficulty"])["count"].sum()
             / prediction["count"].sum()
@@ -1682,7 +1724,7 @@ class Optimizer:
             tmp["difficulty"] = tmp["difficulty"].map(lambda x: round(x, 2))
             tmp["p"] = tmp["p"].map(lambda x: round(x, 2))
             tmp["log_loss"] = tmp["log_loss"].map(lambda x: round(x, 2))
-            tmp.rename(columns={"p": "retrievability"}, inplace=True)
+            tmp.rename(columns={"p": "retrievability"}, inplace=True)  # type: ignore[arg-type]
             tmp[
                 [
                     "review_time",
@@ -1744,7 +1786,7 @@ class Optimizer:
                     y_true=calibration_data["y"],
                     y_score=calibration_data["p"],
                 )
-                if len(calibration_data["y"].unique()) == 2
+                if len(calibration_data["y"].unique()) == 2  # type: ignore[attr-defined]
                 else np.nan
             )
             metrics["LogLoss"] = log_loss(
@@ -1752,7 +1794,7 @@ class Optimizer:
                 y_pred=calibration_data["p"],
                 labels=[0, 1],
             )
-            metrics_all[last_rating] = metrics
+            metrics_all[str(last_rating)] = metrics
 
         fig3 = plt.figure()
         self.calibration_helper(
@@ -1826,12 +1868,12 @@ class Optimizer:
 
     def formula_analysis(self):
         analysis_df = self.dataset[self.dataset["i"] > 2].copy()
-        analysis_df["tensor"] = analysis_df["tensor"].map(lambda x: x[:-1])
+        analysis_df["tensor"] = analysis_df["tensor"].map(lambda x: x[:-1])  # type: ignore[arg-type]
         my_collection = Collection(self.w, self.float_delta_t)
         stabilities, difficulties = my_collection.batch_predict(analysis_df)
         analysis_df["last_s"] = stabilities
         analysis_df["last_d"] = difficulties
-        analysis_df["last_delta_t"] = analysis_df["t_history"].map(
+        analysis_df["last_delta_t"] = analysis_df["t_history"].map(  # type: ignore[arg-type]
             lambda x: (
                 int(x.split(",")[-1])
                 if not self.float_delta_t
@@ -1841,12 +1883,12 @@ class Optimizer:
         analysis_df["last_r"] = power_forgetting_curve(
             analysis_df["delta_t"], analysis_df["last_s"]
         )
-        analysis_df["last_s_bin"] = analysis_df["last_s"].map(
+        analysis_df["last_s_bin"] = analysis_df["last_s"].map(  # type: ignore[arg-type]
             lambda x: math.pow(1.2, math.floor(math.log(x, 1.2)))
         )
-        analysis_df["last_d_bin"] = analysis_df["last_d"].map(lambda x: round(x))
+        analysis_df["last_d_bin"] = analysis_df["last_d"].map(lambda x: round(x))  # type: ignore[arg-type]
         bins = 20
-        analysis_df["last_r_bin"] = analysis_df["last_r"].map(
+        analysis_df["last_r_bin"] = analysis_df["last_r"].map(  # type: ignore[arg-type]
             lambda x: (
                 np.log(
                     np.minimum(np.floor(np.exp(np.log(bins + 1) * x) - 1), bins - 1) + 1
@@ -1858,8 +1900,8 @@ class Optimizer:
         for group_key in ("last_s_bin", "last_d_bin", "last_r_bin"):
             for last_rating in (1, 3):
                 analysis_group = (
-                    analysis_df[analysis_df["last_rating"] == last_rating]
-                    .groupby(
+                    analysis_df[analysis_df["last_rating"] == last_rating]  # type: ignore[index]
+                    .groupby(  # type: ignore[attr-defined]
                         by=["last_s_bin", "last_d_bin", "last_r_bin", "delta_t"],
                         group_keys=True,
                         as_index=False,
@@ -1891,7 +1933,7 @@ class Optimizer:
                     tmp["total_count"] = total_count
                     return tmp
 
-                analysis_group = analysis_group.groupby(
+                analysis_group = analysis_group.groupby(  # type: ignore[attr-defined]
                     by=[group_key], group_keys=False
                 ).apply(cal_stability)
                 analysis_group.dropna(inplace=True)
@@ -1936,10 +1978,10 @@ class Optimizer:
 
     def bw_matrix(self):
         B_W_Metric_raw = self.dataset[["difficulty", "stability", "p", "y"]].copy()
-        B_W_Metric_raw["s_bin"] = B_W_Metric_raw["stability"].map(
+        B_W_Metric_raw["s_bin"] = B_W_Metric_raw["stability"].map(  # type: ignore[arg-type]
             lambda x: round(math.pow(1.4, math.floor(math.log(x, 1.4))), 2)
         )
-        B_W_Metric_raw["d_bin"] = B_W_Metric_raw["difficulty"].map(
+        B_W_Metric_raw["d_bin"] = B_W_Metric_raw["difficulty"].map(  # type: ignore[arg-type]
             lambda x: int(round(x))
         )
         B_W_Metric = (
@@ -1952,7 +1994,7 @@ class Optimizer:
         n = len(self.dataset)
         bins = len(B_W_Metric)
         B_W_Metric_pivot = B_W_Metric[
-            B_W_Metric_count["p"] > max(50, n / (3 * bins))
+            B_W_Metric_count["p"] > max(50.0, n / (3 * bins))
         ].pivot(index="s_bin", columns="d_bin", values="B-W")
         return (
             B_W_Metric_pivot.apply(pd.to_numeric)
@@ -1973,7 +2015,7 @@ class Optimizer:
         )
         tqdm.write(f"Loss of SM-2: {self.dataset['log_loss'].mean():.4f}")
         dataset = self.dataset[["sm2_p", "p", "y"]].copy()
-        dataset.rename(columns={"sm2_p": "R (SM2)", "p": "R (FSRS)"}, inplace=True)
+        dataset.rename(columns={"sm2_p": "R (SM2)", "p": "R (FSRS)"}, inplace=True)  # type: ignore[arg-type]
         fig1 = plt.figure()
         plot_brier(
             dataset["R (SM2)"],
@@ -2186,6 +2228,7 @@ def load_brier(predictions, real, bins=20):
                             p = -p
                         tmp2 = np.abs(tmp2)
                         dx_temp = deltax
+                        rat = cg * deltax  # Initialize rat before using it
                         deltax = rat
                         # check parabolic fit
                         if (
@@ -2379,15 +2422,16 @@ def plot_brier(predictions, real, bins=20, ax=None, title=None):
     e_90 = np.quantile(np.abs(observation - p), 0.9)
     e_max = np.max(np.abs(observation - p))
     brier = load_brier(predictions, real, bins=bins)
-    bin_prediction_means = brier["detail"]["bin_prediction_means"]
+    brier_detail: Dict[str, Any] = brier["detail"]  # type: ignore[index, assignment]
+    bin_prediction_means = brier_detail["bin_prediction_means"]  # type: ignore[index]
 
-    bin_real_means = brier["detail"]["bin_real_means"]
-    bin_real_means_upper_bounds = brier["detail"]["bin_real_means_upper_bounds"]
-    bin_real_means_lower_bounds = brier["detail"]["bin_real_means_lower_bounds"]
+    bin_real_means = brier_detail["bin_real_means"]  # type: ignore[index]
+    bin_real_means_upper_bounds = brier_detail["bin_real_means_upper_bounds"]  # type: ignore[index]
+    bin_real_means_lower_bounds = brier_detail["bin_real_means_lower_bounds"]  # type: ignore[index]
     bin_real_means_errors_upper = bin_real_means_upper_bounds - bin_real_means
     bin_real_means_errors_lower = bin_real_means - bin_real_means_lower_bounds
 
-    bin_counts = brier["detail"]["bin_counts"]
+    bin_counts = brier_detail["bin_counts"]  # type: ignore[index]
     mask = bin_counts > 0
     r2 = r2_score(
         bin_real_means[mask],
@@ -2399,8 +2443,10 @@ def plot_brier(predictions, real, bins=20, ax=None, title=None):
         bin_prediction_means[mask],
         sample_weight=bin_counts[mask],
     )
-    ax.set_xlim([0, 1])
-    ax.set_ylim([0, 1])
+    if ax is None:
+        ax = plt.gca()
+    ax.set_xlim((0, 1))
+    ax.set_ylim((0, 1))
     ax.grid(True)
     try:
         fit_wls = sm.WLS(
@@ -2441,7 +2487,7 @@ def plot_brier(predictions, real, bins=20, ax=None, title=None):
     )
     # ax.plot(p, observation, label="Lowess Smoothing", color="red")
     ax.plot((0, 1), (0, 1), label="Perfect Calibration", color="#ff7f0e")
-    bin_count = brier["detail"]["bin_count"]
+    bin_count = brier_detail["bin_count"]  # type: ignore[index]
     counts = np.array(bin_counts)
     bins = np.log((np.arange(bin_count)) + 1) / np.log(bin_count + 1)
     widths = np.diff(bins)
@@ -2630,7 +2676,7 @@ def wrap_short_term_ratings(r_history, t_history):
 
 
 class FirstOrderMarkovChain:
-    def __init__(self, n_states=4):
+    def __init__(self, n_states: int = 4):
         """
         Initialize a first-order Markov chain model
 
@@ -2638,10 +2684,10 @@ class FirstOrderMarkovChain:
         n_states: Number of states, default is 4 (corresponding to states 1,2,3,4)
         """
         self.n_states = n_states
-        self.transition_matrix = None
-        self.initial_distribution = None
-        self.transition_counts = None
-        self.initial_counts = None
+        self.transition_matrix: Optional[np.ndarray] = None
+        self.initial_distribution: Optional[np.ndarray] = None
+        self.transition_counts: Optional[np.ndarray] = None
+        self.initial_counts: Optional[np.ndarray] = None
 
     def fit(self, sequences, smoothing=1.0):
         """
@@ -2688,7 +2734,7 @@ class FirstOrderMarkovChain:
 
         return self
 
-    def generate_sequence(self, length):
+    def generate_sequence(self, length: int):
         """
         Generate a new sequence
 
@@ -2700,6 +2746,9 @@ class FirstOrderMarkovChain:
         """
         if self.transition_matrix is None or self.initial_distribution is None:
             raise ValueError("Model not yet fitted, please call the fit method first")
+        assert (
+            self.transition_matrix is not None and self.initial_distribution is not None
+        )
 
         sequence = []
 
@@ -2716,7 +2765,7 @@ class FirstOrderMarkovChain:
 
         return sequence
 
-    def log_likelihood(self, sequences):
+    def log_likelihood(self, sequences: List[List[int]]):
         """
         Calculate the log-likelihood of sequences
 
@@ -2728,28 +2777,38 @@ class FirstOrderMarkovChain:
         """
         if self.transition_matrix is None or self.initial_distribution is None:
             raise ValueError("Model not yet fitted, please call the fit method first")
+        assert (
+            self.transition_matrix is not None and self.initial_distribution is not None
+        )
 
-        log_likelihood = 0.0
+        log_likelihood: float = 0.0
 
         for sequence in sequences:
             if len(sequence) == 0:
                 continue
 
             # Log probability of initial state
-            log_likelihood += np.log(self.initial_distribution[sequence[0] - 1])
+            log_val: float = float(np.log(self.initial_distribution[sequence[0] - 1]))
+            log_likelihood = log_likelihood + log_val  # type: ignore[assignment]
 
             # Log probability of transitions
             for i in range(len(sequence) - 1):
                 current_state = sequence[i] - 1
                 next_state = sequence[i + 1] - 1
-                log_likelihood += np.log(
-                    self.transition_matrix[current_state, next_state]
+                log_val = float(
+                    np.log(self.transition_matrix[current_state, next_state])
                 )
+                log_likelihood = log_likelihood + log_val  # type: ignore[assignment]
 
         return log_likelihood
 
     def print_model(self):
         """Print model parameters"""
+        if self.initial_distribution is None or self.transition_matrix is None:
+            raise ValueError("Model not yet fitted, please call the fit method first")
+        assert (
+            self.initial_distribution is not None and self.transition_matrix is not None
+        )
         print("Initial state distribution:")
         for i in range(self.n_states):
             print(f"State {i + 1}: {self.initial_distribution[i]:.4f}")
@@ -2768,6 +2827,7 @@ class FirstOrderMarkovChain:
                 )
             )
 
+        assert self.initial_counts is not None and self.transition_counts is not None
         print("Initial counts:")
         print(self.initial_counts.astype(int))
         print("Transition counts:")

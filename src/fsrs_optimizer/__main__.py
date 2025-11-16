@@ -6,7 +6,7 @@ import pytz
 import os
 import functools
 from pathlib import Path
-from typing import Optional
+from typing import Optional, TypedDict
 
 import matplotlib.pyplot as plt
 
@@ -25,6 +25,17 @@ def prompt(msg: str, fallback):
     return response
 
 
+class RememberedFallbacksDict(TypedDict, total=False):
+    """Type definition for remembered fallbacks configuration dictionary."""
+
+    timezone: Optional[str]
+    next_day: int | str  # Can be int or str from JSON
+    revlog_start_date: str
+    preview: str
+    filter_out_suspended_cards: str
+    enable_short_term: str
+
+
 def process(filepath, filter_out_flags: list[int]):
     suffix = filepath.split("/")[-1].replace(".", "_").replace("@", "_")
     proj_dir = Path(f"{suffix}")
@@ -33,9 +44,9 @@ def process(filepath, filter_out_flags: list[int]):
 
     try:  # Try and remember the last values inputted.
         with open(config_save, "r") as f:
-            remembered_fallbacks = json.load(f)
+            remembered_fallbacks: RememberedFallbacksDict = json.load(f)  # type: ignore[assignment]
     except FileNotFoundError:
-        remembered_fallbacks = {  # Defaults to this if not there
+        remembered_fallbacks: RememberedFallbacksDict = {  # Defaults to this if not there
             "timezone": None,  # Timezone starts with no default
             "next_day": 4,
             "revlog_start_date": "2006-10-05",
@@ -48,7 +59,7 @@ def process(filepath, filter_out_flags: list[int]):
     def remembered_fallback_prompt(key: str, pretty: Optional[str] = None):
         if pretty is None:
             pretty = key
-        remembered_fallbacks[key] = prompt(
+        remembered_fallbacks[key] = prompt(  # type: ignore[assignment]
             f"input {pretty}", remembered_fallbacks.get(key, None)
         )
 
@@ -59,7 +70,8 @@ def process(filepath, filter_out_flags: list[int]):
             "Timezone list: https://gist.github.com/heyalexej/8bf688fd67d7199be4a1682b3eec7568"
         )
         remembered_fallback_prompt("timezone", "used timezone")
-        if remembered_fallbacks["timezone"] not in pytz.all_timezones:
+        timezone_value = remembered_fallbacks.get("timezone")
+        if timezone_value and timezone_value not in pytz.all_timezones:
             raise Exception("Not a valid timezone, Check the list for more information")
 
         remembered_fallback_prompt("next_day", "used next day start hour")
@@ -74,14 +86,19 @@ def process(filepath, filter_out_flags: list[int]):
             "enable_short_term", "enable short-term component in FSRS model? (y/n)"
         )
 
-        graphs_input = prompt("Save graphs? (y/n)", remembered_fallbacks["preview"])
+        graphs_input = prompt(
+            "Save graphs? (y/n)", remembered_fallbacks.get("preview", "n")
+        )
     else:
-        graphs_input = remembered_fallbacks["preview"]
+        graphs_input = remembered_fallbacks.get("preview", "n")
+
+    # Ensure graphs_input is a string
+    graphs_input = str(graphs_input) if graphs_input is not None else "n"
 
     if graphs_input.lower() != "y":
-        remembered_fallbacks["preview"] = "n"
+        remembered_fallbacks["preview"] = "n"  # type: ignore[assignment]
     else:
-        remembered_fallbacks["preview"] = "y"
+        remembered_fallbacks["preview"] = "y"  # type: ignore[assignment]
 
     with open(
         config_save, "w+"
@@ -89,22 +106,39 @@ def process(filepath, filter_out_flags: list[int]):
         json.dump(remembered_fallbacks, f)
 
     save_graphs = graphs_input != "n"
-    enable_short_term = remembered_fallbacks["enable_short_term"] == "y"
+    enable_short_term = remembered_fallbacks.get("enable_short_term", "y") == "y"
 
     optimizer = fsrs_optimizer.Optimizer(enable_short_term=enable_short_term)
     if filepath.endswith(".apkg") or filepath.endswith(".colpkg"):
         optimizer.anki_extract(
             f"{filepath}",
-            remembered_fallbacks["filter_out_suspended_cards"] == "y",
+            remembered_fallbacks.get("filter_out_suspended_cards", "n") == "y",
             filter_out_flags,
         )
     else:
         # copy the file to the current directory and rename it as revlog.csv
         shutil.copyfile(f"{filepath}", "revlog.csv")
+    # Ensure types are correct for create_time_series
+    timezone = (
+        str(remembered_fallbacks["timezone"])
+        if remembered_fallbacks["timezone"] is not None
+        else "UTC"
+    )
+    revlog_start_date = (
+        str(remembered_fallbacks["revlog_start_date"])
+        if remembered_fallbacks["revlog_start_date"] is not None
+        else "2006-10-05"
+    )
+    next_day = (
+        int(remembered_fallbacks["next_day"])
+        if remembered_fallbacks["next_day"] is not None
+        else 4
+    )
+
     analysis = optimizer.create_time_series(
-        remembered_fallbacks["timezone"],
-        remembered_fallbacks["revlog_start_date"],
-        remembered_fallbacks["next_day"],
+        timezone,
+        revlog_start_date,
+        next_day,
         save_graphs,
     )
     print(analysis)
@@ -160,7 +194,7 @@ def process(filepath, filter_out_flags: list[int]):
             print(f"{metric}: {metrics[partition][metric]:.4f}")
         print()
 
-    metrics["Log loss"] = loss_after
+    metrics["Log loss"] = loss_after  # type: ignore[assignment]
     if save_graphs:
         for i, f in enumerate(figures):
             f.savefig(f"calibration_{i}.png")

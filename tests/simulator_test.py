@@ -1,4 +1,4 @@
-from src.fsrs_optimizer import *
+from fsrs_optimizer import *
 
 FSRS_RS_MEMORIZED = 3370.383
 
