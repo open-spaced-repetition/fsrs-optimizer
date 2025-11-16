@@ -2052,7 +2052,11 @@ def load_brier(predictions, real, bins=20):
 
             return log_likelihood_f(k, n, p) - log_likelihood_f(k, n, p_hat)
 
-        def calc(x: np.typing.NDArray[np.float64], y: np.typing.NDArray[np.float64], target_p: float):
+        def calc(
+            x: np.typing.NDArray[np.float64],
+            y: np.typing.NDArray[np.float64],
+            target_p: float,
+        ):
             def loss(guess_y: float, target_p: float) -> float:
                 # Find segments where the horizontal line intersects the curve
                 # This creates a boolean array where True indicates a potential intersection
