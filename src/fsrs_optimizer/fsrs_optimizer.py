@@ -2096,7 +2096,7 @@ def load_brier(predictions, real, bins=20):
                 probability_sum = np.sum(y[in_range])
 
                 # Return the absolute difference from target probability
-                return abs(probability_sum - target_p)
+                return (probability_sum - target_p).abs()
 
             def bracket(xa, xb, maxiter, target_p):
                 u_lim = xa
