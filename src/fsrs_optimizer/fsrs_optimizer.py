@@ -2337,7 +2337,7 @@ def load_brier(predictions, real, bins=20):
         if k == 0 or k == n:
             k, n = k + 0.5, n + 1
 
-        probs = np.arange(1e-5, 1, 1e-5)
+        probs = np.arange(1e-5, 1, 1e-5, dtype=np.float64)
 
         likelihoods = np.exp(log_likelihood(probs, k, n))
         likelihoods = np.asarray(likelihoods)
