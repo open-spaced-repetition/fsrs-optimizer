@@ -2093,10 +2093,10 @@ def load_brier(predictions, real, bins=20):
                 in_range = (x >= x_low) & (x <= x_high)
 
                 # Calculate the sum of probabilities in the range
-                probability_sum = np.sum(y[in_range])
+                probability_sum: float = np.sum(y[in_range])
 
                 # Return the absolute difference from target probability
-                return np.abs(probability_sum - target_p)
+                return abs(probability_sum - target_p)
 
             def bracket(xa, xb, maxiter, target_p):
                 u_lim = xa
