@@ -132,7 +132,7 @@ class FSRS(nn.Module):
         sinc = torch.exp(self.w[17] * (rating - 3 + self.w[18])) * torch.pow(
             state[:, 0], -self.w[19]
         )
-        new_s = state[:, 0] * torch.where(rating >= 3, sinc.clamp(min=1), sinc)
+        new_s = state[:, 0] * torch.where(rating >= 2, sinc.clamp(min=1), sinc)
         return new_s
 
     def init_d(self, rating: Tensor) -> Tensor:
