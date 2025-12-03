@@ -375,10 +375,8 @@ class Trainer:
         )
         self.train_data_loader = BatchLoader(self.train_set)
 
-        self.test_set: BatchDataset = (
-            BatchDataset(
-                pd.DataFrame(), batch_size=self.batch_size, max_seq_len=self.max_seq_len
-            )
+        self.test_set: Optional[BatchDataset] = (
+            None
             if test_set is None
             else BatchDataset(
                 test_set, batch_size=self.batch_size, max_seq_len=self.max_seq_len
@@ -457,10 +455,12 @@ class Trainer:
 
     def eval(self):
         self.model.eval()
+        train_set_size = len(self.train_set)
+        test_set_size = len(self.test_set) if self.test_set is not None else 0
         with torch.no_grad():
             losses = []
             for dataset in (self.train_set, self.test_set):
-                if len(dataset) == 0:
+                if dataset is None or len(dataset) == 0:
                     losses.append(0)
                     continue
                 sequences, delta_ts, labels, seq_lens, weights = (
@@ -481,16 +481,16 @@ class Trainer:
                     torch.square(self.model.w - self.init_w_tensor)
                     / torch.square(DEFAULT_PARAMS_STDDEV_TENSOR)
                 )
-                loss += penalty * self.gamma / len(self.train_set.y_train)
+                loss += penalty * self.gamma / train_set_size
                 losses.append(loss)
             self.avg_train_losses.append(losses[0])
             self.avg_eval_losses.append(losses[1])
 
             w = dict(self.model.named_parameters())["w"].data.clone()
 
-            weighted_loss = (
-                losses[0] * len(self.train_set) + losses[1] * len(self.test_set)
-            ) / (len(self.train_set) + len(self.test_set))
+            weighted_loss = (losses[0] * train_set_size + losses[1] * test_set_size) / (
+                train_set_size + test_set_size
+            )
 
             return weighted_loss, w
 
@@ -2353,9 +2353,9 @@ def load_brier(predictions, real, bins=20):
 
         assert not np.isnan(x_low_cred)
         assert not np.isnan(x_high_cred)
-        assert x_low_cred <= p_hat <= x_high_cred, (
-            f"{x_low_cred}, {p_hat}, {k / n}, {x_high_cred}"
-        )
+        assert (
+            x_low_cred <= p_hat <= x_high_cred
+        ), f"{x_low_cred}, {p_hat}, {k / n}, {x_high_cred}"
         return x_low_cred, x_high_cred
 
     counts = np.zeros(bins)
@@ -2397,9 +2397,9 @@ def load_brier(predictions, real, bins=20):
     for n in range(len(real_means)):
         # check that the mean is within the bounds, unless they are NaNs
         if not np.isnan(real_means_lower[n]):
-            assert real_means_lower[n] <= real_means[n] <= real_means_upper[n], (
-                f"{real_means_lower[n]:4f}, {real_means[n]:4f}, {real_means_upper[n]:4f}"
-            )
+            assert (
+                real_means_lower[n] <= real_means[n] <= real_means_upper[n]
+            ), f"{real_means_lower[n]:4f}, {real_means[n]:4f}, {real_means_upper[n]:4f}"
 
     return {
         "reliability": sum(counts * (real_means - prediction_means) ** 2) / size,
