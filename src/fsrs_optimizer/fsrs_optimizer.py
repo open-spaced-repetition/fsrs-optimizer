@@ -455,8 +455,8 @@ class Trainer:
 
     def eval(self):
         self.model.eval()
-        train_set_size = len(self.train_set)
-        test_set_size = len(self.test_set) if self.test_set is not None else 0
+        train_set_size = len(self.train_set.y_train)
+        test_set_size = len(self.test_set.y_train) if self.test_set is not None else 0
         with torch.no_grad():
             losses = []
             for dataset in (self.train_set, self.test_set):
