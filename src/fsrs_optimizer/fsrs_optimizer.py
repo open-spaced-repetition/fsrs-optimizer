@@ -5,7 +5,7 @@ import pandas as pd
 import numpy as np
 import os
 import math
-from typing import List, Optional, Tuple, Union, Any, Dict, cast
+from typing import List, Optional, Tuple, Union, Any, Dict
 from datetime import timedelta, datetime
 from collections import defaultdict
 import statsmodels.api as sm  # type: ignore
@@ -2792,7 +2792,9 @@ class FirstOrderMarkovChain:
                 continue
 
             # Log probability of initial state
-            log_val: float = float(np.log(self.initial_distribution[sequence[0] - 1]).item())
+            log_val: float = float(
+                np.log(self.initial_distribution[sequence[0] - 1]).item()
+            )
             log_likelihood = log_likelihood + log_val  # type: ignore[assignment]
 
             # Log probability of transitions
