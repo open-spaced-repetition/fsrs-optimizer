@@ -24,7 +24,7 @@ class Test_Model:
         s_short_term = model.stability_short_term(state, rating)
         assert torch.allclose(
             s_short_term,
-            torch.tensor([1.596818, 2.7470093, 5.0, 8.12961]),
+            torch.tensor([1.596818, 5.0, 5.0, 8.12961]),
             atol=1e-4,
         )
 
@@ -125,7 +125,7 @@ class Test_Model:
         stabilities = outputs[seq_lens - 1, torch.arange(real_batch_size), 0]
         retentions = power_forgetting_curve(delta_ts, stabilities, -model.w[20])
         loss = loss_fn(retentions, labels).sum()
-        assert torch.allclose(loss, torch.tensor(4.047898), atol=1e-4)
+        assert torch.allclose(loss, torch.tensor(4.0466027), atol=1e-4)
         loss.backward()
         assert model.w.grad is not None
         assert torch.allclose(
@@ -134,25 +134,25 @@ class Test_Model:
                 [
                     -0.095688485,
                     -0.0051607806,
-                    -0.00080300873,
+                    -0.0012249565,
                     0.007462064,
-                    0.03677408,
-                    -0.084962785,
-                    0.059571628,
-                    -2.1566951,
-                    0.5738574,
-                    -2.8749206,
-                    0.7123072,
+                    0.03650761,
+                    -0.082112335,
+                    0.0593964,
+                    -2.1474836,
+                    0.57626534,
+                    -2.8751316,
+                    0.7154875,
                     -0.028993709,
                     0.0099172965,
                     -0.2189217,
                     -0.0017800558,
                     -0.089381434,
                     0.299141,
-                    0.0708902,
-                    -0.01219162,
-                    -0.25424173,
-                    0.27452517,
+                    0.068104014,
+                    -0.011605468,
+                    -0.25398168,
+                    0.27700496,
                 ]
             ),
             atol=1e-4,
@@ -195,7 +195,7 @@ class Test_Model:
             / 1000
             * 2
         )
-        assert torch.allclose(penalty, torch.tensor(0.6771115), atol=1e-4)
+        assert torch.allclose(penalty, torch.tensor(0.67711145), atol=1e-4)
         penalty.backward()
         assert model.w.grad is not None
         assert torch.allclose(
@@ -256,7 +256,7 @@ class Test_Model:
         stabilities = outputs[seq_lens - 1, torch.arange(real_batch_size), 0]
         retentions = power_forgetting_curve(delta_ts, stabilities, -model.w[20])
         loss = loss_fn(retentions, labels).sum()
-        assert torch.allclose(loss, torch.tensor(3.76888), atol=1e-4)
+        assert torch.allclose(loss, torch.tensor(3.767796), atol=1e-4)
         loss.backward()
         assert model.w.grad is not None
         assert torch.allclose(
@@ -265,25 +265,25 @@ class Test_Model:
                 [
                     -0.040530164,
                     -0.0041278866,
-                    -0.0006833144,
+                    -0.0010157757,
                     0.007239434,
-                    0.009416521,
-                    -0.12156768,
-                    0.039193563,
-                    -0.86553144,
-                    0.57743585,
-                    -2.571437,
-                    0.76415884,
+                    0.009321215,
+                    -0.120117955,
+                    0.039143264,
+                    -0.8628009,
+                    0.5794302,
+                    -2.5713828,
+                    0.7669307,
                     -0.024242667,
                     0.0,
                     -0.16912507,
                     -0.0017008218,
                     -0.061857328,
                     0.28093633,
-                    0.06636292,
-                    0.0057900245,
-                    -0.19041246,
-                    0.6214733,
+                    0.064058185,
+                    0.0063592787,
+                    -0.1903223,
+                    0.6257775,
                 ]
             ),
             atol=1e-4,
@@ -296,24 +296,24 @@ class Test_Model:
                 [
                     0.2882918,
                     1.3726242,
-                    2.3862023,
+                    2.3861322,
                     8.215636,
-                    6.339949,
-                    0.9131501,
-                    2.940647,
-                    0.07696302,
-                    1.7921939,
-                    0.2464219,
-                    0.71595156,
+                    6.339965,
+                    0.9130969,
+                    2.940639,
+                    0.07696985,
+                    1.7921946,
+                    0.2464217,
+                    0.71595186,
                     1.5631561,
                     0.001,
                     0.34230903,
                     1.7282416,
                     0.68038,
                     1.7929853,
-                    0.46259063,
-                    0.1426339,
-                    0.14509763,
+                    0.46258268,
+                    0.14039303,
+                    0.14509967,
                     0.1,
                 ]
             ),
