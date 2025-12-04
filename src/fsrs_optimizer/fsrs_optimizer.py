@@ -375,10 +375,8 @@ class Trainer:
         )
         self.train_data_loader = BatchLoader(self.train_set)
 
-        self.test_set: BatchDataset = (
-            BatchDataset(
-                pd.DataFrame(), batch_size=self.batch_size, max_seq_len=self.max_seq_len
-            )
+        self.test_set: Optional[BatchDataset] = (
+            None
             if test_set is None
             else BatchDataset(
                 test_set, batch_size=self.batch_size, max_seq_len=self.max_seq_len
@@ -457,10 +455,12 @@ class Trainer:
 
     def eval(self):
         self.model.eval()
+        train_set_size = len(self.train_set.y_train)
+        test_set_size = len(self.test_set.y_train) if self.test_set is not None else 0
         with torch.no_grad():
             losses = []
             for dataset in (self.train_set, self.test_set):
-                if len(dataset) == 0:
+                if dataset is None or len(dataset) == 0:
                     losses.append(0)
                     continue
                 sequences, delta_ts, labels, seq_lens, weights = (
@@ -481,16 +481,16 @@ class Trainer:
                     torch.square(self.model.w - self.init_w_tensor)
                     / torch.square(DEFAULT_PARAMS_STDDEV_TENSOR)
                 )
-                loss += penalty * self.gamma / len(self.train_set.y_train)
+                loss += penalty * self.gamma / train_set_size
                 losses.append(loss)
             self.avg_train_losses.append(losses[0])
             self.avg_eval_losses.append(losses[1])
 
             w = dict(self.model.named_parameters())["w"].data.clone()
 
-            weighted_loss = (
-                losses[0] * len(self.train_set) + losses[1] * len(self.test_set)
-            ) / (len(self.train_set) + len(self.test_set))
+            weighted_loss = (losses[0] * train_set_size + losses[1] * test_set_size) / (
+                train_set_size + test_set_size
+            )
 
             return weighted_loss, w
 
@@ -2792,17 +2792,19 @@ class FirstOrderMarkovChain:
                 continue
 
             # Log probability of initial state
-            log_val: float = float(np.log(self.initial_distribution[sequence[0] - 1]))
+            log_val: float = float(
+                np.log(self.initial_distribution[sequence[0] - 1]).item()
+            )
             log_likelihood = log_likelihood + log_val  # type: ignore[assignment]
 
             # Log probability of transitions
-            for i in range(len(sequence) - 1):
+            for i in range(len(sequence) - 1):  # type: ignore[misc]
                 current_state = sequence[i] - 1
                 next_state = sequence[i + 1] - 1
-                log_val = float(
-                    np.log(self.transition_matrix[current_state, next_state])
+                transition_log_val = float(
+                    np.log(self.transition_matrix[current_state, next_state]).item()
                 )
-                log_likelihood = log_likelihood + log_val  # type: ignore[assignment]
+                log_likelihood = log_likelihood + transition_log_val  # type: ignore[assignment]
 
         return log_likelihood
 
