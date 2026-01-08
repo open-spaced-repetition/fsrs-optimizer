@@ -2480,9 +2480,9 @@ def load_brier(predictions, real, bins=20):
     for n in range(len(real_means)):
         # check that the mean is within the bounds, unless they are NaNs
         if not np.isnan(real_means_lower[n]):
-            assert (
-                real_means_lower[n] <= real_means[n] <= real_means_upper[n]
-            ), f"{real_means_lower[n]:4f}, {real_means[n]:4f}, {real_means_upper[n]:4f}"
+            assert real_means_lower[n] <= real_means[n] <= real_means_upper[n], (
+                f"{real_means_lower[n]:4f}, {real_means[n]:4f}, {real_means_upper[n]:4f}"
+            )
 
     return {
         "reliability": sum(counts * (real_means - prediction_means) ** 2) / size,
