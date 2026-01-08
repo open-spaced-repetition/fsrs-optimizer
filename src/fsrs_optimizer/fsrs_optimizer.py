@@ -30,6 +30,8 @@ from scipy.optimize import minimize  # type: ignore
 from itertools import accumulate
 from tqdm.auto import tqdm  # type: ignore
 import warnings
+import threading
+from queue import Queue, Full, Empty
 
 try:
     from .fsrs_simulator import *
@@ -316,41 +318,102 @@ class BatchDataset(Dataset):
 
 
 class BatchLoader:
-    def __init__(
-        self,
-        dataset: BatchDataset,
-        shuffle: bool = True,
-        seed: int = 2023,
-        device: Optional[torch.device] = None,
-    ):
+    def __init__(self, dataset: BatchDataset, shuffle: bool = True, seed: int = 2023):
         self.dataset = dataset
         self.batch_nums = len(dataset)
         self.shuffle = shuffle
         self.generator = torch.Generator()
         self.generator.manual_seed(seed)
-        self.device = device
-
-    def _move_batch(
-        self, batch: Tuple[Tensor, Tensor, Tensor, Tensor, Tensor]
-    ) -> Tuple[Tensor, Tensor, Tensor, Tensor, Tensor]:
-        if self.device is None:
-            return batch
-        return tuple(  # type: ignore[return-value]
-            (tensor.to(self.device) if tensor.device != self.device else tensor)
-            for tensor in batch
-        )
 
     def __iter__(self):
-        indices = (
-            torch.randperm(self.batch_nums, generator=self.generator).tolist()
-            if self.shuffle
-            else range(self.batch_nums)
-        )
-        for idx in indices:
-            yield self._move_batch(self.dataset[idx])
+        if self.shuffle:
+            yield from (
+                self.dataset[idx]
+                for idx in torch.randperm(
+                    self.batch_nums, generator=self.generator
+                ).tolist()
+            )
+        else:
+            yield from (self.dataset[idx] for idx in range(self.batch_nums))
 
     def __len__(self):
         return self.batch_nums
+
+
+class DevicePrefetchLoader:
+    """
+    Wraps any iterable loader and asynchronously moves batches to a target device.
+    Keeps only a limited number of device batches in-flight to avoid memory spikes.
+    """
+
+    def __init__(
+        self,
+        loader: BatchLoader,
+        target_device: torch.device,
+        prefetch_size: int = 2,
+        non_blocking: bool = False,
+    ):
+        self.loader = loader
+        self.target_device = target_device
+        self.prefetch_size = max(1, prefetch_size)
+        self.non_blocking = non_blocking
+        self.batch_nums = len(loader)
+
+    def __len__(self):
+        return len(self.loader)
+
+    def __iter__(self):
+        queue: "Queue[Any]" = Queue(maxsize=self.prefetch_size)
+        sentinel = object()
+        stop_event = threading.Event()
+
+        def _safe_put(item: Any):
+            while True:
+                try:
+                    queue.put(item, timeout=0.1)
+                    return
+                except Full:
+                    if stop_event.is_set():
+                        continue
+
+        def _worker():
+            try:
+                for batch in self.loader:
+                    if stop_event.is_set():
+                        break
+                    moved_batch = tuple(
+                        (
+                            tensor
+                            if tensor.device == self.target_device
+                            else tensor.to(
+                                self.target_device, non_blocking=self.non_blocking
+                            )
+                        )
+                        for tensor in batch
+                    )
+                    _safe_put(moved_batch)
+                    if stop_event.is_set():
+                        break
+            finally:
+                _safe_put(sentinel)
+
+        thread = threading.Thread(target=_worker, daemon=True)
+        thread.start()
+
+        try:
+            while True:
+                batch = queue.get()
+                if batch is sentinel:
+                    break
+                yield batch  # type: ignore[misc]
+        finally:
+            stop_event.set()
+            thread.join()
+            while not queue.empty():
+                try:
+                    queue.get_nowait()
+                except Empty:
+                    break
 
 
 class Trainer:
@@ -2417,9 +2480,9 @@ def load_brier(predictions, real, bins=20):
     for n in range(len(real_means)):
         # check that the mean is within the bounds, unless they are NaNs
         if not np.isnan(real_means_lower[n]):
-            assert real_means_lower[n] <= real_means[n] <= real_means_upper[n], (
-                f"{real_means_lower[n]:4f}, {real_means[n]:4f}, {real_means_upper[n]:4f}"
-            )
+            assert (
+                real_means_lower[n] <= real_means[n] <= real_means_upper[n]
+            ), f"{real_means_lower[n]:4f}, {real_means[n]:4f}, {real_means_upper[n]:4f}"
 
     return {
         "reliability": sum(counts * (real_means - prediction_means) ** 2) / size,
