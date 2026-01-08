@@ -336,11 +336,7 @@ class BatchLoader:
         if self.device is None:
             return batch
         return tuple(  # type: ignore[return-value]
-            (
-                tensor.to(self.device)
-                if tensor.device != self.device
-                else tensor
-            )
+            (tensor.to(self.device) if tensor.device != self.device else tensor)
             for tensor in batch
         )
 
