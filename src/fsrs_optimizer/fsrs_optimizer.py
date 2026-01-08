@@ -337,7 +337,7 @@ class BatchLoader:
             return batch
         return tuple(  # type: ignore[return-value]
             (
-                tensor.to(self.device, non_blocking=True)
+                tensor.to(self.device)
                 if tensor.device != self.device
                 else tensor
             )
