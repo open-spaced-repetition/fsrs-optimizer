@@ -344,7 +344,7 @@ class BatchLoader:
         indices = (
             torch.randperm(self.batch_nums, generator=self.generator).tolist()
             if self.shuffle
-            else list(range(self.batch_nums))
+            else range(self.batch_nums)
         )
         for idx in indices:
             yield self._move_batch(self.dataset[idx])
