@@ -335,10 +335,14 @@ class BatchLoader:
     ) -> Tuple[Tensor, Tensor, Tensor, Tensor, Tensor]:
         if self.device is None:
             return batch
-        return tuple(
-            (tensor.to(self.device) if tensor.device != self.device else tensor)
+        return tuple(  # type: ignore[return-value]
+            (
+                tensor.to(self.device, non_blocking=True)
+                if tensor.device != self.device
+                else tensor
+            )
             for tensor in batch
-        )  # type: ignore[return-value]
+        )
 
     def __iter__(self):
         indices = (
