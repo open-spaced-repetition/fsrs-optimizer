@@ -266,20 +266,25 @@ class BatchDataset(Dataset):
         if sort_by_length:
             dataframe = dataframe.sort_values(by=["seq_len"], kind="stable")
         del dataframe["seq_len"]
-        self.device = torch.device(device)
         self.batch_size = max(1, batch_size)
         self.x_train = pad_sequence(
             dataframe["tensor"].to_list(), batch_first=True, padding_value=0
+        ).to(device)
+        self.t_train = torch.tensor(
+            dataframe["delta_t"].values, dtype=torch.float, device=device
         )
-        self.t_train = torch.tensor(dataframe["delta_t"].values, dtype=torch.float)
-        self.y_train = torch.tensor(dataframe["y"].values, dtype=torch.float)
+        self.y_train = torch.tensor(
+            dataframe["y"].values, dtype=torch.float, device=device
+        )
         self.seq_len = torch.tensor(
-            dataframe["tensor"].map(len).values, dtype=torch.long
+            dataframe["tensor"].map(len).values, dtype=torch.long, device=device
         )
         if "weights" in dataframe.columns:
-            self.weights = torch.tensor(dataframe["weights"].values, dtype=torch.float)
+            self.weights = torch.tensor(
+                dataframe["weights"].values, dtype=torch.float, device=device
+            )
         else:
-            self.weights = torch.ones(len(dataframe), dtype=torch.float)
+            self.weights = torch.ones(len(dataframe), dtype=torch.float, device=device)
         length = len(dataframe)
         batch_num, remainder = divmod(length, self.batch_size)
         self.batch_num = batch_num + 1 if remainder > 0 else batch_num
@@ -298,17 +303,12 @@ class BatchDataset(Dataset):
         max_seq_len_val = int(seq_lens.max().item())
         sequences_truncated = sequences[:, :max_seq_len_val]
 
-        def _to_device(tensor: Tensor) -> Tensor:
-            if tensor.device == self.device:
-                return tensor
-            return tensor.to(self.device, non_blocking=True)
-
         return (
-            _to_device(sequences_truncated.transpose(0, 1)),
-            _to_device(self.t_train[start_index:end_index]),
-            _to_device(self.y_train[start_index:end_index]),
-            _to_device(seq_lens),
-            _to_device(self.weights[start_index:end_index]),
+            sequences_truncated.transpose(0, 1),
+            self.t_train[start_index:end_index],
+            self.y_train[start_index:end_index],
+            seq_lens,
+            self.weights[start_index:end_index],
         )
 
     def __len__(self):
@@ -316,23 +316,42 @@ class BatchDataset(Dataset):
 
 
 class BatchLoader:
-    def __init__(self, dataset: BatchDataset, shuffle: bool = True, seed: int = 2023):
+    def __init__(
+        self,
+        dataset: BatchDataset,
+        shuffle: bool = True,
+        seed: int = 2023,
+        device: Optional[torch.device] = None,
+    ):
         self.dataset = dataset
         self.batch_nums = len(dataset)
         self.shuffle = shuffle
         self.generator = torch.Generator()
         self.generator.manual_seed(seed)
+        self.device = device
+
+    def _move_batch(
+        self, batch: Tuple[Tensor, Tensor, Tensor, Tensor, Tensor]
+    ) -> Tuple[Tensor, Tensor, Tensor, Tensor, Tensor]:
+        if self.device is None:
+            return batch
+        return tuple(
+            (
+                tensor.to(self.device)
+                if tensor.device != self.device
+                else tensor
+            )
+            for tensor in batch
+        )  # type: ignore[return-value]
 
     def __iter__(self):
-        if self.shuffle:
-            yield from (
-                self.dataset[idx]
-                for idx in torch.randperm(
-                    self.batch_nums, generator=self.generator
-                ).tolist()
-            )
-        else:
-            yield from (self.dataset[idx] for idx in range(self.batch_nums))
+        indices = (
+            torch.randperm(self.batch_nums, generator=self.generator).tolist()
+            if self.shuffle
+            else list(range(self.batch_nums))
+        )
+        for idx in indices:
+            yield self._move_batch(self.dataset[idx])
 
     def __len__(self):
         return self.batch_nums
@@ -2358,9 +2377,9 @@ def load_brier(predictions, real, bins=20):
 
         assert not np.isnan(x_low_cred)
         assert not np.isnan(x_high_cred)
-        assert x_low_cred <= p_hat <= x_high_cred, (
-            f"{x_low_cred}, {p_hat}, {k / n}, {x_high_cred}"
-        )
+        assert (
+            x_low_cred <= p_hat <= x_high_cred
+        ), f"{x_low_cred}, {p_hat}, {k / n}, {x_high_cred}"
         return x_low_cred, x_high_cred
 
     counts = np.zeros(bins)
@@ -2402,9 +2421,9 @@ def load_brier(predictions, real, bins=20):
     for n in range(len(real_means)):
         # check that the mean is within the bounds, unless they are NaNs
         if not np.isnan(real_means_lower[n]):
-            assert real_means_lower[n] <= real_means[n] <= real_means_upper[n], (
-                f"{real_means_lower[n]:4f}, {real_means[n]:4f}, {real_means_upper[n]:4f}"
-            )
+            assert (
+                real_means_lower[n] <= real_means[n] <= real_means_upper[n]
+            ), f"{real_means_lower[n]:4f}, {real_means[n]:4f}, {real_means_upper[n]:4f}"
 
     return {
         "reliability": sum(counts * (real_means - prediction_means) ** 2) / size,
