@@ -336,11 +336,7 @@ class BatchLoader:
         if self.device is None:
             return batch
         return tuple(
-            (
-                tensor.to(self.device)
-                if tensor.device != self.device
-                else tensor
-            )
+            (tensor.to(self.device) if tensor.device != self.device else tensor)
             for tensor in batch
         )  # type: ignore[return-value]
 
@@ -2377,9 +2373,9 @@ def load_brier(predictions, real, bins=20):
 
         assert not np.isnan(x_low_cred)
         assert not np.isnan(x_high_cred)
-        assert (
-            x_low_cred <= p_hat <= x_high_cred
-        ), f"{x_low_cred}, {p_hat}, {k / n}, {x_high_cred}"
+        assert x_low_cred <= p_hat <= x_high_cred, (
+            f"{x_low_cred}, {p_hat}, {k / n}, {x_high_cred}"
+        )
         return x_low_cred, x_high_cred
 
     counts = np.zeros(bins)
@@ -2421,9 +2417,9 @@ def load_brier(predictions, real, bins=20):
     for n in range(len(real_means)):
         # check that the mean is within the bounds, unless they are NaNs
         if not np.isnan(real_means_lower[n]):
-            assert (
-                real_means_lower[n] <= real_means[n] <= real_means_upper[n]
-            ), f"{real_means_lower[n]:4f}, {real_means[n]:4f}, {real_means_upper[n]:4f}"
+            assert real_means_lower[n] <= real_means[n] <= real_means_upper[n], (
+                f"{real_means_lower[n]:4f}, {real_means[n]:4f}, {real_means_upper[n]:4f}"
+            )
 
     return {
         "reliability": sum(counts * (real_means - prediction_means) ** 2) / size,
