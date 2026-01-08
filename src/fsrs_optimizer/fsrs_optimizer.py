@@ -30,6 +30,8 @@ from scipy.optimize import minimize  # type: ignore
 from itertools import accumulate
 from tqdm.auto import tqdm  # type: ignore
 import warnings
+import threading
+from queue import Queue, Full, Empty
 
 try:
     from .fsrs_simulator import *
@@ -266,45 +268,50 @@ class BatchDataset(Dataset):
         if sort_by_length:
             dataframe = dataframe.sort_values(by=["seq_len"], kind="stable")
         del dataframe["seq_len"]
+        self.batch_size = max(1, batch_size)
         self.x_train = pad_sequence(
             dataframe["tensor"].to_list(), batch_first=True, padding_value=0
+        ).to(device)
+        self.t_train = torch.tensor(
+            dataframe["delta_t"].values, dtype=torch.float, device=device
         )
-        self.t_train = torch.tensor(dataframe["delta_t"].values, dtype=torch.float)
-        self.y_train = torch.tensor(dataframe["y"].values, dtype=torch.float)
+        self.y_train = torch.tensor(
+            dataframe["y"].values, dtype=torch.float, device=device
+        )
         self.seq_len = torch.tensor(
-            dataframe["tensor"].map(len).values, dtype=torch.long
+            dataframe["tensor"].map(len).values, dtype=torch.long, device=device
         )
         if "weights" in dataframe.columns:
-            self.weights = torch.tensor(dataframe["weights"].values, dtype=torch.float)
+            self.weights = torch.tensor(
+                dataframe["weights"].values, dtype=torch.float, device=device
+            )
         else:
-            self.weights = torch.ones(len(dataframe), dtype=torch.float)
+            self.weights = torch.ones(len(dataframe), dtype=torch.float, device=device)
         length = len(dataframe)
-        batch_num, remainder = divmod(length, max(1, batch_size))
+        batch_num, remainder = divmod(length, self.batch_size)
         self.batch_num = batch_num + 1 if remainder > 0 else batch_num
-        self.batches: List[Optional[Tuple[Tensor, Tensor, Tensor, Tensor, Tensor]]] = [
-            None
-        ] * self.batch_num
-        if batch_size > 0:
-            for i in range(self.batch_num):
-                start_index = i * batch_size
-                end_index = min((i + 1) * batch_size, length)
-                sequences = self.x_train[start_index:end_index]
-                seq_lens = self.seq_len[start_index:end_index]
-                max_seq_len_val = int(max(seq_lens).item())
-                sequences_truncated = sequences[:, :max_seq_len_val]
-                self.batches[i] = (
-                    sequences_truncated.transpose(0, 1).to(device),
-                    self.t_train[start_index:end_index].to(device),
-                    self.y_train[start_index:end_index].to(device),
-                    seq_lens.to(device),
-                    self.weights[start_index:end_index].to(device),
-                )
+        self.batches: List[Tuple[int, int]] = []
+        for i in range(self.batch_num):
+            start_index = i * self.batch_size
+            end_index = min((i + 1) * self.batch_size, length)
+            self.batches.append((start_index, end_index))
 
     def __getitem__(self, index: int) -> Tuple[Tensor, Tensor, Tensor, Tensor, Tensor]:
-        batch = self.batches[index]
-        if batch is None:
-            raise ValueError(f"Batch {index} is not initialized")
-        return batch
+        if index < 0 or index >= self.batch_num:
+            raise IndexError(f"Batch index {index} out of range")
+        start_index, end_index = self.batches[index]
+        sequences = self.x_train[start_index:end_index]
+        seq_lens = self.seq_len[start_index:end_index]
+        max_seq_len_val = int(seq_lens.max().item())
+        sequences_truncated = sequences[:, :max_seq_len_val]
+
+        return (
+            sequences_truncated.transpose(0, 1),
+            self.t_train[start_index:end_index],
+            self.y_train[start_index:end_index],
+            seq_lens,
+            self.weights[start_index:end_index],
+        )
 
     def __len__(self):
         return self.batch_num
@@ -313,7 +320,7 @@ class BatchDataset(Dataset):
 class BatchLoader:
     def __init__(self, dataset: BatchDataset, shuffle: bool = True, seed: int = 2023):
         self.dataset = dataset
-        self.batch_nums = len(dataset.batches)
+        self.batch_nums = len(dataset)
         self.shuffle = shuffle
         self.generator = torch.Generator()
         self.generator.manual_seed(seed)
@@ -331,6 +338,82 @@ class BatchLoader:
 
     def __len__(self):
         return self.batch_nums
+
+
+class DevicePrefetchLoader:
+    """
+    Wraps any iterable loader and asynchronously moves batches to a target device.
+    Keeps only a limited number of device batches in-flight to avoid memory spikes.
+    """
+
+    def __init__(
+        self,
+        loader: BatchLoader,
+        target_device: torch.device,
+        prefetch_size: int = 2,
+        non_blocking: bool = False,
+    ):
+        self.loader = loader
+        self.target_device = target_device
+        self.prefetch_size = max(1, prefetch_size)
+        self.non_blocking = non_blocking
+        self.batch_nums = len(loader)
+
+    def __len__(self):
+        return len(self.loader)
+
+    def __iter__(self):
+        queue: "Queue[Any]" = Queue(maxsize=self.prefetch_size)
+        sentinel = object()
+        stop_event = threading.Event()
+
+        def _safe_put(item: Any):
+            while True:
+                try:
+                    queue.put(item, timeout=0.1)
+                    return
+                except Full:
+                    if stop_event.is_set():
+                        continue
+
+        def _worker():
+            try:
+                for batch in self.loader:
+                    if stop_event.is_set():
+                        break
+                    moved_batch = tuple(
+                        (
+                            tensor
+                            if tensor.device == self.target_device
+                            else tensor.to(
+                                self.target_device, non_blocking=self.non_blocking
+                            )
+                        )
+                        for tensor in batch
+                    )
+                    _safe_put(moved_batch)
+                    if stop_event.is_set():
+                        break
+            finally:
+                _safe_put(sentinel)
+
+        thread = threading.Thread(target=_worker, daemon=True)
+        thread.start()
+
+        try:
+            while True:
+                batch = queue.get()
+                if batch is sentinel:
+                    break
+                yield batch  # type: ignore[misc]
+        finally:
+            stop_event.set()
+            thread.join()
+            while not queue.empty():
+                try:
+                    queue.get_nowait()
+                except Empty:
+                    break
 
 
 class Trainer:
