@@ -5,6 +5,7 @@ import json
 import pytz
 import os
 import functools
+import traceback
 from pathlib import Path
 from typing import Optional, TypedDict
 
@@ -287,7 +288,7 @@ if __name__ == "__main__":
             print(f"Processing {filename}")
             process(filename, args.flags)
         except Exception as e:
-            print(e)
+            traceback.print_exc()
             print(f"Failed to process {filename}")
         finally:
             plt.close("all")
