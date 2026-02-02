@@ -6,6 +6,7 @@ import pytz
 import os
 import functools
 import traceback
+import sys
 from pathlib import Path
 from typing import Optional, TypedDict
 
@@ -289,7 +290,7 @@ if __name__ == "__main__":
             process(filename, args.flags)
         except Exception:
             traceback.print_exc()
-            print(f"Failed to process {filename}")
+            print(f"Failed to process {filename}", file=sys.stderr)
         finally:
             plt.close("all")
             os.chdir(curdir)
