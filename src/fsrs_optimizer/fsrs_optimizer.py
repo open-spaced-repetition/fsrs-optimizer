@@ -97,6 +97,10 @@ DEFAULT_PARAMS_STDDEV_TENSOR = torch.tensor(
 )
 
 
+def cum_concat(x):
+    return list(accumulate(x))
+
+
 class FSRS(nn.Module):
     def __init__(self, w: List[float], float_delta_t: bool = False):
         super(FSRS, self).__init__()
@@ -250,7 +254,7 @@ def lineToTensor(line: Tuple[str, str]) -> Tensor:
     return tensor
 
 
-class BatchDataset(Dataset):
+class Seq2OneBatchDataset(Dataset):
     def __init__(
         self,
         dataframe: pd.DataFrame,
@@ -312,6 +316,106 @@ class BatchDataset(Dataset):
             seq_lens,
             self.weights[start_index:end_index],
         )
+
+    def __len__(self):
+        return self.batch_num
+
+
+class BatchDataset(Dataset):
+    def __init__(
+        self,
+        dataframe: pd.DataFrame,
+        batch_size: int = 0,
+        sort_by_length: bool = True,
+        max_seq_len: int = math.inf,
+        device: str = "cpu",
+    ):
+        if dataframe.empty:
+            raise ValueError("Training data is inadequate.")
+        if "weights" in dataframe.columns:
+            dataframe.sort_values(
+                by=["card_id", "review_time"], inplace=True, ignore_index=True
+            )
+            weights_list = dataframe.groupby("card_id")["weights"].apply(
+                lambda x: cum_concat([[i] for i in x])
+            )
+            dataframe["weights"] = [
+                ",".join(map(str, i)) for sublist in weights_list for i in sublist
+            ]
+        else:
+            dataframe.sort_values(
+                by=["card_id", "review_time"], inplace=True, ignore_index=True
+            )
+            weights_list = dataframe.groupby("card_id").apply(
+                lambda x: cum_concat([[1] for i in x])
+            )
+            dataframe["weights"] = [
+                ",".join(map(str, i)) for sublist in weights_list for i in sublist
+            ]
+        dataframe = dataframe.groupby("card_id").tail(1)
+        dataframe["tensor"] = dataframe.progress_apply(
+            lambda x: lineToTensor(list(zip([x["t_history"]], [x["r_history"]]))[0]),
+            axis=1,
+        )
+        dataframe["seq_len"] = dataframe["tensor"].map(len)
+        if dataframe["seq_len"].min() > max_seq_len:
+            raise ValueError("Training data is inadequate.")
+        dataframe = dataframe[dataframe["seq_len"] <= max_seq_len]
+        if sort_by_length:
+            dataframe = dataframe.sort_values(by=["seq_len"], kind="stable")
+        del dataframe["seq_len"]
+        self.x_train = pad_sequence(
+            dataframe["tensor"].to_list(), batch_first=True, padding_value=0
+        )
+        dataframe["next_t_seq"] = dataframe["next_t_seq"].map(
+            lambda x: torch.tensor(list(map(float, x.split(","))), dtype=torch.float)
+        )
+        self.t_train = pad_sequence(
+            dataframe["next_t_seq"].to_list(), batch_first=True, padding_value=0.0
+        )
+        dataframe["y_seq"] = dataframe["y_seq"].map(
+            lambda x: torch.tensor(list(map(float, x.split(","))), dtype=torch.float)
+        )
+        self.y_train = pad_sequence(
+            dataframe["y_seq"].to_list(), batch_first=True, padding_value=0.0
+        )
+        self.seq_len = torch.tensor(
+            dataframe["tensor"].map(len).values, dtype=torch.long
+        )
+        dataframe["weights"] = dataframe["weights"].map(
+            lambda x: torch.tensor(list(map(float, x.split(","))), dtype=torch.float)
+        )
+        self.weights = pad_sequence(
+            dataframe["weights"].to_list(), batch_first=True, padding_value=0.0
+        )
+        length = len(dataframe)
+        batch_num, remainder = divmod(length, max(1, batch_size))
+        self.batch_num = batch_num + 1 if remainder > 0 else batch_num
+        self.batches = [None] * self.batch_num
+        if batch_size > 0:
+            for i in range(self.batch_num):
+                start_index = i * batch_size
+                end_index = min((i + 1) * batch_size, length)
+                sequences = self.x_train[start_index:end_index]
+                seq_lens = self.seq_len[start_index:end_index]
+                max_seq_len = max(seq_lens)
+                sequences_truncated = sequences[:, :max_seq_len]
+                t_seq = self.t_train[start_index:end_index]
+                t_seq_truncated = t_seq[:, :max_seq_len]
+                y_seq = self.y_train[start_index:end_index]
+                y_seq_truncated = y_seq[:, :max_seq_len]
+                weights = self.weights[start_index:end_index]
+                weights_truncated = weights[:, :max_seq_len]
+                self.batches[i] = (
+                    sequences_truncated.transpose(0, 1).to(device),
+                    t_seq_truncated.to(device),
+                    y_seq_truncated.to(device),
+                    seq_lens.to(device),
+                    weights_truncated.to(device),
+                )
+
+    def __getitem__(self, idx):
+        return self.batches[idx]
 
     def __len__(self):
         return self.batch_num
@@ -484,14 +588,18 @@ class Trainer:
             for i, batch in enumerate(self.train_data_loader):
                 self.model.train()
                 self.optimizer.zero_grad()
-                sequences, delta_ts, labels, seq_lens, weights = batch
+                sequences, t_seq, y_seq, seq_lens, weights = batch
                 real_batch_size = seq_lens.shape[0]
                 outputs, _ = self.model(sequences)
-                stabilities = outputs[seq_lens - 1, torch.arange(real_batch_size), 0]
-                retentions = power_forgetting_curve(
-                    delta_ts, stabilities, -self.model.w[20]
+                stabilities = outputs[:, torch.arange(real_batch_size), 0].transpose(
+                    0, 1
                 )
-                loss = (self.loss_fn(retentions, labels) * weights).sum()
+                t_mask = t_seq > 0
+                w_mask = weights > 0
+                retentions = power_forgetting_curve(
+                    t_seq[t_mask], stabilities[t_mask], -self.model.w[20]
+                )
+                loss = (self.loss_fn(retentions, y_seq[t_mask]) * weights[w_mask]).sum()
                 penalty = (
                     torch.sum(
                         torch.square(self.model.w - self.init_w_tensor)
@@ -546,20 +654,26 @@ class Trainer:
                 if dataset is None or len(dataset) == 0:
                     losses.append(0)
                     continue
-                sequences, delta_ts, labels, seq_lens, weights = (
+                sequences, t_seq, y_seq, seq_lens, weights = (
                     dataset.x_train,
                     dataset.t_train,
                     dataset.y_train,
                     dataset.seq_len,
                     dataset.weights,
                 )
+                t_mask = t_seq > 0
                 real_batch_size = seq_lens.shape[0]
                 outputs, _ = self.model(sequences.transpose(0, 1))
-                stabilities = outputs[seq_lens - 1, torch.arange(real_batch_size), 0]
-                retentions = power_forgetting_curve(
-                    delta_ts, stabilities, -self.model.w[20]
+                stabilities = outputs[:, torch.arange(real_batch_size), 0].transpose(
+                    0, 1
                 )
-                loss = (self.loss_fn(retentions, labels) * weights).mean()
+                retentions = power_forgetting_curve(
+                    t_seq[t_mask], stabilities[t_mask], -self.model.w[20]
+                )
+                w_mask = weights > 0
+                loss = (
+                    self.loss_fn(retentions, y_seq[t_mask]) * weights[w_mask]
+                ).mean()
                 penalty = torch.sum(
                     torch.square(self.model.w - self.init_w_tensor)
                     / torch.square(DEFAULT_PARAMS_STDDEV_TENSOR)
@@ -606,7 +720,7 @@ class Collection:
             return output_t[-1][0]
 
     def batch_predict(self, dataset):
-        fast_dataset = BatchDataset(dataset, sort_by_length=False)
+        fast_dataset = Seq2OneBatchDataset(dataset, sort_by_length=False)
         with torch.no_grad():
             outputs, _ = self.model(fast_dataset.x_train.transpose(0, 1))
             stabilities, difficulties = outputs[
@@ -976,9 +1090,6 @@ class Optimizer:
             self.extract_simulation_config(df)
             df.drop(columns=["review_duration", "review_state"], inplace=True)  # type: ignore[arg-type]
 
-        def cum_concat(x):
-            return list(accumulate(x))
-
         t_history_list = df.groupby("card_id", group_keys=False)["delta_t"].apply(
             lambda x: cum_concat(
                 [
@@ -997,11 +1108,21 @@ class Optimizer:
             for sublist in t_history_list
             for item in sublist
         ]
+        df["next_t_seq"] = [
+            ",".join(map(str, item[1:]))
+            for sublist in t_history_list
+            for item in sublist
+        ]
         r_history_list = df.groupby("card_id", group_keys=False)["review_rating"].apply(
             lambda x: cum_concat([[i] for i in x])
         )
         df["r_history"] = [
             ",".join(map(str, item[:-1]))
+            for sublist in r_history_list
+            for item in sublist
+        ]
+        df["y_seq"] = [
+            ",".join(map(lambda x: {1: "0", 2: "1", 3: "1", 4: "1"}[x], item[1:]))
             for sublist in r_history_list
             for item in sublist
         ]
@@ -1409,13 +1530,7 @@ class Optimizer:
         recency_weight: bool = False,
     ):
         """Step 4"""
-        self.dataset["tensor"] = self.dataset.progress_apply(
-            lambda x: lineToTensor(list(zip([x["t_history"]], [x["r_history"]]))[0]),
-            axis=1,
-        )
         self.dataset["group"] = self.dataset["r_history"] + self.dataset["t_history"]
-        if verbose:
-            tqdm.write("Tensorized!")
 
         w = []
         plots = []
@@ -1456,7 +1571,7 @@ class Optimizer:
                 x = np.linspace(0, 1, len(self.dataset))
                 self.dataset["weights"] = 0.25 + 0.75 * np.power(x, 3)
             trainer = Trainer(
-                self.dataset,
+                self.dataset.copy(),
                 None,
                 self.init_w,
                 n_epoch=n_epoch,
@@ -1623,7 +1738,10 @@ class Optimizer:
 
     def predict_memory_states(self):
         my_collection = Collection(self.w, self.float_delta_t)
-
+        self.dataset["tensor"] = self.dataset.progress_apply(
+            lambda x: lineToTensor(list(zip([x["t_history"]], [x["r_history"]]))[0]),
+            axis=1,
+        )
         stabilities, difficulties = my_collection.batch_predict(self.dataset)
         stabilities = map(lambda x: round(x, 2), stabilities)
         difficulties = map(lambda x: round(x, 2), difficulties)
