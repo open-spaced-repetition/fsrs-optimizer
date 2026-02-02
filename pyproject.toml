@@ -9,7 +9,7 @@ readme = "README.md"
 dependencies = [
     "matplotlib",
     "numpy",
-    "pandas",
+    "pandas>=3.0.0",
     "pytz",
     "scikit_learn",
     "torch",
@@ -17,7 +17,7 @@ dependencies = [
     "statsmodels",
     "scipy"
 ]
-requires-python = ">=3.10,<3.14"
+requires-python = ">=3.11,<3.14"
 
 [project.urls]
 Homepage = "https://github.com/open-spaced-repetition/fsrs-optimizer"
