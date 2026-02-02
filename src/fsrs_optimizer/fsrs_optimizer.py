@@ -889,9 +889,7 @@ class Optimizer:
             result.transition_matrix[:3],  # type: ignore[index]
             result.transition_counts[:3],  # type: ignore[index]
         )
-        self.relearning_step_transitions = relearning_transition_matrix.round(
-            2
-        ).tolist()
+        self.relearning_step_transitions = relearning_transition_matrix.round(2)
         for i, (rating_probs, default_rating_probs, transition_counts) in enumerate(
             zip(
                 relearning_transition_matrix.tolist(),
