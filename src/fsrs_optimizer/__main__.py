@@ -287,7 +287,7 @@ if __name__ == "__main__":
         try:
             print(f"Processing {filename}")
             process(filename, args.flags)
-        except Exception as e:
+        except Exception:
             traceback.print_exc()
             print(f"Failed to process {filename}")
         finally:
