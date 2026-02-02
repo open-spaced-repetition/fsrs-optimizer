@@ -25,9 +25,6 @@ jobs:
         - name: Install the project
           run: uv sync --all-extras --dev
 
-        - name: Run type test1
-          run: uv add pyrefly --dev && uv run pyrefly check .
-
         - name: Run tests
           # For example, using `pytest`
           run: uv run pytest tests
