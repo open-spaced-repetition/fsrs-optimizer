@@ -636,7 +636,7 @@ def remove_outliers(group: pd.DataFrame) -> pd.DataFrame:
     has_been_removed = 0
     for i in sort_index:
         count = grouped_group.loc[i, ("y", "count")]
-        delta_t = grouped_group.loc[i, "delta_t"].values[0]
+        delta_t = grouped_group.loc[i, "delta_t"]
         if has_been_removed + count >= max(total * 0.05, 20):
             if count < 6 or delta_t > (100 if group.name[0] != "4" else 365):
                 group.drop(group[group["delta_t"] == delta_t].index, inplace=True)  # type: ignore[arg-type]
@@ -861,7 +861,7 @@ class Optimizer:
             result.transition_matrix[:3],  # type: ignore[index]
             result.transition_counts[:3],  # type: ignore[index]
         )
-        self.learning_step_transitions = learning_transition_matrix.round(2).tolist()
+        self.learning_step_transitions = learning_transition_matrix.round(2)
         for i, (rating_probs, default_rating_probs, transition_counts) in enumerate(
             zip(
                 learning_transition_matrix.tolist(),
@@ -889,9 +889,7 @@ class Optimizer:
             result.transition_matrix[:3],  # type: ignore[index]
             result.transition_counts[:3],  # type: ignore[index]
         )
-        self.relearning_step_transitions = relearning_transition_matrix.round(
-            2
-        ).tolist()
+        self.relearning_step_transitions = relearning_transition_matrix.round(2)
         for i, (rating_probs, default_rating_probs, transition_counts) in enumerate(
             zip(
                 relearning_transition_matrix.tolist(),
@@ -961,8 +959,7 @@ class Optimizer:
         if self.float_delta_t:
             df["delta_t"] = df["review_time"].diff().fillna(0) / 1000 / 86400
         else:
-            df["delta_t"] = df.real_days.diff()
-        df.fillna({"delta_t": 0}, inplace=True)
+            df["delta_t"] = df.real_days.diff().fillna(0).astype(int)
         df["i"] = df.groupby("card_id").cumcount() + 1
         df.loc[df["i"] == 1, "delta_t"] = -1
         if df.empty:
@@ -987,12 +984,8 @@ class Optimizer:
                 [
                     [
                         max(
-                            0.0,
-                            float(
-                                round(float(i), 6)
-                                if self.float_delta_t
-                                else float(int(i))
-                            ),
+                            0,
+                            round(float(i), 6) if self.float_delta_t else int(i),
                         )
                     ]
                     for i in x
@@ -1042,14 +1035,16 @@ class Optimizer:
         if not self.float_delta_t:
             df[df["i"] == 2] = (  # type: ignore[assignment]
                 df[df["i"] == 2]  # type: ignore[index]
-                .groupby(by=["first_rating"], as_index=False, group_keys=False)  # type: ignore[attr-defined]
+                .groupby(by=["first_rating"], as_index=False, group_keys=False)[
+                    df.columns
+                ]  # type: ignore[attr-defined]
                 .apply(remove_outliers)
             )
             df.dropna(inplace=True)
 
-            df = df.groupby("card_id", as_index=False, group_keys=False).progress_apply(
-                remove_non_continuous_rows
-            )
+            df = df.groupby("card_id", as_index=False, group_keys=False)[
+                df.columns
+            ].progress_apply(remove_non_continuous_rows)
 
         df["review_time"] = df["review_time"].astype(int)
         df["review_rating"] = df["review_rating"].astype(int)
@@ -1072,7 +1067,6 @@ class Optimizer:
         self.dataset_for_initialization.to_csv(
             "dataset_for_initialization.tsv", sep="\t", index=None
         )
-        del df["first_rating"]
 
         if not analysis:
             return
@@ -1135,7 +1129,7 @@ class Optimizer:
             del group["delta_t"]
             return group
 
-        df = df.groupby(by=["r_history"], group_keys=False).progress_apply(
+        df = df.groupby(by=["r_history"], group_keys=False)[df.columns].progress_apply(
             cal_stability
         )
         if df.empty:
@@ -1165,7 +1159,6 @@ class Optimizer:
             df.to_csv("./stability_for_analysis.tsv", sep="\t", index=None)
             tqdm.write("Analysis saved!")
             caption = "1:again, 2:hard, 3:good, 4:easy\n"
-            df["first_rating"] = df["r_history"].map(lambda x: x[1])
             analysis = (
                 df[df["r_history"].str.contains(r"^\([1-4][^124]*$", regex=True)][
                     [
@@ -2018,7 +2011,7 @@ class Optimizer:
 
                 analysis_group = analysis_group.groupby(  # type: ignore[attr-defined]
                     by=[group_key], group_keys=False
-                ).apply(cal_stability)
+                )[analysis_group.columns].apply(cal_stability)
                 analysis_group.dropna(inplace=True)
                 analysis_group.drop_duplicates(subset=[group_key], inplace=True)
                 analysis_group.sort_values(by=[group_key], inplace=True)
