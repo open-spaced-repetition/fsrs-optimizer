@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import zipfile
 import sqlite3
 import time
@@ -5,7 +7,7 @@ import pandas as pd
 import numpy as np
 import os
 import math
-from typing import List, Optional, Tuple, Union, Any, Dict
+from typing import TYPE_CHECKING, List, Optional, Tuple, Union, Any, Dict
 from datetime import timedelta, datetime
 from collections import defaultdict
 import statsmodels.api as sm  # type: ignore
@@ -32,6 +34,9 @@ from tqdm.auto import tqdm  # type: ignore
 import warnings
 import threading
 from queue import Queue, Full, Empty
+
+if TYPE_CHECKING:
+    from shape_extensions import IntVar
 
 try:
     from .fsrs_simulator import *
@@ -103,9 +108,9 @@ class FSRS(nn.Module):
         self.w = nn.Parameter(torch.tensor(w, dtype=torch.float32))
         self.float_delta_t = float_delta_t
 
-    def stability_after_success(
-        self, state: Tensor, r: Tensor, rating: Tensor
-    ) -> Tensor:
+    def stability_after_success[B: IntVar](
+        self, state: Tensor[[B, 2]], r: Tensor[[B]], rating: Tensor[[B]]
+    ) -> Tensor[[B]]:
         hard_penalty = torch.where(rating == 2, self.w[15], 1)
         easy_bonus = torch.where(rating == 4, self.w[16], 1)
         new_s = state[:, 0] * (
@@ -119,7 +124,9 @@ class FSRS(nn.Module):
         )
         return new_s
 
-    def stability_after_failure(self, state: Tensor, r: Tensor) -> Tensor:
+    def stability_after_failure[B: IntVar](
+        self, state: Tensor[[B, 2]], r: Tensor[[B]]
+    ) -> Tensor[[B]]:
         old_s = state[:, 0]
         new_s = (
             self.w[11]
@@ -130,27 +137,35 @@ class FSRS(nn.Module):
         new_minimum_s = old_s / torch.exp(self.w[17] * self.w[18])
         return torch.minimum(new_s, new_minimum_s)
 
-    def stability_short_term(self, state: Tensor, rating: Tensor) -> Tensor:
+    def stability_short_term[B: IntVar](
+        self, state: Tensor[[B, 2]], rating: Tensor[[B]]
+    ) -> Tensor[[B]]:
         sinc = torch.exp(self.w[17] * (rating - 3 + self.w[18])) * torch.pow(
             state[:, 0], -self.w[19]
         )
         new_s = state[:, 0] * torch.where(rating >= 2, sinc.clamp(min=1), sinc)
         return new_s
 
-    def init_d(self, rating: Tensor) -> Tensor:
+    def init_d[B: IntVar](self, rating: Tensor[[B]]) -> Tensor[[B]]:
         new_d = self.w[4] - torch.exp(self.w[5] * (rating - 1)) + 1
         return new_d
 
-    def linear_damping(self, delta_d: Tensor, old_d: Tensor) -> Tensor:
+    def linear_damping[B: IntVar](
+        self, delta_d: Tensor[[B]], old_d: Tensor[[B]]
+    ) -> Tensor[[B]]:
         return delta_d * (10 - old_d) / 9
 
-    def next_d(self, state: Tensor, rating: Tensor) -> Tensor:
+    def next_d[B: IntVar](
+        self, state: Tensor[[B, 2]], rating: Tensor[[B]]
+    ) -> Tensor[[B]]:
         delta_d = -self.w[6] * (rating - 3)
         new_d = state[:, 1] + self.linear_damping(delta_d, state[:, 1])
         new_d = self.mean_reversion(self.init_d(torch.tensor([4.0])), new_d)
         return new_d
 
-    def step(self, X: Tensor, state: Tensor) -> Tensor:
+    def step[B: IntVar](
+        self, X: Tensor[[B, 2]], state: Tensor[[B, 2]]
+    ) -> Tensor[[B, 2]]:
         """
         :param X: shape[batch_size, 2], X[:,0] is elapsed time, X[:,1] is rating
         :param state: shape[batch_size, 2], state[:,0] is stability, state[:,1] is difficulty
@@ -191,9 +206,9 @@ class FSRS(nn.Module):
         new_s = new_s.clamp(S_MIN, 36500)
         return torch.stack([new_s, new_d], dim=1)
 
-    def forward(
-        self, inputs: Tensor, state: Optional[Tensor] = None
-    ) -> Tuple[Tensor, Tensor]:
+    def forward[S: IntVar, B: IntVar](
+        self, inputs: Tensor[[S, B, 2]], state: Optional[Tensor[[B, 2]]] = None
+    ) -> Tuple[Tensor[[S, B, 2]], Tensor[[B, 2]]]:
         """
         :param inputs: shape[seq_len, batch_size, 2]
         """
@@ -205,7 +220,9 @@ class FSRS(nn.Module):
             outputs.append(state)
         return torch.stack(outputs), state
 
-    def mean_reversion(self, init: Tensor, current: Tensor) -> Tensor:
+    def mean_reversion[B: IntVar](
+        self, init: Tensor[[B]], current: Tensor[[B]]
+    ) -> Tensor[[B]]:
         return self.w[7] * init + (1 - self.w[7]) * current
 
 

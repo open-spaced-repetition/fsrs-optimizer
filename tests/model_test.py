@@ -8,7 +8,7 @@ class Test_Model:
         difficulty = torch.tensor([1.0, 2.0, 3.0, 4.0])
         retention = torch.tensor([0.9, 0.8, 0.7, 0.6])
         rating = torch.tensor([1, 2, 3, 4])
-        state = torch.stack([stability, difficulty]).unsqueeze(0)
+        state = torch.stack([stability, difficulty], dim=1)
         s_recall = model.stability_after_success(state, retention, rating)
         assert torch.allclose(
             s_recall,
@@ -33,7 +33,7 @@ class Test_Model:
         stability = torch.tensor([5.0] * 4)
         difficulty = torch.tensor([5.0] * 4)
         rating = torch.tensor([1, 2, 3, 4])
-        state = torch.stack([stability, difficulty]).unsqueeze(0)
+        state = torch.stack([stability, difficulty], dim=1)
         d_recall = model.next_d(state, rating)
         assert torch.allclose(
             d_recall,

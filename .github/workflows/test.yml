@@ -8,7 +8,7 @@ jobs:
         runs-on: ubuntu-latest
         strategy:
           matrix:
-            python-version: ["3.11", "3.12", "3.13"]
+            python-version: ["3.12", "3.13"]
 
         steps:
         - uses: actions/checkout@v4
@@ -28,3 +28,6 @@ jobs:
         - name: Run tests
           # For example, using `pytest`
           run: uv run pytest tests
+
+        - name: Check tensor shapes
+          run: uv run pyrefly check --expectations
