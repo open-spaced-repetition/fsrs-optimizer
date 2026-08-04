@@ -1,5 +1,6 @@
 import argparse
 import functools
+import itertools
 import json
 import os
 import shutil
@@ -24,7 +25,7 @@ def prompt(msg: str, fallback):
         if fallback is not None:
             return fallback
         else:  # If there is no fallback
-            raise Exception("You failed to enter a required parameter")
+            raise ValueError("You failed to enter a required parameter")
     return response
 
 
@@ -75,7 +76,9 @@ def process(filepath, filter_out_flags: list[int]):
         remembered_fallback_prompt("timezone", "used timezone")
         timezone_value = remembered_fallbacks.get("timezone")
         if timezone_value and timezone_value not in pytz.all_timezones:
-            raise Exception("Not a valid timezone, Check the list for more information")
+            raise ValueError(
+                "Not a valid timezone, Check the list for more information"
+            )
 
         remembered_fallback_prompt("next_day", "used next day start hour")
         remembered_fallback_prompt(
@@ -112,7 +115,7 @@ def process(filepath, filter_out_flags: list[int]):
     enable_short_term = remembered_fallbacks.get("enable_short_term", "y") == "y"
 
     optimizer = fsrs_optimizer.Optimizer(enable_short_term=enable_short_term)
-    if filepath.endswith(".apkg") or filepath.endswith(".colpkg"):
+    if filepath.endswith((".apkg", ".colpkg")):
         optimizer.anki_extract(
             f"{filepath}",
             remembered_fallbacks.get("filter_out_suspended_cards", "n") == "y",
@@ -164,8 +167,8 @@ def process(filepath, filter_out_flags: list[int]):
         for i, f in enumerate(figures):
             f.savefig(f"find_optimal_retention_{i}.png")
             plt.close(f)
-    except Exception as e:
-        print(e)
+    except Exception as error:  # noqa: BLE001 - optimization failure has a fallback
+        print(error)
         print("Failed to find optimal retention")
         optimizer.optimal_retention = 0.9
 
@@ -257,7 +260,7 @@ if __name__ == "__main__":
         return os.listdir(file_or_dir) if os.path.isdir(file_or_dir) else [file_or_dir]
 
     def flatten(fl):
-        return sum(fl, [])
+        return list(itertools.chain.from_iterable(fl))
 
     def mapC(f):
         return lambda x: map(f, x)
@@ -291,10 +294,9 @@ if __name__ == "__main__":
         try:
             print(f"Processing {filename}")
             process(filename, args.flags)
-        except Exception:
+        except Exception:  # noqa: BLE001 - isolate failures between input files
             traceback.print_exc()
             print(f"Failed to process {filename}", file=sys.stderr)
         finally:
             plt.close("all")
             os.chdir(curdir)
-            continue

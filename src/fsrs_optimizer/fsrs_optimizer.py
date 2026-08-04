@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import math
 import os
 import sqlite3
@@ -44,6 +45,7 @@ except ImportError:
     from fsrs_simulator import *  # type: ignore
 
 warnings.filterwarnings("ignore", category=UserWarning)
+logger = logging.getLogger(__name__)
 
 New = 0
 Learning = 1
@@ -259,9 +261,9 @@ class ParameterClipper:
 
 def lineToTensor(line: tuple[str, str]) -> Tensor:
     ivl = line[0].split(",")
-    response = line[1].split(",")
-    tensor = torch.zeros(len(response), 2)
-    for li, response in enumerate(response):
+    responses = line[1].split(",")
+    tensor = torch.zeros(len(responses), 2)
+    for li, response in enumerate(responses):
         tensor[li][0] = float(ivl[li])
         tensor[li][1] = int(response)
     return tensor
@@ -538,9 +540,7 @@ class Trainer:
                         f"iteration: {k * epoch_len + (i + 1) * self.batch_size}"
                     )
                     for name, param in self.model.named_parameters():
-                        tqdm.write(
-                            f"{name}: {list(map(lambda x: round(float(x), 4), param))}"
-                        )
+                        tqdm.write(f"{name}: {[round(float(x), 4) for x in param]}")
         if verbose and pbar is not None:
             pbar.close()
 
@@ -614,9 +614,7 @@ class Collection:
 
     def predict(self, t_history: str, r_history: str):
         with torch.no_grad():
-            line_tensor = lineToTensor(
-                list(zip([t_history], [r_history]))[0]
-            ).unsqueeze(1)
+            line_tensor = lineToTensor((t_history, r_history)).unsqueeze(1)
             output_t = self.model(line_tensor)
             return output_t[-1][0]
 
@@ -701,9 +699,12 @@ class Optimizer:
         self,
         filename: str,
         filter_out_suspended_cards: bool = False,
-        filter_out_flags: list[int] = [],
+        filter_out_flags: list[int] | None = None,
     ):
         """Step 1"""
+        if filter_out_flags is None:
+            filter_out_flags = []
+
         # Extract the collection file or deck file to get the .anki21 database.
         with zipfile.ZipFile(f"{filename}", "r") as zip_ref:
             zip_ref.extractall("./")
@@ -711,7 +712,7 @@ class Optimizer:
 
         if os.path.isfile("collection.anki21b"):
             os.remove("collection.anki21b")
-            raise Exception(
+            raise ValueError(
                 "Please export the file with `support older Anki versions` if you use the latest version of Anki."
             )
         elif os.path.isfile("collection.anki21"):
@@ -719,7 +720,7 @@ class Optimizer:
         elif os.path.isfile("collection.anki2"):
             con = sqlite3.connect("collection.anki2")
         else:
-            raise Exception("Collection not exist!")
+            raise FileNotFoundError("Collection does not exist")
         cur = con.cursor()
 
         def flags2str(flags: list[int]) -> str:
@@ -735,7 +736,7 @@ class Optimizer:
             WHERE queue != 0
             AND id <= {time.time() * 1000}
             {"AND queue != -1" if filter_out_suspended_cards else ""}
-            {"AND flags NOT IN %s" % flags2str(filter_out_flags) if len(filter_out_flags) > 0 else ""}
+            {f"AND flags NOT IN {flags2str(filter_out_flags)}" if filter_out_flags else ""}
         )
         AND ease BETWEEN 1 AND 4
         AND (
@@ -748,7 +749,7 @@ class Optimizer:
         )
         revlog = res.fetchall()
         if len(revlog) == 0:
-            raise Exception("No review log found!")
+            raise ValueError("No review log found")
         df = pd.DataFrame(revlog)
         df.columns = [
             "review_time",
@@ -1033,14 +1034,12 @@ class Optimizer:
                     last_rating.append(r_history[0])
         df["last_rating"] = last_rating
 
+        revlog_start_timestamp = (
+            datetime.strptime(revlog_start_date, "%Y-%m-%d").astimezone().timestamp()
+            * 1000
+        )
         df = df.groupby("card_id").filter(
-            lambda group: (
-                group["review_time"].min()
-                > time.mktime(
-                    datetime.strptime(revlog_start_date, "%Y-%m-%d").timetuple()
-                )
-                * 1000
-            )
+            lambda group: group["review_time"].min() > revlog_start_timestamp
         )
         df = df[
             (df["review_rating"] != 0)
@@ -1244,6 +1243,14 @@ class Optimizer:
         plots = []
         r_s0_default = {str(i): DEFAULT_PARAMETER[i - 1] for i in range(1, 5)}
 
+        def loss(stability, delta_t, recall, count, init_s0):
+            y_pred = power_forgetting_curve(delta_t, stability)
+            logloss = sum(
+                -(recall * np.log(y_pred) + (1 - recall) * np.log(1 - y_pred)) * count
+            )
+            l1 = np.abs(stability - init_s0) / 16 if not self.float_delta_t else 0
+            return logloss + l1
+
         for first_rating in ("1", "2", "3", "4"):
             group = self.dataset_for_initialization[
                 self.dataset_for_initialization["first_rating"] == first_rating
@@ -1265,18 +1272,10 @@ class Optimizer:
 
             init_s0 = r_s0_default[first_rating]
 
-            def loss(stability):
-                y_pred = power_forgetting_curve(delta_t, stability)
-                logloss = sum(
-                    -(recall * np.log(y_pred) + (1 - recall) * np.log(1 - y_pred))
-                    * count
-                )
-                l1 = np.abs(stability - init_s0) / 16 if not self.float_delta_t else 0
-                return logloss + l1
-
             res = minimize(
                 loss,
                 x0=init_s0,
+                args=(delta_t, recall, count, init_s0),
                 bounds=((S_MIN, 100),),
                 options={"maxiter": int(sum(count))},
             )
@@ -1318,24 +1317,27 @@ class Optimizer:
             (2, 4),
             (1, 4),
         ):
-            if small_rating in rating_stability and big_rating in rating_stability:
+            if (
+                small_rating in rating_stability
+                and big_rating in rating_stability
+                and rating_stability[small_rating] > rating_stability[big_rating]
+            ):
                 # if rating_count[small_rating] > 300 and rating_count[big_rating] > 300:
                 #     continue
-                if rating_stability[small_rating] > rating_stability[big_rating]:
-                    if rating_count[small_rating] > rating_count[big_rating]:
-                        rating_stability[big_rating] = rating_stability[small_rating]
-                    else:
-                        rating_stability[small_rating] = rating_stability[big_rating]
+                if rating_count[small_rating] > rating_count[big_rating]:
+                    rating_stability[big_rating] = rating_stability[small_rating]
+                else:
+                    rating_stability[small_rating] = rating_stability[big_rating]
 
         w1 = 0.41
         w2 = 0.54
 
-        if len(rating_stability) == 0:
-            raise Exception("Not enough data for parameter initialization!")
+        if not rating_stability:
+            raise ValueError("Not enough data for parameter initialization")
         elif len(rating_stability) == 1:
-            rating = list(rating_stability.keys())[0]
+            rating = next(iter(rating_stability))
             factor = rating_stability[rating] / r_s0_default[str(rating)]
-            init_s0 = list(map(lambda x: x * factor, r_s0_default.values()))
+            init_s0 = [x * factor for x in r_s0_default.values()]
         elif len(rating_stability) == 2:
             if 1 not in rating_stability and 2 not in rating_stability:
                 rating_stability[2] = np.power(
@@ -1410,9 +1412,7 @@ class Optimizer:
             # This should not happen, but initialize to avoid type error
             init_s0 = [1.0, 1.0, 1.0, 1.0]
 
-        self.init_w[0:4] = list(
-            map(lambda x: max(float(min(100, x)), float(S_MIN)), init_s0)
-        )  # type: ignore[no-matching-overload]
+        self.init_w[0:4] = [max(float(min(100, x)), float(S_MIN)) for x in init_s0]  # type: ignore[no-matching-overload]
         if verbose:
             tqdm.write(f"Parameter initialization finished!")
         return plots
@@ -1429,7 +1429,7 @@ class Optimizer:
     ):
         """Step 4"""
         self.dataset["tensor"] = self.dataset.progress_apply(
-            lambda x: lineToTensor(list(zip([x["t_history"]], [x["r_history"]]))[0]),
+            lambda x: lineToTensor((x["t_history"], x["r_history"])),
             axis=1,
         )
         self.dataset["group"] = self.dataset["r_history"] + self.dataset["t_history"]
@@ -1520,8 +1520,8 @@ class Optimizer:
                 difficulty = round(float(states[1]), 1)
                 if verbose:
                     print(
-                        "{0:9.2f} {1:11.2f} {2:7.0f}".format(
-                            *list(map(lambda x: round(float(x), 4), states))
+                        "{:9.2f} {:11.2f} {:7.0f}".format(
+                            *[round(float(x), 4) for x in states]
                         )
                     )
                 left -= 1
@@ -1644,10 +1644,8 @@ class Optimizer:
         my_collection = Collection(self.w, self.float_delta_t)
 
         stabilities, difficulties = my_collection.batch_predict(self.dataset)
-        stabilities = map(lambda x: round(x, 2), stabilities)
-        difficulties = map(lambda x: round(x, 2), difficulties)
-        self.dataset["stability"] = list(stabilities)
-        self.dataset["difficulty"] = list(difficulties)
+        self.dataset["stability"] = [round(x, 2) for x in stabilities]
+        self.dataset["difficulty"] = [round(x, 2) for x in difficulties]
         prediction = self.dataset.groupby(by=["t_history", "r_history"]).agg(
             {"stability": "mean", "difficulty": "mean", "review_time": "count"}
         )
@@ -1655,7 +1653,7 @@ class Optimizer:
         prediction.sort_values(by=["r_history"], inplace=True)  # type: ignore[arg-type]
         prediction.rename(columns={"review_time": "count"}, inplace=True)  # type: ignore[arg-type]
         prediction.to_csv("./prediction.tsv", sep="\t", index=False)  # type: ignore[arg-type]
-        prediction["difficulty"] = prediction["difficulty"].map(lambda x: int(round(x)))  # type: ignore[arg-type]
+        prediction["difficulty"] = prediction["difficulty"].map(round)  # type: ignore[arg-type]
         self.difficulty_distribution = (
             prediction.groupby(by=["difficulty"])["count"].sum()
             / prediction["count"].sum()
@@ -1768,9 +1766,7 @@ class Optimizer:
         my_collection = Collection(DEFAULT_PARAMETER, self.float_delta_t)
         if "tensor" not in self.dataset.columns:
             self.dataset["tensor"] = self.dataset.progress_apply(
-                lambda x: lineToTensor(
-                    list(zip([x["t_history"]], [x["r_history"]]))[0]
-                ),
+                lambda x: lineToTensor((x["t_history"], x["r_history"])),
                 axis=1,
             )
         stabilities, difficulties = my_collection.batch_predict(self.dataset)
@@ -2077,7 +2073,7 @@ class Optimizer:
             lambda x: round(math.pow(1.4, math.floor(math.log(x, 1.4))), 2)
         )
         B_W_Metric_raw["d_bin"] = B_W_Metric_raw["difficulty"].map(  # type: ignore[arg-type]
-            lambda x: int(round(x))
+            round
         )
         B_W_Metric = (
             B_W_Metric_raw.groupby(by=["s_bin", "d_bin"]).agg("mean").reset_index()
@@ -2286,7 +2282,7 @@ def load_brier(predictions, real, bins=20):
                 mintol = 1.0e-11
                 cg = 0.3819660
 
-                xa, xb, xc, fa, fb, fc, funccalls = bracket(
+                xa, xb, xc, _fa, fb, _fc, funccalls = bracket(
                     xa=min(y), xb=max(y), maxiter=maxiter, target_p=target_p
                 )
 
@@ -2400,7 +2396,7 @@ def load_brier(predictions, real, bins=20):
                     # print(f'Loss function called {funccalls} times')
                     return xmin
                 else:
-                    raise Exception(
+                    raise RuntimeError(
                         "The algorithm terminated without finding a valid value."
                     )
 
@@ -2561,8 +2557,8 @@ def plot_brier(predictions, real, bins=20, ax=None, title=None):
             label=f"y = {params[0]:.3f} + {params[1]:.3f}x",
             color="green",
         )
-    except:
-        pass
+    except Exception:
+        logger.debug("Unable to fit the calibration regression", exc_info=True)
     # ax.plot(
     #     bin_prediction_means[mask],
     #     bin_correct_means[mask],
@@ -2678,28 +2674,34 @@ def cross_comparison(dataset, algoA, algoB):
 
     universal_metric_list = []
 
-    for algoA, algoB in pair_algo:
-        cross_comparison_group = cross_comparison_record.groupby(by=f"{algoA}_bin").agg(
-            {"y": ["mean"], f"{algoB}_B-W": ["mean"], f"R ({algoB})": ["mean", "count"]}
+    for grouping_algo, comparison_algo in pair_algo:
+        cross_comparison_group = cross_comparison_record.groupby(
+            by=f"{grouping_algo}_bin"
+        ).agg(
+            {
+                "y": ["mean"],
+                f"{comparison_algo}_B-W": ["mean"],
+                f"R ({comparison_algo})": ["mean", "count"],
+            }
         )
         universal_metric = root_mean_squared_error(
             y_true=cross_comparison_group["y", "mean"],
-            y_pred=cross_comparison_group[f"R ({algoB})", "mean"],
-            sample_weight=cross_comparison_group[f"R ({algoB})", "count"],
+            y_pred=cross_comparison_group[f"R ({comparison_algo})", "mean"],
+            sample_weight=cross_comparison_group[f"R ({comparison_algo})", "count"],
         )
-        cross_comparison_group[f"R ({algoB})", "percent"] = (
-            cross_comparison_group[f"R ({algoB})", "count"]
-            / cross_comparison_group[f"R ({algoB})", "count"].sum()
+        cross_comparison_group[f"R ({comparison_algo})", "percent"] = (
+            cross_comparison_group[f"R ({comparison_algo})", "count"]
+            / cross_comparison_group[f"R ({comparison_algo})", "count"].sum()
         )
         ax.scatter(
             cross_comparison_group.index,
-            cross_comparison_group[f"{algoB}_B-W", "mean"],
-            s=cross_comparison_group[f"R ({algoB})", "percent"] * 1024,
+            cross_comparison_group[f"{comparison_algo}_B-W", "mean"],
+            s=cross_comparison_group[f"R ({comparison_algo})", "percent"] * 1024,
             alpha=0.5,
         )
         ax.plot(
-            cross_comparison_group[f"{algoB}_B-W", "mean"],
-            label=f"{algoB} by {algoA}, UM={universal_metric:.4f}",
+            cross_comparison_group[f"{comparison_algo}_B-W", "mean"],
+            label=(f"{comparison_algo} by {grouping_algo}, UM={universal_metric:.4f}"),
         )
         universal_metric_list.append(universal_metric)
 

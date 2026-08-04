@@ -6,12 +6,12 @@ FSRS_RS_MEMORIZED = 3370.383
 class Test_Simulator:
     def test_simulate(self):
         (
-            card_table,
-            review_cnt_per_day,
-            learn_cnt_per_day,
+            _card_table,
+            _review_cnt_per_day,
+            _learn_cnt_per_day,
             memorized_cnt_per_day,
-            cost_per_day,
-            revlogs,
+            _cost_per_day,
+            _revlogs,
         ) = simulate(w=DEFAULT_PARAMETER, request_retention=0.9)
         deviation = abs(1 - (memorized_cnt_per_day[-1] / FSRS_RS_MEMORIZED))
         assert deviation < 0.06, (
