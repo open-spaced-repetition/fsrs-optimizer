@@ -1,39 +1,39 @@
 from __future__ import annotations
 
-import zipfile
-import sqlite3
-import time
-import pandas as pd
-import numpy as np
-import os
 import math
-from typing import TYPE_CHECKING, List, Optional, Tuple, Union, Any, Dict
-from datetime import timedelta, datetime
+import os
+import sqlite3
+import threading
+import time
+import warnings
+import zipfile
 from collections import defaultdict
-import statsmodels.api as sm  # type: ignore
-from statsmodels.nonparametric.smoothers_lowess import lowess  # type: ignore
+from datetime import datetime, timedelta
+from itertools import accumulate
+from queue import Empty, Full, Queue
+from typing import TYPE_CHECKING, Any
+
 import matplotlib.pyplot as plt
-import matplotlib.ticker as ticker
+import numpy as np
+import pandas as pd
+import statsmodels.api as sm  # type: ignore
 import torch
-from torch import nn
-from torch import Tensor
-from torch.utils.data import Dataset
-from torch.nn.utils.rnn import pad_sequence
-from sklearn.model_selection import TimeSeriesSplit  # type: ignore
+from matplotlib import ticker
+from scipy.optimize import minimize  # type: ignore
 from sklearn.metrics import (  # type: ignore
     log_loss,
-    root_mean_squared_error,
     mean_absolute_error,
     mean_absolute_percentage_error,
     r2_score,
     roc_auc_score,
+    root_mean_squared_error,
 )
-from scipy.optimize import minimize  # type: ignore
-from itertools import accumulate
+from sklearn.model_selection import TimeSeriesSplit  # type: ignore
+from statsmodels.nonparametric.smoothers_lowess import lowess  # type: ignore
+from torch import Tensor, nn
+from torch.nn.utils.rnn import pad_sequence
+from torch.utils.data import Dataset
 from tqdm.auto import tqdm  # type: ignore
-import warnings
-import threading
-from queue import Queue, Full, Empty
 
 if TYPE_CHECKING:
     from shape_extensions import IntVar
@@ -103,8 +103,8 @@ DEFAULT_PARAMS_STDDEV_TENSOR = torch.tensor(
 
 
 class FSRS(nn.Module):
-    def __init__(self, w: List[float], float_delta_t: bool = False):
-        super(FSRS, self).__init__()
+    def __init__(self, w: list[float], float_delta_t: bool = False):
+        super().__init__()
         self.w = nn.Parameter(torch.tensor(w, dtype=torch.float32))
         self.float_delta_t = float_delta_t
 
@@ -207,8 +207,8 @@ class FSRS(nn.Module):
         return torch.stack([new_s, new_d], dim=1)
 
     def forward[S: IntVar, B: IntVar](
-        self, inputs: Tensor[[S, B, 2]], state: Optional[Tensor[[B, 2]]] = None
-    ) -> Tuple[Tensor[[S, B, 2]], Tensor[[B, 2]]]:
+        self, inputs: Tensor[[S, B, 2]], state: Tensor[[B, 2]] | None = None
+    ) -> tuple[Tensor[[S, B, 2]], Tensor[[B, 2]]]:
         """
         :param inputs: shape[seq_len, batch_size, 2]
         """
@@ -257,7 +257,7 @@ class ParameterClipper:
             module.w.data = w
 
 
-def lineToTensor(line: Tuple[str, str]) -> Tensor:
+def lineToTensor(line: tuple[str, str]) -> Tensor:
     ivl = line[0].split(",")
     response = line[1].split(",")
     tensor = torch.zeros(len(response), 2)
@@ -273,7 +273,7 @@ class BatchDataset(Dataset):
         dataframe: pd.DataFrame,
         batch_size: int = 0,
         sort_by_length: bool = True,
-        max_seq_len: Union[int, float] = math.inf,
+        max_seq_len: float = math.inf,
         device: str = "cpu",
     ):
         if dataframe.empty:
@@ -307,13 +307,13 @@ class BatchDataset(Dataset):
         length = len(dataframe)
         batch_num, remainder = divmod(length, self.batch_size)
         self.batch_num = batch_num + 1 if remainder > 0 else batch_num
-        self.batches: List[Tuple[int, int]] = []
+        self.batches: list[tuple[int, int]] = []
         for i in range(self.batch_num):
             start_index = i * self.batch_size
             end_index = min((i + 1) * self.batch_size, length)
             self.batches.append((start_index, end_index))
 
-    def __getitem__(self, index: int) -> Tuple[Tensor, Tensor, Tensor, Tensor, Tensor]:
+    def __getitem__(self, index: int) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor]:
         if index < 0 or index >= self.batch_num:
             raise IndexError(f"Batch index {index} out of range")
         start_index, end_index = self.batches[index]
@@ -380,7 +380,7 @@ class DevicePrefetchLoader:
         return len(self.loader)
 
     def __iter__(self):
-        queue: "Queue[Any]" = Queue(maxsize=self.prefetch_size)
+        queue: Queue[Any] = Queue(maxsize=self.prefetch_size)
         sentinel = object()
         stop_event = threading.Event()
 
@@ -437,8 +437,8 @@ class Trainer:
     def __init__(
         self,
         train_set: pd.DataFrame,
-        test_set: Optional[pd.DataFrame],
-        init_w: List[float],
+        test_set: pd.DataFrame | None,
+        init_w: list[float],
         n_epoch: int = 5,
         lr: float = 4e-2,
         gamma: float = 1,
@@ -469,13 +469,13 @@ class Trainer:
         self.float_delta_t = float_delta_t
         self.enable_short_term = enable_short_term
 
-    def build_dataset(self, train_set: pd.DataFrame, test_set: Optional[pd.DataFrame]):
+    def build_dataset(self, train_set: pd.DataFrame, test_set: pd.DataFrame | None):
         self.train_set = BatchDataset(
             train_set, batch_size=self.batch_size, max_seq_len=self.max_seq_len
         )
         self.train_data_loader = BatchLoader(self.train_set)
 
-        self.test_set: Optional[BatchDataset] = (
+        self.test_set: BatchDataset | None = (
             None
             if test_set is None
             else BatchDataset(
@@ -486,9 +486,9 @@ class Trainer:
     def train(self, verbose: bool = True):
         self.verbose = verbose
         best_loss = np.inf
-        best_w: Optional[Tensor] = None
+        best_w: Tensor | None = None
         epoch_len = len(self.train_set.y_train)
-        pbar: Optional[tqdm] = None
+        pbar: tqdm | None = None
         if verbose:
             pbar = tqdm(desc="train", colour="red", total=epoch_len * self.n_epoch)
         print_len = max(self.batch_nums * self.n_epoch // 10, 1)
@@ -606,9 +606,7 @@ class Trainer:
 
 
 class Collection:
-    def __init__(
-        self, w: Union[List[float], Tensor], float_delta_t: bool = False
-    ) -> None:
+    def __init__(self, w: list[float] | Tensor, float_delta_t: bool = False) -> None:
         if isinstance(w, Tensor):
             w = w.tolist()
         self.model = FSRS(w, float_delta_t)
@@ -703,7 +701,7 @@ class Optimizer:
         self,
         filename: str,
         filter_out_suspended_cards: bool = False,
-        filter_out_flags: List[int] = [],
+        filter_out_flags: list[int] = [],
     ):
         """Step 1"""
         # Extract the collection file or deck file to get the .anki21 database.
@@ -724,7 +722,7 @@ class Optimizer:
             raise Exception("Collection not exist!")
         cur = con.cursor()
 
-        def flags2str(flags: List[int]) -> str:
+        def flags2str(flags: list[int]) -> str:
             return f"({','.join(map(str, flags))})"
 
         res = cur.execute(
@@ -1036,9 +1034,13 @@ class Optimizer:
         df["last_rating"] = last_rating
 
         df = df.groupby("card_id").filter(
-            lambda group: group["review_time"].min()
-            > time.mktime(datetime.strptime(revlog_start_date, "%Y-%m-%d").timetuple())
-            * 1000
+            lambda group: (
+                group["review_time"].min()
+                > time.mktime(
+                    datetime.strptime(revlog_start_date, "%Y-%m-%d").timetuple()
+                )
+                * 1000
+            )
         )
         df = df[
             (df["review_rating"] != 0)
@@ -2519,7 +2521,7 @@ def plot_brier(predictions, real, bins=20, ax=None, title=None):
     e_90 = np.quantile(np.abs(observation - p), 0.9)
     e_max = np.max(np.abs(observation - p))
     brier = load_brier(predictions, real, bins=bins)
-    brier_detail: Dict[str, Any] = brier["detail"]  # type: ignore[index, assignment]
+    brier_detail: dict[str, Any] = brier["detail"]  # type: ignore[index, assignment]
     bin_prediction_means = brier_detail["bin_prediction_means"]  # type: ignore[index]
 
     bin_real_means = brier_detail["bin_real_means"]  # type: ignore[index]
@@ -2781,10 +2783,10 @@ class FirstOrderMarkovChain:
         n_states: Number of states, default is 4 (corresponding to states 1,2,3,4)
         """
         self.n_states = n_states
-        self.transition_matrix: Optional[np.ndarray] = None
-        self.initial_distribution: Optional[np.ndarray] = None
-        self.transition_counts: Optional[np.ndarray] = None
-        self.initial_counts: Optional[np.ndarray] = None
+        self.transition_matrix: np.ndarray | None = None
+        self.initial_distribution: np.ndarray | None = None
+        self.transition_counts: np.ndarray | None = None
+        self.initial_counts: np.ndarray | None = None
 
     def fit(self, sequences, smoothing=1.0):
         """
@@ -2862,7 +2864,7 @@ class FirstOrderMarkovChain:
 
         return sequence
 
-    def log_likelihood(self, sequences: List[List[int]]):
+    def log_likelihood(self, sequences: list[list[int]]):
         """
         Calculate the log-likelihood of sequences
 

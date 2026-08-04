@@ -1,16 +1,17 @@
-import fsrs_optimizer
 import argparse
-import shutil
-import json
-import pytz
-import os
 import functools
-import traceback
+import json
+import os
+import shutil
 import sys
+import traceback
 from pathlib import Path
-from typing import Optional, TypedDict
+from typing import TypedDict
 
 import matplotlib.pyplot as plt
+import pytz
+
+import fsrs_optimizer
 
 
 def prompt(msg: str, fallback):
@@ -30,7 +31,7 @@ def prompt(msg: str, fallback):
 class RememberedFallbacksDict(TypedDict, total=False):
     """Type definition for remembered fallbacks configuration dictionary."""
 
-    timezone: Optional[str]
+    timezone: str | None
     next_day: int | str  # Can be int or str from JSON
     revlog_start_date: str
     preview: str
@@ -58,7 +59,7 @@ def process(filepath, filter_out_flags: list[int]):
         }
 
     # Prompts the user with the key and then falls back on the last answer given.
-    def remembered_fallback_prompt(key: str, pretty: Optional[str] = None):
+    def remembered_fallback_prompt(key: str, pretty: str | None = None):
         if pretty is None:
             pretty = key
         remembered_fallbacks[key] = prompt(  # type: ignore[assignment]
@@ -276,9 +277,11 @@ if __name__ == "__main__":
             mapC(os.path.abspath),  # map to absolute path
             filterC(lambda f: not os.path.isdir(f)),  # file filter
             filterC(
-                lambda f: f.lower().endswith(".apkg")
-                or f.lower().endswith(".colpkg")
-                or f.lower().endswith(".csv")
+                lambda f: (
+                    f.lower().endswith(".apkg")
+                    or f.lower().endswith(".colpkg")
+                    or f.lower().endswith(".csv")
+                )
             ),  # extension filter
         ],
         args.filenames,
