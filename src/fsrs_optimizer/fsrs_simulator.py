@@ -1,9 +1,8 @@
 import math
-import numpy as np
-from matplotlib import pyplot as plt
-from typing import Optional
 from concurrent.futures import ProcessPoolExecutor, as_completed
 
+import numpy as np
+from matplotlib import pyplot as plt
 
 DECAY = -0.1542
 FACTOR = 0.9 ** (1 / DECAY) - 1
@@ -257,7 +256,7 @@ def simulate(
 
     # learn_state: 1: Learning, 2: Review, 3: Relearning
     def memory_state_short_term(
-        s: np.ndarray, d: np.ndarray, init_rating: Optional[np.ndarray] = None
+        s: np.ndarray, d: np.ndarray, init_rating: np.ndarray | None = None
     ):
         if init_rating is not None:
             s = np.choose(init_rating - 1, w)
@@ -670,7 +669,7 @@ def brent(tol=0.01, maxiter=20, **kwargs):
     if success:
         return xmin
     else:
-        raise Exception("The algorithm terminated without finding a valid value.")
+        raise RuntimeError("The algorithm terminated without finding a valid value.")
 
 
 def workload_graph(default_params, sampling_size=30):
@@ -712,7 +711,7 @@ def workload_graph(default_params, sampling_size=30):
     else:
         min2_index = R.index(R[workload.index(min_w2)])
 
-    min1_5_index = int(math.ceil((min2_index + 3 * min1_index) / 4))
+    min1_5_index = math.ceil((min2_index + 3 * min1_index) / 4)
     if min_w3 == 0:
         min3_index = len(R)
     else:

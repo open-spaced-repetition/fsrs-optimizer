@@ -1,37 +1,43 @@
-import zipfile
-import sqlite3
-import time
-import pandas as pd
-import numpy as np
-import os
+from __future__ import annotations
+
+import logging
 import math
-from typing import List, Optional, Tuple, Union, Any, Dict
-from datetime import timedelta, datetime
+import os
+import sqlite3
+import threading
+import time
+import warnings
+import zipfile
 from collections import defaultdict
-import statsmodels.api as sm  # type: ignore
-from statsmodels.nonparametric.smoothers_lowess import lowess  # type: ignore
+from datetime import datetime, timedelta
+from itertools import accumulate
+from queue import Empty, Full, Queue
+from typing import TYPE_CHECKING, Any
+
 import matplotlib.pyplot as plt
-import matplotlib.ticker as ticker
+import numpy as np
+import pandas as pd
+import statsmodels.api as sm  # type: ignore
 import torch
-from torch import nn
-from torch import Tensor
-from torch.utils.data import Dataset
-from torch.nn.utils.rnn import pad_sequence
-from sklearn.model_selection import TimeSeriesSplit  # type: ignore
+from matplotlib import ticker
+from scipy.optimize import minimize  # type: ignore
 from sklearn.metrics import (  # type: ignore
     log_loss,
-    root_mean_squared_error,
     mean_absolute_error,
     mean_absolute_percentage_error,
     r2_score,
     roc_auc_score,
+    root_mean_squared_error,
 )
-from scipy.optimize import minimize  # type: ignore
-from itertools import accumulate
+from sklearn.model_selection import TimeSeriesSplit  # type: ignore
+from statsmodels.nonparametric.smoothers_lowess import lowess  # type: ignore
+from torch import Tensor, nn
+from torch.nn.utils.rnn import pad_sequence
+from torch.utils.data import Dataset
 from tqdm.auto import tqdm  # type: ignore
-import warnings
-import threading
-from queue import Queue, Full, Empty
+
+if TYPE_CHECKING:
+    from shape_extensions import IntVar
 
 try:
     from .fsrs_simulator import *
@@ -39,6 +45,7 @@ except ImportError:
     from fsrs_simulator import *  # type: ignore
 
 warnings.filterwarnings("ignore", category=UserWarning)
+logger = logging.getLogger(__name__)
 
 New = 0
 Learning = 1
@@ -98,14 +105,14 @@ DEFAULT_PARAMS_STDDEV_TENSOR = torch.tensor(
 
 
 class FSRS(nn.Module):
-    def __init__(self, w: List[float], float_delta_t: bool = False):
-        super(FSRS, self).__init__()
+    def __init__(self, w: list[float], float_delta_t: bool = False):
+        super().__init__()
         self.w = nn.Parameter(torch.tensor(w, dtype=torch.float32))
         self.float_delta_t = float_delta_t
 
-    def stability_after_success(
-        self, state: Tensor, r: Tensor, rating: Tensor
-    ) -> Tensor:
+    def stability_after_success[B: IntVar](
+        self, state: Tensor[[B, 2]], r: Tensor[[B]], rating: Tensor[[B]]
+    ) -> Tensor[[B]]:
         hard_penalty = torch.where(rating == 2, self.w[15], 1)
         easy_bonus = torch.where(rating == 4, self.w[16], 1)
         new_s = state[:, 0] * (
@@ -119,7 +126,9 @@ class FSRS(nn.Module):
         )
         return new_s
 
-    def stability_after_failure(self, state: Tensor, r: Tensor) -> Tensor:
+    def stability_after_failure[B: IntVar](
+        self, state: Tensor[[B, 2]], r: Tensor[[B]]
+    ) -> Tensor[[B]]:
         old_s = state[:, 0]
         new_s = (
             self.w[11]
@@ -130,27 +139,35 @@ class FSRS(nn.Module):
         new_minimum_s = old_s / torch.exp(self.w[17] * self.w[18])
         return torch.minimum(new_s, new_minimum_s)
 
-    def stability_short_term(self, state: Tensor, rating: Tensor) -> Tensor:
+    def stability_short_term[B: IntVar](
+        self, state: Tensor[[B, 2]], rating: Tensor[[B]]
+    ) -> Tensor[[B]]:
         sinc = torch.exp(self.w[17] * (rating - 3 + self.w[18])) * torch.pow(
             state[:, 0], -self.w[19]
         )
         new_s = state[:, 0] * torch.where(rating >= 2, sinc.clamp(min=1), sinc)
         return new_s
 
-    def init_d(self, rating: Tensor) -> Tensor:
+    def init_d[B: IntVar](self, rating: Tensor[[B]]) -> Tensor[[B]]:
         new_d = self.w[4] - torch.exp(self.w[5] * (rating - 1)) + 1
         return new_d
 
-    def linear_damping(self, delta_d: Tensor, old_d: Tensor) -> Tensor:
+    def linear_damping[B: IntVar](
+        self, delta_d: Tensor[[B]], old_d: Tensor[[B]]
+    ) -> Tensor[[B]]:
         return delta_d * (10 - old_d) / 9
 
-    def next_d(self, state: Tensor, rating: Tensor) -> Tensor:
+    def next_d[B: IntVar](
+        self, state: Tensor[[B, 2]], rating: Tensor[[B]]
+    ) -> Tensor[[B]]:
         delta_d = -self.w[6] * (rating - 3)
         new_d = state[:, 1] + self.linear_damping(delta_d, state[:, 1])
         new_d = self.mean_reversion(self.init_d(torch.tensor([4.0])), new_d)
         return new_d
 
-    def step(self, X: Tensor, state: Tensor) -> Tensor:
+    def step[B: IntVar](
+        self, X: Tensor[[B, 2]], state: Tensor[[B, 2]]
+    ) -> Tensor[[B, 2]]:
         """
         :param X: shape[batch_size, 2], X[:,0] is elapsed time, X[:,1] is rating
         :param state: shape[batch_size, 2], state[:,0] is stability, state[:,1] is difficulty
@@ -191,9 +208,9 @@ class FSRS(nn.Module):
         new_s = new_s.clamp(S_MIN, 36500)
         return torch.stack([new_s, new_d], dim=1)
 
-    def forward(
-        self, inputs: Tensor, state: Optional[Tensor] = None
-    ) -> Tuple[Tensor, Tensor]:
+    def forward[S: IntVar, B: IntVar](
+        self, inputs: Tensor[[S, B, 2]], state: Tensor[[B, 2]] | None = None
+    ) -> tuple[Tensor[[S, B, 2]], Tensor[[B, 2]]]:
         """
         :param inputs: shape[seq_len, batch_size, 2]
         """
@@ -205,7 +222,9 @@ class FSRS(nn.Module):
             outputs.append(state)
         return torch.stack(outputs), state
 
-    def mean_reversion(self, init: Tensor, current: Tensor) -> Tensor:
+    def mean_reversion[B: IntVar](
+        self, init: Tensor[[B]], current: Tensor[[B]]
+    ) -> Tensor[[B]]:
         return self.w[7] * init + (1 - self.w[7]) * current
 
 
@@ -240,11 +259,11 @@ class ParameterClipper:
             module.w.data = w
 
 
-def lineToTensor(line: Tuple[str, str]) -> Tensor:
+def lineToTensor(line: tuple[str, str]) -> Tensor:
     ivl = line[0].split(",")
-    response = line[1].split(",")
-    tensor = torch.zeros(len(response), 2)
-    for li, response in enumerate(response):
+    responses = line[1].split(",")
+    tensor = torch.zeros(len(responses), 2)
+    for li, response in enumerate(responses):
         tensor[li][0] = float(ivl[li])
         tensor[li][1] = int(response)
     return tensor
@@ -256,7 +275,7 @@ class BatchDataset(Dataset):
         dataframe: pd.DataFrame,
         batch_size: int = 0,
         sort_by_length: bool = True,
-        max_seq_len: Union[int, float] = math.inf,
+        max_seq_len: float = math.inf,
         device: str = "cpu",
     ):
         if dataframe.empty:
@@ -290,13 +309,13 @@ class BatchDataset(Dataset):
         length = len(dataframe)
         batch_num, remainder = divmod(length, self.batch_size)
         self.batch_num = batch_num + 1 if remainder > 0 else batch_num
-        self.batches: List[Tuple[int, int]] = []
+        self.batches: list[tuple[int, int]] = []
         for i in range(self.batch_num):
             start_index = i * self.batch_size
             end_index = min((i + 1) * self.batch_size, length)
             self.batches.append((start_index, end_index))
 
-    def __getitem__(self, index: int) -> Tuple[Tensor, Tensor, Tensor, Tensor, Tensor]:
+    def __getitem__(self, index: int) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor]:
         if index < 0 or index >= self.batch_num:
             raise IndexError(f"Batch index {index} out of range")
         start_index, end_index = self.batches[index]
@@ -363,7 +382,7 @@ class DevicePrefetchLoader:
         return len(self.loader)
 
     def __iter__(self):
-        queue: "Queue[Any]" = Queue(maxsize=self.prefetch_size)
+        queue: Queue[Any] = Queue(maxsize=self.prefetch_size)
         sentinel = object()
         stop_event = threading.Event()
 
@@ -420,8 +439,8 @@ class Trainer:
     def __init__(
         self,
         train_set: pd.DataFrame,
-        test_set: Optional[pd.DataFrame],
-        init_w: List[float],
+        test_set: pd.DataFrame | None,
+        init_w: list[float],
         n_epoch: int = 5,
         lr: float = 4e-2,
         gamma: float = 1,
@@ -452,13 +471,13 @@ class Trainer:
         self.float_delta_t = float_delta_t
         self.enable_short_term = enable_short_term
 
-    def build_dataset(self, train_set: pd.DataFrame, test_set: Optional[pd.DataFrame]):
+    def build_dataset(self, train_set: pd.DataFrame, test_set: pd.DataFrame | None):
         self.train_set = BatchDataset(
             train_set, batch_size=self.batch_size, max_seq_len=self.max_seq_len
         )
         self.train_data_loader = BatchLoader(self.train_set)
 
-        self.test_set: Optional[BatchDataset] = (
+        self.test_set: BatchDataset | None = (
             None
             if test_set is None
             else BatchDataset(
@@ -469,9 +488,9 @@ class Trainer:
     def train(self, verbose: bool = True):
         self.verbose = verbose
         best_loss = np.inf
-        best_w: Optional[Tensor] = None
+        best_w: Tensor | None = None
         epoch_len = len(self.train_set.y_train)
-        pbar: Optional[tqdm] = None
+        pbar: tqdm | None = None
         if verbose:
             pbar = tqdm(desc="train", colour="red", total=epoch_len * self.n_epoch)
         print_len = max(self.batch_nums * self.n_epoch // 10, 1)
@@ -521,9 +540,7 @@ class Trainer:
                         f"iteration: {k * epoch_len + (i + 1) * self.batch_size}"
                     )
                     for name, param in self.model.named_parameters():
-                        tqdm.write(
-                            f"{name}: {list(map(lambda x: round(float(x), 4), param))}"
-                        )
+                        tqdm.write(f"{name}: {[round(float(x), 4) for x in param]}")
         if verbose and pbar is not None:
             pbar.close()
 
@@ -589,9 +606,7 @@ class Trainer:
 
 
 class Collection:
-    def __init__(
-        self, w: Union[List[float], Tensor], float_delta_t: bool = False
-    ) -> None:
+    def __init__(self, w: list[float] | Tensor, float_delta_t: bool = False) -> None:
         if isinstance(w, Tensor):
             w = w.tolist()
         self.model = FSRS(w, float_delta_t)
@@ -599,9 +614,7 @@ class Collection:
 
     def predict(self, t_history: str, r_history: str):
         with torch.no_grad():
-            line_tensor = lineToTensor(
-                list(zip([t_history], [r_history]))[0]
-            ).unsqueeze(1)
+            line_tensor = lineToTensor((t_history, r_history)).unsqueeze(1)
             output_t = self.model(line_tensor)
             return output_t[-1][0]
 
@@ -686,9 +699,12 @@ class Optimizer:
         self,
         filename: str,
         filter_out_suspended_cards: bool = False,
-        filter_out_flags: List[int] = [],
+        filter_out_flags: list[int] | None = None,
     ):
         """Step 1"""
+        if filter_out_flags is None:
+            filter_out_flags = []
+
         # Extract the collection file or deck file to get the .anki21 database.
         with zipfile.ZipFile(f"{filename}", "r") as zip_ref:
             zip_ref.extractall("./")
@@ -696,7 +712,7 @@ class Optimizer:
 
         if os.path.isfile("collection.anki21b"):
             os.remove("collection.anki21b")
-            raise Exception(
+            raise ValueError(
                 "Please export the file with `support older Anki versions` if you use the latest version of Anki."
             )
         elif os.path.isfile("collection.anki21"):
@@ -704,10 +720,10 @@ class Optimizer:
         elif os.path.isfile("collection.anki2"):
             con = sqlite3.connect("collection.anki2")
         else:
-            raise Exception("Collection not exist!")
+            raise FileNotFoundError("Collection does not exist")
         cur = con.cursor()
 
-        def flags2str(flags: List[int]) -> str:
+        def flags2str(flags: list[int]) -> str:
             return f"({','.join(map(str, flags))})"
 
         res = cur.execute(
@@ -720,7 +736,7 @@ class Optimizer:
             WHERE queue != 0
             AND id <= {time.time() * 1000}
             {"AND queue != -1" if filter_out_suspended_cards else ""}
-            {"AND flags NOT IN %s" % flags2str(filter_out_flags) if len(filter_out_flags) > 0 else ""}
+            {f"AND flags NOT IN {flags2str(filter_out_flags)}" if filter_out_flags else ""}
         )
         AND ease BETWEEN 1 AND 4
         AND (
@@ -733,7 +749,7 @@ class Optimizer:
         )
         revlog = res.fetchall()
         if len(revlog) == 0:
-            raise Exception("No review log found!")
+            raise ValueError("No review log found")
         df = pd.DataFrame(revlog)
         df.columns = [
             "review_time",
@@ -1018,10 +1034,12 @@ class Optimizer:
                     last_rating.append(r_history[0])
         df["last_rating"] = last_rating
 
-        df = df.groupby("card_id").filter(
-            lambda group: group["review_time"].min()
-            > time.mktime(datetime.strptime(revlog_start_date, "%Y-%m-%d").timetuple())
+        revlog_start_timestamp = (
+            datetime.strptime(revlog_start_date, "%Y-%m-%d").astimezone().timestamp()
             * 1000
+        )
+        df = df.groupby("card_id").filter(
+            lambda group: group["review_time"].min() > revlog_start_timestamp
         )
         df = df[
             (df["review_rating"] != 0)
@@ -1225,6 +1243,14 @@ class Optimizer:
         plots = []
         r_s0_default = {str(i): DEFAULT_PARAMETER[i - 1] for i in range(1, 5)}
 
+        def loss(stability, delta_t, recall, count, init_s0):
+            y_pred = power_forgetting_curve(delta_t, stability)
+            logloss = sum(
+                -(recall * np.log(y_pred) + (1 - recall) * np.log(1 - y_pred)) * count
+            )
+            l1 = np.abs(stability - init_s0) / 16 if not self.float_delta_t else 0
+            return logloss + l1
+
         for first_rating in ("1", "2", "3", "4"):
             group = self.dataset_for_initialization[
                 self.dataset_for_initialization["first_rating"] == first_rating
@@ -1246,18 +1272,10 @@ class Optimizer:
 
             init_s0 = r_s0_default[first_rating]
 
-            def loss(stability):
-                y_pred = power_forgetting_curve(delta_t, stability)
-                logloss = sum(
-                    -(recall * np.log(y_pred) + (1 - recall) * np.log(1 - y_pred))
-                    * count
-                )
-                l1 = np.abs(stability - init_s0) / 16 if not self.float_delta_t else 0
-                return logloss + l1
-
             res = minimize(
                 loss,
                 x0=init_s0,
+                args=(delta_t, recall, count, init_s0),
                 bounds=((S_MIN, 100),),
                 options={"maxiter": int(sum(count))},
             )
@@ -1299,24 +1317,27 @@ class Optimizer:
             (2, 4),
             (1, 4),
         ):
-            if small_rating in rating_stability and big_rating in rating_stability:
+            if (
+                small_rating in rating_stability
+                and big_rating in rating_stability
+                and rating_stability[small_rating] > rating_stability[big_rating]
+            ):
                 # if rating_count[small_rating] > 300 and rating_count[big_rating] > 300:
                 #     continue
-                if rating_stability[small_rating] > rating_stability[big_rating]:
-                    if rating_count[small_rating] > rating_count[big_rating]:
-                        rating_stability[big_rating] = rating_stability[small_rating]
-                    else:
-                        rating_stability[small_rating] = rating_stability[big_rating]
+                if rating_count[small_rating] > rating_count[big_rating]:
+                    rating_stability[big_rating] = rating_stability[small_rating]
+                else:
+                    rating_stability[small_rating] = rating_stability[big_rating]
 
         w1 = 0.41
         w2 = 0.54
 
-        if len(rating_stability) == 0:
-            raise Exception("Not enough data for parameter initialization!")
+        if not rating_stability:
+            raise ValueError("Not enough data for parameter initialization")
         elif len(rating_stability) == 1:
-            rating = list(rating_stability.keys())[0]
+            rating = next(iter(rating_stability))
             factor = rating_stability[rating] / r_s0_default[str(rating)]
-            init_s0 = list(map(lambda x: x * factor, r_s0_default.values()))
+            init_s0 = [x * factor for x in r_s0_default.values()]
         elif len(rating_stability) == 2:
             if 1 not in rating_stability and 2 not in rating_stability:
                 rating_stability[2] = np.power(
@@ -1391,9 +1412,7 @@ class Optimizer:
             # This should not happen, but initialize to avoid type error
             init_s0 = [1.0, 1.0, 1.0, 1.0]
 
-        self.init_w[0:4] = list(
-            map(lambda x: max(float(min(100, x)), float(S_MIN)), init_s0)
-        )  # type: ignore[no-matching-overload]
+        self.init_w[0:4] = [max(float(min(100, x)), float(S_MIN)) for x in init_s0]  # type: ignore[no-matching-overload]
         if verbose:
             tqdm.write(f"Parameter initialization finished!")
         return plots
@@ -1410,7 +1429,7 @@ class Optimizer:
     ):
         """Step 4"""
         self.dataset["tensor"] = self.dataset.progress_apply(
-            lambda x: lineToTensor(list(zip([x["t_history"]], [x["r_history"]]))[0]),
+            lambda x: lineToTensor((x["t_history"], x["r_history"])),
             axis=1,
         )
         self.dataset["group"] = self.dataset["r_history"] + self.dataset["t_history"]
@@ -1501,8 +1520,8 @@ class Optimizer:
                 difficulty = round(float(states[1]), 1)
                 if verbose:
                     print(
-                        "{0:9.2f} {1:11.2f} {2:7.0f}".format(
-                            *list(map(lambda x: round(float(x), 4), states))
+                        "{:9.2f} {:11.2f} {:7.0f}".format(
+                            *[round(float(x), 4) for x in states]
                         )
                     )
                 left -= 1
@@ -1625,10 +1644,8 @@ class Optimizer:
         my_collection = Collection(self.w, self.float_delta_t)
 
         stabilities, difficulties = my_collection.batch_predict(self.dataset)
-        stabilities = map(lambda x: round(x, 2), stabilities)
-        difficulties = map(lambda x: round(x, 2), difficulties)
-        self.dataset["stability"] = list(stabilities)
-        self.dataset["difficulty"] = list(difficulties)
+        self.dataset["stability"] = [round(x, 2) for x in stabilities]
+        self.dataset["difficulty"] = [round(x, 2) for x in difficulties]
         prediction = self.dataset.groupby(by=["t_history", "r_history"]).agg(
             {"stability": "mean", "difficulty": "mean", "review_time": "count"}
         )
@@ -1636,7 +1653,7 @@ class Optimizer:
         prediction.sort_values(by=["r_history"], inplace=True)  # type: ignore[arg-type]
         prediction.rename(columns={"review_time": "count"}, inplace=True)  # type: ignore[arg-type]
         prediction.to_csv("./prediction.tsv", sep="\t", index=False)  # type: ignore[arg-type]
-        prediction["difficulty"] = prediction["difficulty"].map(lambda x: int(round(x)))  # type: ignore[arg-type]
+        prediction["difficulty"] = prediction["difficulty"].map(round)  # type: ignore[arg-type]
         self.difficulty_distribution = (
             prediction.groupby(by=["difficulty"])["count"].sum()
             / prediction["count"].sum()
@@ -1749,9 +1766,7 @@ class Optimizer:
         my_collection = Collection(DEFAULT_PARAMETER, self.float_delta_t)
         if "tensor" not in self.dataset.columns:
             self.dataset["tensor"] = self.dataset.progress_apply(
-                lambda x: lineToTensor(
-                    list(zip([x["t_history"]], [x["r_history"]]))[0]
-                ),
+                lambda x: lineToTensor((x["t_history"], x["r_history"])),
                 axis=1,
             )
         stabilities, difficulties = my_collection.batch_predict(self.dataset)
@@ -2058,7 +2073,7 @@ class Optimizer:
             lambda x: round(math.pow(1.4, math.floor(math.log(x, 1.4))), 2)
         )
         B_W_Metric_raw["d_bin"] = B_W_Metric_raw["difficulty"].map(  # type: ignore[arg-type]
-            lambda x: int(round(x))
+            round
         )
         B_W_Metric = (
             B_W_Metric_raw.groupby(by=["s_bin", "d_bin"]).agg("mean").reset_index()
@@ -2267,7 +2282,7 @@ def load_brier(predictions, real, bins=20):
                 mintol = 1.0e-11
                 cg = 0.3819660
 
-                xa, xb, xc, fa, fb, fc, funccalls = bracket(
+                xa, xb, xc, _fa, fb, _fc, funccalls = bracket(
                     xa=min(y), xb=max(y), maxiter=maxiter, target_p=target_p
                 )
 
@@ -2381,7 +2396,7 @@ def load_brier(predictions, real, bins=20):
                     # print(f'Loss function called {funccalls} times')
                     return xmin
                 else:
-                    raise Exception(
+                    raise RuntimeError(
                         "The algorithm terminated without finding a valid value."
                     )
 
@@ -2502,7 +2517,7 @@ def plot_brier(predictions, real, bins=20, ax=None, title=None):
     e_90 = np.quantile(np.abs(observation - p), 0.9)
     e_max = np.max(np.abs(observation - p))
     brier = load_brier(predictions, real, bins=bins)
-    brier_detail: Dict[str, Any] = brier["detail"]  # type: ignore[index, assignment]
+    brier_detail: dict[str, Any] = brier["detail"]  # type: ignore[index, assignment]
     bin_prediction_means = brier_detail["bin_prediction_means"]  # type: ignore[index]
 
     bin_real_means = brier_detail["bin_real_means"]  # type: ignore[index]
@@ -2542,8 +2557,8 @@ def plot_brier(predictions, real, bins=20, ax=None, title=None):
             label=f"y = {params[0]:.3f} + {params[1]:.3f}x",
             color="green",
         )
-    except:
-        pass
+    except Exception:
+        logger.debug("Unable to fit the calibration regression", exc_info=True)
     # ax.plot(
     #     bin_prediction_means[mask],
     #     bin_correct_means[mask],
@@ -2659,28 +2674,34 @@ def cross_comparison(dataset, algoA, algoB):
 
     universal_metric_list = []
 
-    for algoA, algoB in pair_algo:
-        cross_comparison_group = cross_comparison_record.groupby(by=f"{algoA}_bin").agg(
-            {"y": ["mean"], f"{algoB}_B-W": ["mean"], f"R ({algoB})": ["mean", "count"]}
+    for grouping_algo, comparison_algo in pair_algo:
+        cross_comparison_group = cross_comparison_record.groupby(
+            by=f"{grouping_algo}_bin"
+        ).agg(
+            {
+                "y": ["mean"],
+                f"{comparison_algo}_B-W": ["mean"],
+                f"R ({comparison_algo})": ["mean", "count"],
+            }
         )
         universal_metric = root_mean_squared_error(
             y_true=cross_comparison_group["y", "mean"],
-            y_pred=cross_comparison_group[f"R ({algoB})", "mean"],
-            sample_weight=cross_comparison_group[f"R ({algoB})", "count"],
+            y_pred=cross_comparison_group[f"R ({comparison_algo})", "mean"],
+            sample_weight=cross_comparison_group[f"R ({comparison_algo})", "count"],
         )
-        cross_comparison_group[f"R ({algoB})", "percent"] = (
-            cross_comparison_group[f"R ({algoB})", "count"]
-            / cross_comparison_group[f"R ({algoB})", "count"].sum()
+        cross_comparison_group[f"R ({comparison_algo})", "percent"] = (
+            cross_comparison_group[f"R ({comparison_algo})", "count"]
+            / cross_comparison_group[f"R ({comparison_algo})", "count"].sum()
         )
         ax.scatter(
             cross_comparison_group.index,
-            cross_comparison_group[f"{algoB}_B-W", "mean"],
-            s=cross_comparison_group[f"R ({algoB})", "percent"] * 1024,
+            cross_comparison_group[f"{comparison_algo}_B-W", "mean"],
+            s=cross_comparison_group[f"R ({comparison_algo})", "percent"] * 1024,
             alpha=0.5,
         )
         ax.plot(
-            cross_comparison_group[f"{algoB}_B-W", "mean"],
-            label=f"{algoB} by {algoA}, UM={universal_metric:.4f}",
+            cross_comparison_group[f"{comparison_algo}_B-W", "mean"],
+            label=(f"{comparison_algo} by {grouping_algo}, UM={universal_metric:.4f}"),
         )
         universal_metric_list.append(universal_metric)
 
@@ -2764,10 +2785,10 @@ class FirstOrderMarkovChain:
         n_states: Number of states, default is 4 (corresponding to states 1,2,3,4)
         """
         self.n_states = n_states
-        self.transition_matrix: Optional[np.ndarray] = None
-        self.initial_distribution: Optional[np.ndarray] = None
-        self.transition_counts: Optional[np.ndarray] = None
-        self.initial_counts: Optional[np.ndarray] = None
+        self.transition_matrix: np.ndarray | None = None
+        self.initial_distribution: np.ndarray | None = None
+        self.transition_counts: np.ndarray | None = None
+        self.initial_counts: np.ndarray | None = None
 
     def fit(self, sequences, smoothing=1.0):
         """
@@ -2845,7 +2866,7 @@ class FirstOrderMarkovChain:
 
         return sequence
 
-    def log_likelihood(self, sequences: List[List[int]]):
+    def log_likelihood(self, sequences: list[list[int]]):
         """
         Calculate the log-likelihood of sequences
 

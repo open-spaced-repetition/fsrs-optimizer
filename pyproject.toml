@@ -17,16 +17,20 @@ dependencies = [
     "statsmodels",
     "scipy"
 ]
-requires-python = ">=3.11,<3.14"
+requires-python = ">=3.12,<3.14"
 
 [project.urls]
 Homepage = "https://github.com/open-spaced-repetition/fsrs-optimizer"
 [tool.ruff.lint]
 ignore = ["F405", "F403", "E712", "F541", "E722", "E741"]
+
+
 [project.optional-dependencies]
 test = [
     "ruff",
-    "pyrefly",
+    # Tensor-shape support is experimental, so keep Pyrefly and its stubs in lockstep.
+    "pyrefly==1.2.0",
+    "pyrefly-torch-stubs==1.2.0",
     "pytest",
     "pytest-cov",
 ]
